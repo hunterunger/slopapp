@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-03T20:15:04.968Z",
+  "generatedAt": "2026-11-03T21:47:20.100Z",
   "name": "Slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "apps": [
@@ -15,7 +15,17 @@
       "icon": "layout-grid",
       "menuBarOnly": false,
       "hub": true,
-      "status": "planned"
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.slopapp",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.0/Slopapp.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.0/Slopapp-icon.png",
+      "sha256": "7a30e6d806a4958721b941525515d5b5a350d82530a568d0994fc8a472717dee",
+      "size": 2409816,
+      "installedSize": 8470597,
+      "releaseNotes": ""
     },
     {
       "slug": "switchboard",
