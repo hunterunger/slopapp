@@ -1,0 +1,44 @@
+{
+  "slug": "squish",
+  "name": "Squish",
+  "tagline": "Drop in images and PDFs, get smaller files out.",
+  "replaces": [
+    "Squash",
+    "PDF Squeezer"
+  ],
+  "category": "Utilities",
+  "icon": "shrink",
+  "menuBarOnly": false,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.squish",
+  "infoPlist": {
+    "CFBundleDocumentTypes": [
+      {
+        "CFBundleTypeName": "Image or PDF",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "public.image",
+          "com.adobe.pdf"
+        ]
+      }
+    ],
+    "NSServices": [
+      {
+        "NSMenuItem": {
+          "default": "Compress with Squish"
+        },
+        "NSMessage": "compressFiles",
+        "NSPortName": "Squish",
+        "NSRequiredContext": {},
+        "NSSendFileTypes": [
+          "public.image",
+          "com.adobe.pdf"
+        ]
+      }
+    ]
+  }
+}
