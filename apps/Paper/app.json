@@ -1,0 +1,43 @@
+{
+  "slug": "paper",
+  "name": "Paper",
+  "tagline": "Read, annotate and edit PDFs.",
+  "replaces": [
+    "Nitro PDF Pro"
+  ],
+  "category": "Productivity",
+  "icon": "file-pen-line",
+  "menuBarOnly": false,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.paper",
+  "infoPlist": {
+    "CFBundleDocumentTypes": [
+      {
+        "CFBundleTypeName": "PDF document",
+        "CFBundleTypeRole": "Editor",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "com.adobe.pdf"
+        ],
+        "NSDocumentClass": "PaperDocument"
+      },
+      {
+        "CFBundleTypeName": "Image",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "public.png",
+          "public.jpeg",
+          "public.heic",
+          "public.tiff"
+        ],
+        "NSDocumentClass": "PaperDocument"
+      }
+    ],
+    "NSSupportsAutomaticTermination": false,
+    "NSSupportsSuddenTermination": false
+  }
+}
