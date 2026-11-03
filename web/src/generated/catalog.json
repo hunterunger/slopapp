@@ -1,0 +1,801 @@
+{
+  "generatedAt": "2026-11-03",
+  "brand": {
+    "name": "Slopapp",
+    "tagline": "The name is a joke. The apps aren't.",
+    "description": "Free, open-source Mac apps, built with an unreasonable amount of care. No subscription, no account, no tracking.",
+    "bundleIdPrefix": "app.slopapp",
+    "repoUrl": "https://github.com/hunterunger/slopapp",
+    "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
+    "teamId": null,
+    "license": "MIT",
+    "colors": {
+      "forest": "#0F3D2E",
+      "leaf": "#3DBE74",
+      "mint": "#D4F2DF",
+      "cream": "#FAF6EC",
+      "ember": "#E5603D",
+      "ink": "#13201A"
+    }
+  },
+  "apps": [
+    {
+      "slug": "slopapp",
+      "name": "Slopapp",
+      "tagline": "Every Slopapp app, installed and up to date.",
+      "replaces": [
+        "Setapp"
+      ],
+      "category": "Hub",
+      "icon": "layout-grid",
+      "size": "M",
+      "menuBarOnly": false,
+      "hub": true,
+      "priority": 0,
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.slopapp",
+      "infoPlist": {
+        "SlopappFeedURL": "https://hunterunger.github.io/slopapp/feed.json"
+      },
+      "dir": "apps/Slopapp",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.0/Slopapp.zip"
+    },
+    {
+      "slug": "switchboard",
+      "name": "Switchboard",
+      "tagline": "Open every link in the right browser.",
+      "replaces": [
+        "OpenIn"
+      ],
+      "category": "Utilities",
+      "icon": "route",
+      "size": "M",
+      "menuBarOnly": true,
+      "favourite": true,
+      "priority": 1,
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.switchboard",
+      "infoPlist": {
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "Web site URL",
+            "CFBundleTypeRole": "Viewer",
+            "CFBundleURLSchemes": [
+              "http",
+              "https"
+            ]
+          },
+          {
+            "CFBundleURLName": "Switchboard URL",
+            "CFBundleTypeRole": "Viewer",
+            "CFBundleURLSchemes": [
+              "switchboard"
+            ]
+          }
+        ],
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "HTML document",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.html",
+              "public.xhtml"
+            ]
+          }
+        ]
+      },
+      "dir": "apps/Switchboard",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/switchboard-v0.2.0/Switchboard.zip"
+    },
+    {
+      "slug": "clips",
+      "name": "Clips",
+      "tagline": "Clipboard history you can search.",
+      "replaces": [
+        "Paste"
+      ],
+      "category": "Productivity",
+      "icon": "clipboard-list",
+      "size": "M",
+      "menuBarOnly": true,
+      "favourite": true,
+      "priority": 1,
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.clips",
+      "dir": "apps/Clips",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/clips-v0.2.0/Clips.zip"
+    },
+    {
+      "slug": "squish",
+      "name": "Squish",
+      "tagline": "Drop in images and PDFs, get smaller files out.",
+      "replaces": [
+        "Squash",
+        "PDF Squeezer"
+      ],
+      "category": "Utilities",
+      "icon": "shrink",
+      "size": "S",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 1,
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.squish",
+      "infoPlist": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Image or PDF",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.image",
+              "com.adobe.pdf"
+            ]
+          }
+        ],
+        "NSServices": [
+          {
+            "NSMenuItem": {
+              "default": "Compress with Squish"
+            },
+            "NSMessage": "compressFiles",
+            "NSPortName": "Squish",
+            "NSRequiredContext": {},
+            "NSSendFileTypes": [
+              "public.image",
+              "com.adobe.pdf"
+            ]
+          }
+        ]
+      },
+      "dir": "apps/Squish",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/squish-v0.1.0/Squish.zip"
+    },
+    {
+      "slug": "snapper",
+      "name": "Snapper",
+      "tagline": "Screenshots, annotated and shared in seconds.",
+      "replaces": [
+        "CleanShot X"
+      ],
+      "category": "Productivity",
+      "icon": "camera",
+      "size": "L",
+      "menuBarOnly": true,
+      "favourite": true,
+      "priority": 1,
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.snapper",
+      "infoPlist": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Image",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.image"
+            ]
+          }
+        ]
+      },
+      "dir": "apps/Snapper",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/snapper-v0.2.0/Snapper.zip"
+    },
+    {
+      "slug": "convert",
+      "name": "Convert",
+      "tagline": "Drop in audio, video or images and convert them.",
+      "replaces": [
+        "Permute"
+      ],
+      "category": "Media",
+      "icon": "refresh-cw",
+      "size": "M",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 1,
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.convert",
+      "infoPlist": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Video, audio or image",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.movie",
+              "public.audio",
+              "public.image"
+            ]
+          }
+        ]
+      },
+      "dir": "apps/Convert",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/convert-v0.1.0/Convert.zip"
+    },
+    {
+      "slug": "tidy",
+      "name": "Tidy",
+      "tagline": "Uninstall apps completely and clear out the junk.",
+      "replaces": [
+        "CleanMyMac"
+      ],
+      "category": "Utilities",
+      "icon": "brush-cleaning",
+      "size": "L",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 1,
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.tidy",
+      "dir": "apps/Tidy",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/tidy-v0.2.0/Tidy.zip"
+    },
+    {
+      "slug": "dropper",
+      "name": "Dropper",
+      "tagline": "Pick any color on screen and copy it in the format you need.",
+      "replaces": [
+        "Sip"
+      ],
+      "category": "Design",
+      "icon": "pipette",
+      "size": "S",
+      "menuBarOnly": true,
+      "favourite": true,
+      "priority": 2,
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.dropper",
+      "dir": "apps/Dropper",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/dropper-v0.2.0/Dropper.zip"
+    },
+    {
+      "slug": "ruler",
+      "name": "Ruler",
+      "tagline": "Measure anything on screen, to the pixel.",
+      "replaces": [
+        "PixelSnap"
+      ],
+      "category": "Design",
+      "icon": "ruler",
+      "size": "M",
+      "menuBarOnly": true,
+      "favourite": true,
+      "priority": 2,
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.ruler",
+      "dir": "apps/Ruler",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/ruler-v0.1.0/Ruler.zip"
+    },
+    {
+      "slug": "iconsmith",
+      "name": "Iconsmith",
+      "tagline": "Turn any image into app and folder icons.",
+      "replaces": [
+        "Image2icon"
+      ],
+      "category": "Design",
+      "icon": "shapes",
+      "size": "M",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 2,
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.iconsmith",
+      "infoPlist": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Image",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.image",
+              "com.adobe.pdf",
+              "public.svg-image",
+              "com.apple.icns"
+            ]
+          }
+        ]
+      },
+      "dir": "apps/Iconsmith",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/iconsmith-v0.1.0/Iconsmith.zip"
+    },
+    {
+      "slug": "specimen",
+      "name": "Specimen",
+      "tagline": "Browse and compare your fonts.",
+      "replaces": [
+        "Typeface"
+      ],
+      "category": "Design",
+      "icon": "type",
+      "size": "M",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 2,
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.specimen",
+      "dir": "apps/Specimen",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/specimen-v0.1.0/Specimen.zip"
+    },
+    {
+      "slug": "zones",
+      "name": "Zones",
+      "tagline": "World clocks and meeting times, in the menu bar.",
+      "replaces": [
+        "World Clock Pro"
+      ],
+      "category": "Productivity",
+      "icon": "globe",
+      "size": "S",
+      "menuBarOnly": true,
+      "favourite": true,
+      "priority": 2,
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.zones",
+      "dir": "apps/Zones",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/zones-v0.2.0/Zones.zip"
+    },
+    {
+      "slug": "crate",
+      "name": "Crate",
+      "tagline": "Open, preview and make archives.",
+      "replaces": [
+        "Archiver"
+      ],
+      "category": "Utilities",
+      "icon": "package",
+      "size": "M",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 2,
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.crate",
+      "infoPlist": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Archive",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.zip-archive",
+              "org.7-zip.7-zip-archive",
+              "public.rar-archive",
+              "public.tar-archive",
+              "org.gnu.gnu-zip-archive",
+              "org.gnu.gnu-zip-tar-archive",
+              "public.bzip2-archive",
+              "public.tar-bzip2-archive",
+              "org.tukaani.xz-archive",
+              "org.tukaani.tar-xz-archive",
+              "public.z-archive",
+              "public.cpio-archive",
+              "com.apple.xar-archive",
+              "com.microsoft.cab"
+            ]
+          },
+          {
+            "CFBundleTypeName": "Split Archive Part",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "CFBundleTypeExtensions": [
+              "001",
+              "z01",
+              "zipx",
+              "lzh",
+              "lha",
+              "deb"
+            ]
+          }
+        ],
+        "NSServices": [
+          {
+            "NSMenuItem": {
+              "default": "Extract with Crate"
+            },
+            "NSMessage": "extractFiles",
+            "NSPortName": "Crate",
+            "NSRequiredContext": {},
+            "NSSendFileTypes": [
+              "public.zip-archive",
+              "org.7-zip.7-zip-archive",
+              "public.rar-archive",
+              "public.tar-archive",
+              "org.gnu.gnu-zip-archive",
+              "org.gnu.gnu-zip-tar-archive",
+              "public.bzip2-archive",
+              "public.tar-bzip2-archive",
+              "org.tukaani.xz-archive",
+              "org.tukaani.tar-xz-archive",
+              "public.z-archive",
+              "public.cpio-archive",
+              "com.apple.xar-archive",
+              "com.microsoft.cab"
+            ]
+          },
+          {
+            "NSMenuItem": {
+              "default": "Compress with Crate"
+            },
+            "NSMessage": "compressFiles",
+            "NSPortName": "Crate",
+            "NSRequiredContext": {},
+            "NSSendFileTypes": [
+              "public.item"
+            ]
+          }
+        ]
+      },
+      "dir": "apps/Crate",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/crate-v0.2.0/Crate.zip"
+    },
+    {
+      "slug": "paper",
+      "name": "Paper",
+      "tagline": "Read, annotate and edit PDFs.",
+      "replaces": [
+        "Nitro PDF Pro"
+      ],
+      "category": "Productivity",
+      "icon": "file-pen-line",
+      "size": "L",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 3,
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.paper",
+      "infoPlist": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "PDF document",
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "com.adobe.pdf"
+            ],
+            "NSDocumentClass": "PaperDocument"
+          },
+          {
+            "CFBundleTypeName": "Image",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.png",
+              "public.jpeg",
+              "public.heic",
+              "public.tiff"
+            ],
+            "NSDocumentClass": "PaperDocument"
+          }
+        ],
+        "NSSupportsAutomaticTermination": false,
+        "NSSupportsSuddenTermination": false
+      },
+      "dir": "apps/Paper",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/paper-v0.1.0/Paper.zip"
+    },
+    {
+      "slug": "dual",
+      "name": "Dual",
+      "tagline": "A two-pane file manager with remote servers.",
+      "replaces": [
+        "ForkLift"
+      ],
+      "category": "Utilities",
+      "icon": "folder-tree",
+      "size": "L",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 3,
+      "status": "planned"
+    },
+    {
+      "slug": "commit",
+      "name": "Commit",
+      "tagline": "A calm Git client.",
+      "replaces": [
+        "Gitfox"
+      ],
+      "category": "Developer",
+      "icon": "git-branch",
+      "size": "L",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 3,
+      "status": "planned"
+    },
+    {
+      "slug": "awake",
+      "name": "Awake",
+      "tagline": "Keep your Mac awake, from the menu bar.",
+      "replaces": [
+        "Lungo",
+        "Amphetamine"
+      ],
+      "category": "Utilities",
+      "icon": "coffee",
+      "size": "S",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.awake",
+      "dir": "apps/Awake",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/awake-v0.1.0/Awake.zip"
+    },
+    {
+      "slug": "focus",
+      "name": "Focus",
+      "tagline": "A calm focus timer that lives in your menu bar.",
+      "replaces": [
+        "Session"
+      ],
+      "category": "Productivity",
+      "icon": "timer",
+      "size": "S",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.focus",
+      "dir": "apps/Focus",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/focus-v0.1.0/Focus.zip"
+    },
+    {
+      "slug": "tally",
+      "name": "Tally",
+      "tagline": "A notepad that does the math as you type.",
+      "replaces": [
+        "Numi"
+      ],
+      "category": "Productivity",
+      "icon": "calculator",
+      "size": "M",
+      "menuBarOnly": false,
+      "priority": 3,
+      "favourite": false,
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.tally",
+      "dir": "apps/Tally",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/tally-v0.1.0/Tally.zip"
+    },
+    {
+      "slug": "devkit",
+      "name": "Devkit",
+      "tagline": "Offline developer tools: JSON, Base64, JWT, hashes and more.",
+      "replaces": [
+        "DevUtils"
+      ],
+      "category": "Developer",
+      "icon": "braces",
+      "size": "M",
+      "menuBarOnly": false,
+      "priority": 3,
+      "favourite": false,
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.devkit",
+      "dir": "apps/Devkit",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/devkit-v0.1.0/Devkit.zip"
+    },
+    {
+      "slug": "snip",
+      "name": "Snip",
+      "tagline": "Copy text from anything on your screen.",
+      "replaces": [
+        "TextSniper"
+      ],
+      "category": "Utilities",
+      "icon": "scan-text",
+      "size": "M",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "gauge",
+      "name": "Gauge",
+      "tagline": "CPU, memory, network and battery in your menu bar.",
+      "replaces": [
+        "iStat Menus"
+      ],
+      "category": "Utilities",
+      "icon": "gauge",
+      "size": "M",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "tiles",
+      "name": "Tiles",
+      "tagline": "Snap windows into place with the keyboard.",
+      "replaces": [
+        "Mosaic"
+      ],
+      "category": "Utilities",
+      "icon": "layout-grid",
+      "size": "M",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "switches",
+      "name": "Switches",
+      "tagline": "One menu for dark mode, hidden desktop icons and more.",
+      "replaces": [
+        "One Switch"
+      ],
+      "category": "Utilities",
+      "icon": "toggle-right",
+      "size": "S",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "quit",
+      "name": "Quit",
+      "tagline": "Quit every app at once, except the ones you keep.",
+      "replaces": [
+        "QuitAll"
+      ],
+      "category": "Utilities",
+      "icon": "square-x",
+      "size": "S",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "shelf",
+      "name": "Shelf",
+      "tagline": "A place to park files while you drag.",
+      "replaces": [
+        "Yoink"
+      ],
+      "category": "Productivity",
+      "icon": "inbox",
+      "size": "M",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "margin",
+      "name": "Margin",
+      "tagline": "Quick notes tucked into the edge of your screen.",
+      "replaces": [
+        "SideNotes"
+      ],
+      "category": "Productivity",
+      "icon": "panel-right",
+      "size": "M",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "hours",
+      "name": "Hours",
+      "tagline": "See where your time went, automatically and privately.",
+      "replaces": [
+        "Timing"
+      ],
+      "category": "Productivity",
+      "icon": "chart-column",
+      "size": "M",
+      "menuBarOnly": false,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "twins",
+      "name": "Twins",
+      "tagline": "Find and remove duplicate files.",
+      "replaces": [
+        "Gemini"
+      ],
+      "category": "Utilities",
+      "icon": "copy",
+      "size": "M",
+      "menuBarOnly": false,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "glance",
+      "name": "Glance",
+      "tagline": "Your calendar and world clocks, one click away.",
+      "replaces": [
+        "Dato"
+      ],
+      "category": "Productivity",
+      "icon": "calendar",
+      "size": "M",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "seek",
+      "name": "Seek",
+      "tagline": "Find files by name, kind, size and date.",
+      "replaces": [
+        "HoudahSpot"
+      ],
+      "category": "Utilities",
+      "icon": "search",
+      "size": "M",
+      "menuBarOnly": false,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    }
+  ]
+}

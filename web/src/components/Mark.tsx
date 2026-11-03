@@ -1,0 +1,13 @@
+/** One-color Slopapp mark (brand/mark-mono.svg): the grid, with one app melting a little. */
+export function Mark({ className = "size-7" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 512 512" aria-hidden className={className}>
+      <g fill="currentColor">
+        <rect x="56" y="24" width="180" height="180" rx="50" />
+        <rect x="276" y="24" width="180" height="180" rx="50" />
+        <rect x="56" y="244" width="180" height="180" rx="50" />
+        <path d="M326 244H406A50 50 0 0 1 456 294V374A50 50 0 0 1 434 415V472A19 19 0 0 1 396 472V424H326A50 50 0 0 1 276 374V294A50 50 0 0 1 326 244Z" />
+      </g>
+    </svg>
+  );
+}

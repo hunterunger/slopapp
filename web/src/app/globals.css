@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* Brand tokens from brand/brand.json. */
+@theme {
+  --color-forest: #0f3d2e;
+  --color-leaf: #3dbe74;
+  --color-mint: #d4f2df;
+  --color-cream: #faf6ec;
+  --color-ember: #e5603d;
+  --color-ink: #13201a;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Surface tokens that flip in dark mode. */
+:root {
+  --page: var(--color-cream);
+  --text: var(--color-ink);
+  --muted: color-mix(in oklab, var(--color-ink) 65%, transparent);
+  --card: #ffffff;
+  --line: color-mix(in oklab, var(--color-forest) 14%, transparent);
+  --heading: var(--color-forest);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #0b1f18;
+    --text: #e9efe9;
+    --muted: color-mix(in oklab, #e9efe9 65%, transparent);
+    --card: #10291f;
+    --line: color-mix(in oklab, var(--color-cream) 12%, transparent);
+    --heading: var(--color-cream);
+  }
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-card: var(--card);
+  --color-line: var(--line);
+  --color-heading: var(--heading);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--page);
+  color: var(--text);
+}

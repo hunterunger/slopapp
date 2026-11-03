@@ -1,0 +1,31 @@
+{
+  "name": "slopapp-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "catalog": "node ../scripts/catalog.mjs",
+    "predev": "node ../scripts/catalog.mjs",
+    "dev": "next dev",
+    "prebuild": "node ../scripts/catalog.mjs",
+    "build": "next build",
+    "start": "npx serve out",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "lucide-react": "^1.66.0",
+    "next": "16.4.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@10.6.4"
+}
