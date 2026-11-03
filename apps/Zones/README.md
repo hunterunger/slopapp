@@ -1,0 +1,101 @@
+# Zones
+
+World clocks and meeting times, in the menu bar.
+
+Part of [Slopapp](../../README.md), a free, open-source collection of Mac apps.
+An open alternative to World Clock Pro.
+
+**Status:** beta (0.2.0)
+
+## What it does
+
+Click the globe in the menu bar to see what time it is everywhere you care about: your local
+time first, then your places, each with the time, "Tomorrow · +7 h", and a sun or moon so you
+can tell who's asleep at a glance.
+
+- **Plan a meeting.** Drag sideways on the list (or two-finger swipe, or **← →** for 15
+  minutes, **⇧← ⇧→** for an hour, **⌥← ⌥→** for a day) and every clock moves together. The top
+  shows how far from now you are; **Esc** or **Now** goes back. Closing the panel always resets.
+- **Type a time.** Click a place's time (or select a row and press **Return**, or just start
+  typing a digit) and type `3pm`, `9:30 am`, `15:30` or `noon`. Every row jumps to that moment.
+  If the time doesn't exist that day (clocks going forward) or happens twice (going back),
+  Zones says so.
+- **Copy Times** (**⌘C**) copies the shown moment in every place as plain text with absolute
+  dates, ready for an invite: `London: Wed, Nov 4, 3:15 AM GMT`. Well-known abbreviations
+  (EST, GMT/BST, CET/CEST, JST, IST, AEST/AEDT…) are used where they're unambiguous;
+  otherwise the UTC offset (`UTC+8`). Settings has a single-line
+  and an ISO 8601 format; right-click a row to copy just that one.
+- **Add Place…** (**⌘N**) searches 34,000 cities offline (accents and case don't matter:
+  `zurich`, `sao paulo`, `東京`, `nyc`), countries, time zone names (`Europe/Paris`),
+  abbreviations (`PST`, `IST` lists every zone it can mean) and fixed offsets (`UTC+5:30`).
+  `paris, texas` narrows by country or region.
+- **Daylight saving is always right.** Offsets are computed for the moment you're looking at,
+  from macOS's own time zone database, so the weeks when the US and Europe change on
+  different dates, southern-hemisphere zones, half-hour and 45-minute offsets and the date
+  line all come out right. A row warns "Clocks go back 1 h on Sun" during the week before a
+  change.
+- **Menu bar clock.** Settings → General → Menu bar shows: icon only (default), icon and
+  time, or time only, for one place (or right-click a row → Show in Menu Bar). On a full
+  menu bar (notched MacBooks) macOS may hide the item; Settings says so when it happens, and
+  a keyboard shortcut (Settings → Shortcuts) opens Zones anyway.
+- Rename (right-click → Rename…), reorder (drag a row up or down, ⌥⌘↑/↓, or Settings →
+  Places), remove (right-click → Remove, or **⌫**) and Sort by Time Difference, all with Undo
+  (**⌘Z**). Choosing a place that's already listed shows its row instead of adding it twice.
+
+Every action is also in the **⋯** menu with its shortcut.
+
+No permissions, no network access, no accounts, no tracking. Local time is the Mac's time
+zone (no Location access) and follows it when you travel.
+
+## Keyboard
+
+| Key | Action |
+|---|---|
+| ← → / ⇧← ⇧→ / ⌥← ⌥→ | 15 minutes / 1 hour / 1 day earlier or later |
+| ↑ ↓ | Select a row |
+| Return, or a digit | Type a time on the selected row |
+| ⌫ | Remove the selected place (⌘Z undoes) |
+| ⌥⌘↑ ⌥⌘↓ | Move the selected place |
+| ⌘C | Copy Times |
+| ⌘N | Add Place… |
+| Esc | Back to now, then close |
+| ⌘, / ⌘Q | Settings / Quit |
+| Esc / ⌘W in Settings or About | Close the window |
+| (your choice) | Settings → Shortcuts → Open Zones, from any app. Unset by default. Also opens the panel when the menu bar icon is hidden or squeezed behind the notch. |
+
+## Not there yet
+
+Calendar hand-off, airport codes, more than one clock in the menu bar, widgets, Shortcuts
+actions, working-hours shading, a date picker (⌥← ⌥→ move by days). No map and no weather, on purpose.
+
+## City data
+
+City names come from [GeoNames](https://www.geonames.org) (`cities15000`), licensed under
+[Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/). See
+[THIRD_PARTY.md](THIRD_PARTY.md). Time zone rules come from macOS, never from the bundled
+file. To refresh the list: `python3 -I apps/Zones/Tools/build-cities.py` (downloads from
+GeoNames and rewrites `Sources/ZonesCore/Resources/cities.tsv.deflate`).
+
+## Develop
+
+```sh
+scripts/test.sh Zones          # unit tests (DST weeks, offsets, date line, parsing, search)
+scripts/run.sh Zones           # build a debug .app and open it
+scripts/check.sh Zones --perf  # tests, release bundle, smoke test, perf budgets
+```
+
+Logic lives in `Sources/ZonesCore` (tested); views and wiring in `Sources/Zones`.
+
+| Variable | Effect |
+|---|---|
+| `ZONES_DEFAULTS_SUITE=<name>` | Keep places and settings in this UserDefaults suite (tests) |
+| `ZONES_RESET=1` | Start from the first-run state (local time + UTC) |
+| `ZONES_NOW=2026-03-15T15:00:00Z` | Pin "now" (the clock doesn't move) |
+| `ZONES_TIMEZONE=America/New_York` | Pretend the Mac is in this time zone |
+| `ZONES_APPEARANCE=light\|dark` | Force an appearance (screenshots) |
+
+```sh
+scripts/drive launch build/Zones.app --env ZONES_DEFAULTS_SUITE=zones-test --env ZONES_RESET=1 \
+  --env ZONES_NOW=2026-03-15T15:00:00Z --env ZONES_TIMEZONE=America/New_York
+scripts/drive menubar Zones
+```

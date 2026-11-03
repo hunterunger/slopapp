@@ -1,0 +1,16 @@
+{
+  "slug": "zones",
+  "name": "Zones",
+  "tagline": "World clocks and meeting times, in the menu bar.",
+  "replaces": [
+    "World Clock Pro"
+  ],
+  "category": "Productivity",
+  "icon": "globe",
+  "menuBarOnly": true,
+  "status": "beta",
+  "version": "0.2.0",
+  "build": 2,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.zones"
+}
