@@ -1,0 +1,16 @@
+{
+  "slug": "specimen",
+  "name": "Specimen",
+  "tagline": "Browse and compare your fonts.",
+  "replaces": [
+    "Typeface"
+  ],
+  "category": "Design",
+  "icon": "type",
+  "menuBarOnly": false,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.specimen"
+}
