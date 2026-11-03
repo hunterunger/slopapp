@@ -1,0 +1,14 @@
+{
+  "slug": "awake",
+  "name": "Awake",
+  "tagline": "Keep your Mac awake, from the menu bar.",
+  "replaces": ["Lungo", "Amphetamine"],
+  "category": "Utilities",
+  "icon": "coffee",
+  "menuBarOnly": true,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.awake"
+}
