@@ -1,0 +1,46 @@
+{
+  "slug": "switchboard",
+  "name": "Switchboard",
+  "tagline": "Open every link in the right browser.",
+  "replaces": [
+    "OpenIn"
+  ],
+  "category": "Utilities",
+  "icon": "route",
+  "menuBarOnly": true,
+  "status": "beta",
+  "version": "0.2.0",
+  "build": 2,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.switchboard",
+  "infoPlist": {
+    "CFBundleURLTypes": [
+      {
+        "CFBundleURLName": "Web site URL",
+        "CFBundleTypeRole": "Viewer",
+        "CFBundleURLSchemes": [
+          "http",
+          "https"
+        ]
+      },
+      {
+        "CFBundleURLName": "Switchboard URL",
+        "CFBundleTypeRole": "Viewer",
+        "CFBundleURLSchemes": [
+          "switchboard"
+        ]
+      }
+    ],
+    "CFBundleDocumentTypes": [
+      {
+        "CFBundleTypeName": "HTML document",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "public.html",
+          "public.xhtml"
+        ]
+      }
+    ]
+  }
+}
