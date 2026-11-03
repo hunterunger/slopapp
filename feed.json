@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-03T20:09:22.766Z",
+  "generatedAt": "2026-11-03T20:15:04.968Z",
   "name": "Slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "apps": [
@@ -220,7 +220,17 @@
       ],
       "icon": "package",
       "menuBarOnly": false,
-      "status": "planned"
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.crate",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/crate-v0.2.0/Crate.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/crate-v0.2.0/Crate-icon.png",
+      "sha256": "0e0c39cf018ab8f85cbcb283bf00fb8078466494a2e0180f67697ae0ec75ca7b",
+      "size": 2778052,
+      "installedSize": 8493254,
+      "releaseNotes": ""
     },
     {
       "slug": "paper",
