@@ -1,0 +1,16 @@
+{
+  "slug": "clips",
+  "name": "Clips",
+  "tagline": "Clipboard history you can search.",
+  "replaces": [
+    "Paste"
+  ],
+  "category": "Productivity",
+  "icon": "clipboard-list",
+  "menuBarOnly": true,
+  "status": "beta",
+  "version": "0.2.0",
+  "build": 2,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.clips"
+}
