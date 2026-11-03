@@ -1,0 +1,393 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-03T19:42:24.535Z",
+  "name": "Slopapp",
+  "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
+  "apps": [
+    {
+      "slug": "slopapp",
+      "name": "Slopapp",
+      "tagline": "Every Slopapp app, installed and up to date.",
+      "category": "Hub",
+      "replaces": [
+        "Setapp"
+      ],
+      "icon": "layout-grid",
+      "menuBarOnly": false,
+      "hub": true,
+      "status": "planned"
+    },
+    {
+      "slug": "switchboard",
+      "name": "Switchboard",
+      "tagline": "Open every link in the right browser.",
+      "category": "Utilities",
+      "replaces": [
+        "OpenIn"
+      ],
+      "icon": "route",
+      "menuBarOnly": true,
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.switchboard",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/switchboard-v0.2.0/Switchboard.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/switchboard-v0.2.0/Switchboard-icon.png",
+      "sha256": "e1eb8d568e6afb08a349ea2e14e5f3cba8c868c86e21b6cd88c14dbbc0bb32c5",
+      "size": 2508838,
+      "installedSize": 8199027,
+      "releaseNotes": ""
+    },
+    {
+      "slug": "clips",
+      "name": "Clips",
+      "tagline": "Clipboard history you can search.",
+      "category": "Productivity",
+      "replaces": [
+        "Paste"
+      ],
+      "icon": "clipboard-list",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "squish",
+      "name": "Squish",
+      "tagline": "Drop in images and PDFs, get smaller files out.",
+      "category": "Utilities",
+      "replaces": [
+        "Squash",
+        "PDF Squeezer"
+      ],
+      "icon": "shrink",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "snapper",
+      "name": "Snapper",
+      "tagline": "Screenshots, annotated and shared in seconds.",
+      "category": "Productivity",
+      "replaces": [
+        "CleanShot X"
+      ],
+      "icon": "camera",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "convert",
+      "name": "Convert",
+      "tagline": "Drop in audio, video or images and convert them.",
+      "category": "Media",
+      "replaces": [
+        "Permute"
+      ],
+      "icon": "refresh-cw",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "tidy",
+      "name": "Tidy",
+      "tagline": "Uninstall apps completely and clear out the junk.",
+      "category": "Utilities",
+      "replaces": [
+        "CleanMyMac"
+      ],
+      "icon": "brush-cleaning",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "dropper",
+      "name": "Dropper",
+      "tagline": "Pick any color on screen and copy it in the format you need.",
+      "category": "Design",
+      "replaces": [
+        "Sip"
+      ],
+      "icon": "pipette",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "ruler",
+      "name": "Ruler",
+      "tagline": "Measure anything on screen, to the pixel.",
+      "category": "Design",
+      "replaces": [
+        "PixelSnap"
+      ],
+      "icon": "ruler",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "iconsmith",
+      "name": "Iconsmith",
+      "tagline": "Turn any image into app and folder icons.",
+      "category": "Design",
+      "replaces": [
+        "Image2icon"
+      ],
+      "icon": "shapes",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "specimen",
+      "name": "Specimen",
+      "tagline": "Browse and compare your fonts.",
+      "category": "Design",
+      "replaces": [
+        "Typeface"
+      ],
+      "icon": "type",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "zones",
+      "name": "Zones",
+      "tagline": "World clocks and meeting times, in the menu bar.",
+      "category": "Productivity",
+      "replaces": [
+        "World Clock Pro"
+      ],
+      "icon": "globe",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "crate",
+      "name": "Crate",
+      "tagline": "Open, preview and make archives.",
+      "category": "Utilities",
+      "replaces": [
+        "Archiver"
+      ],
+      "icon": "package",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "paper",
+      "name": "Paper",
+      "tagline": "Read, annotate and edit PDFs.",
+      "category": "Productivity",
+      "replaces": [
+        "Nitro PDF Pro"
+      ],
+      "icon": "file-pen-line",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "dual",
+      "name": "Dual",
+      "tagline": "A two-pane file manager with remote servers.",
+      "category": "Utilities",
+      "replaces": [
+        "ForkLift"
+      ],
+      "icon": "folder-tree",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "commit",
+      "name": "Commit",
+      "tagline": "A calm Git client.",
+      "category": "Developer",
+      "replaces": [
+        "Gitfox"
+      ],
+      "icon": "git-branch",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "awake",
+      "name": "Awake",
+      "tagline": "Keep your Mac awake, from the menu bar.",
+      "category": "Utilities",
+      "replaces": [
+        "Lungo",
+        "Amphetamine"
+      ],
+      "icon": "coffee",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "focus",
+      "name": "Focus",
+      "tagline": "A calm focus timer that lives in your menu bar.",
+      "category": "Productivity",
+      "replaces": [
+        "Session"
+      ],
+      "icon": "timer",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "tally",
+      "name": "Tally",
+      "tagline": "A notepad that does the math as you type.",
+      "category": "Productivity",
+      "replaces": [
+        "Numi"
+      ],
+      "icon": "calculator",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "devkit",
+      "name": "Devkit",
+      "tagline": "Offline developer tools: JSON, Base64, JWT, hashes and more.",
+      "category": "Developer",
+      "replaces": [
+        "DevUtils"
+      ],
+      "icon": "braces",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "snip",
+      "name": "Snip",
+      "tagline": "Copy text from anything on your screen.",
+      "category": "Utilities",
+      "replaces": [
+        "TextSniper"
+      ],
+      "icon": "scan-text",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "gauge",
+      "name": "Gauge",
+      "tagline": "CPU, memory, network and battery in your menu bar.",
+      "category": "Utilities",
+      "replaces": [
+        "iStat Menus"
+      ],
+      "icon": "gauge",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "tiles",
+      "name": "Tiles",
+      "tagline": "Snap windows into place with the keyboard.",
+      "category": "Utilities",
+      "replaces": [
+        "Mosaic"
+      ],
+      "icon": "layout-grid",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "switches",
+      "name": "Switches",
+      "tagline": "One menu for dark mode, hidden desktop icons and more.",
+      "category": "Utilities",
+      "replaces": [
+        "One Switch"
+      ],
+      "icon": "toggle-right",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "quit",
+      "name": "Quit",
+      "tagline": "Quit every app at once, except the ones you keep.",
+      "category": "Utilities",
+      "replaces": [
+        "QuitAll"
+      ],
+      "icon": "square-x",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "shelf",
+      "name": "Shelf",
+      "tagline": "A place to park files while you drag.",
+      "category": "Productivity",
+      "replaces": [
+        "Yoink"
+      ],
+      "icon": "inbox",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "margin",
+      "name": "Margin",
+      "tagline": "Quick notes tucked into the edge of your screen.",
+      "category": "Productivity",
+      "replaces": [
+        "SideNotes"
+      ],
+      "icon": "panel-right",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "hours",
+      "name": "Hours",
+      "tagline": "See where your time went, automatically and privately.",
+      "category": "Productivity",
+      "replaces": [
+        "Timing"
+      ],
+      "icon": "chart-column",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "twins",
+      "name": "Twins",
+      "tagline": "Find and remove duplicate files.",
+      "category": "Utilities",
+      "replaces": [
+        "Gemini"
+      ],
+      "icon": "copy",
+      "menuBarOnly": false,
+      "status": "planned"
+    },
+    {
+      "slug": "glance",
+      "name": "Glance",
+      "tagline": "Your calendar and world clocks, one click away.",
+      "category": "Productivity",
+      "replaces": [
+        "Dato"
+      ],
+      "icon": "calendar",
+      "menuBarOnly": true,
+      "status": "planned"
+    },
+    {
+      "slug": "seek",
+      "name": "Seek",
+      "tagline": "Find files by name, kind, size and date.",
+      "category": "Utilities",
+      "replaces": [
+        "HoudahSpot"
+      ],
+      "icon": "search",
+      "menuBarOnly": false,
+      "status": "planned"
+    }
+  ]
+}
