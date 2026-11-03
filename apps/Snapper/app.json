@@ -1,0 +1,28 @@
+{
+  "slug": "snapper",
+  "name": "Snapper",
+  "tagline": "Screenshots, annotated and shared in seconds.",
+  "replaces": [
+    "CleanShot X"
+  ],
+  "category": "Productivity",
+  "icon": "camera",
+  "menuBarOnly": true,
+  "status": "beta",
+  "version": "0.2.0",
+  "build": 2,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.snapper",
+  "infoPlist": {
+    "CFBundleDocumentTypes": [
+      {
+        "CFBundleTypeName": "Image",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "public.image"
+        ]
+      }
+    ]
+  }
+}
