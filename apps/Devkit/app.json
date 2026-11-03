@@ -1,0 +1,16 @@
+{
+  "slug": "devkit",
+  "name": "Devkit",
+  "tagline": "Offline developer tools: JSON, Base64, JWT, hashes and more.",
+  "replaces": [
+    "DevUtils"
+  ],
+  "category": "Developer",
+  "icon": "braces",
+  "menuBarOnly": false,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.devkit"
+}
