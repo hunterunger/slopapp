@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-03T19:56:48.249Z",
+  "generatedAt": "2026-11-03T20:03:54.146Z",
   "name": "Slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "apps": [
@@ -188,7 +188,17 @@
       ],
       "icon": "globe",
       "menuBarOnly": true,
-      "status": "planned"
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.zones",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/zones-v0.2.0/Zones.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/zones-v0.2.0/Zones-icon.png",
+      "sha256": "952e3dfb4945539b32ae6284d1b7af16b9bea34b02b524b1f195076d5659f6ac",
+      "size": 3885462,
+      "installedSize": 8943571,
+      "releaseNotes": ""
     },
     {
       "slug": "crate",
