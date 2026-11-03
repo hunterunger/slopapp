@@ -1,0 +1,20 @@
+{
+  "slug": "slopapp",
+  "name": "Slopapp",
+  "tagline": "Every Slopapp app, installed and up to date.",
+  "replaces": [
+    "Setapp"
+  ],
+  "category": "Hub",
+  "icon": "layout-grid",
+  "menuBarOnly": false,
+  "status": "beta",
+  "version": "0.2.0",
+  "build": 2,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.slopapp",
+  "hub": true,
+  "infoPlist": {
+    "SlopappFeedURL": "https://hunterunger.github.io/slopapp/feed.json"
+  }
+}
