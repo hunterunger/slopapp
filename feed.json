@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-03T19:42:24.535Z",
+  "generatedAt": "2026-11-03T19:46:43.265Z",
   "name": "Slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "apps": [
@@ -49,7 +49,17 @@
       ],
       "icon": "clipboard-list",
       "menuBarOnly": true,
-      "status": "planned"
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.clips",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/clips-v0.2.0/Clips.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/clips-v0.2.0/Clips-icon.png",
+      "sha256": "913e38772c0b52219abe0a089503566f54d92ee1169ac5e08a9fb52ad0e9cf15",
+      "size": 2538071,
+      "installedSize": 7989822,
+      "releaseNotes": ""
     },
     {
       "slug": "squish",
