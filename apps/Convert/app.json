@@ -1,0 +1,30 @@
+{
+  "slug": "convert",
+  "name": "Convert",
+  "tagline": "Drop in audio, video or images and convert them.",
+  "replaces": [
+    "Permute"
+  ],
+  "category": "Media",
+  "icon": "refresh-cw",
+  "menuBarOnly": false,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.convert",
+  "infoPlist": {
+    "CFBundleDocumentTypes": [
+      {
+        "CFBundleTypeName": "Video, audio or image",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "public.movie",
+          "public.audio",
+          "public.image"
+        ]
+      }
+    ]
+  }
+}
