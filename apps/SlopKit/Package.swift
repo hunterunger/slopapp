@@ -1,0 +1,24 @@
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "SlopKit",
+    platforms: [.macOS(.v14)],
+    products: [
+        .library(name: "SlopKit", targets: ["SlopKit"]),
+    ],
+    dependencies: [
+        // Global hotkeys + recorder. Approved in docs/design-system.md; pin exact versions.
+        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", exact: "1.10.0"),
+    ],
+    targets: [
+        .target(
+            name: "SlopKit",
+            dependencies: [.product(name: "KeyboardShortcuts", package: "KeyboardShortcuts")]
+        ),
+        // Every component on one screen: swift run --package-path apps/SlopKit SlopKitGallery
+        .executableTarget(name: "SlopKitGallery", dependencies: ["SlopKit"]),
+        .testTarget(name: "SlopKitTests", dependencies: ["SlopKit"]),
+    ],
+    swiftLanguageModes: [.v6]
+)
