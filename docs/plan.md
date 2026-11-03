@@ -12,7 +12,10 @@ cycle in [`dev-cycle.md`](dev-cycle.md). Status as of 2026-11-03.
 - [x] Build pipeline: scaffold, test, bundle, smoke, perf, icons, CI ([`pipeline.md`](pipeline.md))
 - [x] Design system + SlopKit shared components ([`design-system.md`](design-system.md))
 - [x] Dev-cycle tooling: SlopDrive, researcher and blind-tester agents, `build-app` skill
-- [ ] First commit, push to GitHub, CI green on GitHub's runners
+- [x] Repo on GitHub (public), website + update feed on GitHub Pages, 8 apps released (2026-11-03)
+- [ ] CI green on GitHub's runners (macOS 26 / Xcode 26.6). Open: Paper's pending redaction marks
+      don't survive save/reopen on macOS 26 (real bug); Convert's tests exceed 45 min on CI
+      (no hardware encoder on the VMs).
 - [ ] Owner decisions (below)
 
 ## Phase 1: Ship Switchboard (OpenIn)
