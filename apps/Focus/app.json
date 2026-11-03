@@ -1,0 +1,16 @@
+{
+  "slug": "focus",
+  "name": "Focus",
+  "tagline": "A calm focus timer that lives in your menu bar.",
+  "replaces": [
+    "Session"
+  ],
+  "category": "Productivity",
+  "icon": "timer",
+  "menuBarOnly": true,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.focus"
+}
