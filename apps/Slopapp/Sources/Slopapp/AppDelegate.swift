@@ -19,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Store.shared.start()
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { Task { @MainActor in await Store.shared.checkIfDue() } }
+            MainActor.assumeIsolated { _ = Task<Void, Never> { @MainActor in await Store.shared.checkIfDue() } }
         }
         // Apps come and go behind our back (Finder, other installers): re-scan when they launch
         // or quit and whenever Slopapp comes to the front. Cheap, and no polling.
