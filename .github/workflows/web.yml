@@ -1,0 +1,86 @@
+name: web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "brand/**"
+      - "catalog/**"
+      - "apps/*/app.json"
+      - "scripts/catalog.mjs"
+      - ".github/workflows/web.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "brand/**"
+      - "catalog/**"
+      - "apps/*/app.json"
+      - "scripts/catalog.mjs"
+      - ".github/workflows/web.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build
+        env:
+          # The site is served from https://<owner>.github.io/<repo>/
+          NEXT_BASE_PATH: /${{ github.event.repository.name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: web/out
+
+  # Publish the site to the gh-pages branch, next to the launcher's feed.json (written by
+  # release.yml). Shares the "release" concurrency group so the two never race, and never
+  # deletes feed.json.
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: site
+      - name: Publish to gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          PAGES="$RUNNER_TEMP/pages"
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git fetch --depth 1 origin gh-pages
+            git worktree add -B gh-pages "$PAGES" FETCH_HEAD
+          else
+            git worktree add --detach "$PAGES"
+            git -C "$PAGES" checkout --orphan gh-pages
+            git -C "$PAGES" rm -rf --quiet . || true
+          fi
+          rsync -a --delete --exclude .git --exclude feed.json --exclude .nojekyll site/ "$PAGES/"
+          touch "$PAGES/.nojekyll"
+          git -C "$PAGES" add -A
+          if git -C "$PAGES" diff --cached --quiet; then echo "site unchanged"; exit 0; fi
+          git -C "$PAGES" commit --quiet -m "site: ${GITHUB_SHA::7}"
+          git -C "$PAGES" push origin gh-pages

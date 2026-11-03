@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Drive any running Mac app through Accessibility. Built for agents (and blind testers).
+#
+#   scripts/drive help
+#   scripts/drive launch Awake
+#   scripts/drive menubar Awake
+#   scripts/drive click Awake "1 Hour"
+#
+# Builds tools/SlopDrive on first use (and again when its sources change), then runs it.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PKG="$ROOT/tools/SlopDrive"
+BIN="$PKG/.build/release/SlopDrive"
+STAMP="$PKG/.build/slopdrive.stamp"   # touched after each good build
+
+if [[ ! -x "$BIN" || ! -f "$STAMP" ]] || [[ -n "$(find "$PKG/Sources" "$PKG/Package.swift" -newer "$STAMP" 2>/dev/null | head -1)" ]]; then
+  echo "building SlopDrive…" >&2
+  if ! swift build -c release --package-path "$PKG" >"/tmp/slopdrive-build.log" 2>&1; then
+    grep -E "error:" /tmp/slopdrive-build.log | sed -E "s/\x1b\[[0-9;]*m//g" | sort -u | head -n 20 >&2
+    echo "error: SlopDrive failed to build (log: /tmp/slopdrive-build.log)" >&2
+    exit 1
+  fi
+  touch "$STAMP"
+fi
+
+SLOPDRIVE_ROOT="$ROOT" exec "$BIN" "$@"

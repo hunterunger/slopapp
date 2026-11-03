@@ -1,0 +1,878 @@
+# Paper research (inspired by Nitro PDF Pro)
+
+> Written by the research step of [`docs/dev-cycle.md`](../dev-cycle.md). Studied on
+> 2026-11-03: **Nitro PDF Pro 26.4 (260400.2455)**, Setapp build, at
+> /Applications/Setapp/Nitro PDF Pro.app (read-only). Also its online Mac user guide,
+> App Store and Setapp listings, reviews and forum threads, and Apple Preview for contrast.
+> We study how it works so we don't reinvent the wheel. We never copy its name, icons,
+> artwork, wording, sounds or signature visuals.
+>
+> Nitro wasn't running. It was opened with a generated 3-page test PDF
+> (`/tmp/paper-demo/paper-demo.pdf`: three lines of text per page, a blue rectangle, plus a
+> text field, a checkbox and a dropdown on page 1). We read the home window's structure (its
+> recents list held only that test file), the full main menu, every toolbar dropdown and all
+> three Settings panes, then quit Nitro. No setting was changed, nothing was typed into the
+> document and nothing was saved. Not explored: the floating Search, Inspector and Review Tools
+> panels. They don't show up to Accessibility when the app is driven from the background (see
+> "Couldn't explore"). Their behavior comes from the help docs.
+>
+> PDFKit behavior was checked with small Swift experiments on this Mac (**macOS 27.2**), which
+> is newer than our **macOS 14** floor. Anything only seen on 27 is marked **verify on 14**.
+> Sources are in `/tmp/paper-exp/scripts`, not in the repo. Outputs were checked with an
+> independent extractor (Poppler `pdftotext` / `pdfimages`, from Homebrew), not only with
+> PDFKit.
+
+## The job
+
+Someone has a PDF and needs to do something to it, other than just reading it, in the next five
+minutes. Typical cases: a lease to sign and send back, a government form to fill in, a paper
+to read with highlights and notes, three scans to combine into one file with the pages in
+the right order, two pages to pull out for a colleague, or an account number to black out
+before forwarding. Preview handles some of this, but it hides the page tools, can't redact
+every occurrence of a word, can't flatten, and saves over the original without being asked.
+The paid tools (Nitro, PDF Expert, Acrobat) cost $130–180 a year and come with accounts.
+"Done" means the file looks right in any viewer, the edits can't be peeled off when that
+matters (signatures, flattened forms, redactions), and the original is untouched unless the
+person meant to change it.
+
+**The one interaction that matters: open a PDF, pick a tool with one key, act on the page
+(highlight, sign, type into a field, drag a thumbnail), and the result is saved like any Mac
+document.** The second one, and the reason to pick Paper over Preview, is: **mark what's
+sensitive (including "every occurrence of this text"), apply it, and get a new file in which
+that content is provably gone.**
+
+## Who and when
+
+- Signing a contract or permission slip that arrived by email, then sending it back flattened
+  so the signature can't be lifted off.
+- Filling a fillable form (tax, visa, onboarding). Or typing onto a flat scanned form that has
+  no fields.
+- Reading and marking up a paper, spec or legal draft: highlights in a few colors, sticky notes,
+  strike-throughs, an arrow and a box. Later, jumping between notes in a list.
+- Fixing a scan: rotating sideways pages, deleting blanks, reordering. Then merging several
+  scans into one file, or splitting a 40-page scan into separate documents.
+- Redacting before sharing: an account number, a name everywhere it appears, a signature,
+  a photo of an ID card.
+
+Frequency: a few times a week for most people. Readers and reviewers use it daily. A
+signing or forms session takes 1–3 minutes. A reading session can last an hour, so it should
+stay out of the way. Page surgery and redaction come in bursts. They are rarer, but they're
+why people pay.
+
+## How Nitro is laid out (observed)
+
+- **Home window on launch** (default on): a greeting, three big actions (open a file, new from
+  a template, import from a scanner), and a Recents list with a list/grid toggle and a
+  clear button. It's an extra window between launch and the document. Our version: skip it and
+  use the system Open panel and File > Open Recent.
+- **Document window** (one per document, system tabs supported):
+  - **Toolbar, row 1, left to right:** sidebar toggle with a dropdown for the mode (Thumbnails,
+    Table of Contents, Annotations, Attachments, Form Fields; plus Single / Facing /
+    Continuous), zoom out/in, Fit Width, an editable scale field ("146%"), an editable page
+    field, then four **tool groups, each a button plus a dropdown arrow**: *Drawing*
+    (Scribble, Polygon Line, Rectangle, Oval, Line, Rounded Rectangle), *Highlight* (a row of 7
+    color swatches + Edit Custom Colors, Underline, Cross Out, Squiggle, Remove), *Markup* (Text,
+    Note, Comment, Cloud, Callout, Link, Attach Files, Sound), *Forms* (Text Field, Checkbox,
+    Radio, Dropdown, List Box, Signature, Button). The button repeats the last tool used from
+    that group. Right side: Review Tools (a library of reusable items), Search, Inspector,
+    Compare, Get Signatures (cloud e-sign), Share.
+  - **Toolbar, row 2, the "editing bar":** mode buttons (Edit, Select Text, Pointer, Rectangle
+    Selection, Measure, Hand), then context formatting controls: font and size, bold, italic,
+    underline, text color, four alignments, stroke color, fill bucket, line style, stroke width.
+    Mostly disabled until something is selected.
+  - **Sidebar:** page thumbnails with the page number under each, and a size slider at the
+    bottom. The current page has a darker card behind it.
+  - **Canvas:** continuous vertical scroll, pages on a dark backdrop. A small "1 / 3" page
+    badge sits in the corner of the current page.
+- **Floating panels:** Review Tools / Library (⌘Y: built-in shapes, saved custom items such as
+  signature scribbles and images, proofreading marks, stamps including dynamic name/date
+  stamps), Inspector (⌥⌘I: tabs for alignment, form element properties, document info and
+  permissions), Search (a results list in page order, optionally including comments),
+  Magnifier, JavaScript console, Scripts.
+- **Page operations are scattered.** Rotate is in View, insert blank page and crop are in Edit,
+  insert file is in File, and delete/extract/reorder happen on thumbnails (context menu and
+  drag). There is no Pages menu. Splitting is an AppleScript in a Scripts menu. This
+  scattering is a lesson for us.
+
+## PDFKit platform facts (experiments on macOS 27.2)
+
+These decide what v1 can promise. Each was checked with `pdftotext`/`pdfimages`, not only by
+reopening in PDFKit.
+
+| # | Question | Result | Consequence for us |
+|---|---|---|---|
+| P1 | Does a **`Redact`-subtype annotation** (`PDFAnnotation(bounds:forType: PDFAnnotationSubtype(rawValue: "Redact"))`) remove content when the document is written? | **Yes, on every write**, even a plain `dataRepresentation()` with no options. It removed **only the glyphs inside the box** ("Account number ▮▮▮ belongs" kept the rest of the line; a box over half a word removed exactly those letters). It also removed **invisible text** (render mode 3, like an OCR layer), and **zeroed the image pixels** inside the box in the embedded image itself (checked with `pdfimages`). Vector fills under it were removed too. | True redaction is possible on PDFKit without our own content-stream editor. It's **undocumented**, so **verify on 14**, and always verify the output (P5). |
+| P2 | The `PDFMarkupType.redact` markup (a Highlight annotation with `markupType = .redact`) | **Fake.** It draws a black blob and the text stays extractable. | Never use it. A unit test should guard this. |
+| P3 | What does an applied `Redact` annotation look like? | Kept as an annotation, it draws a **grey box with an X** (the "marked for redaction" look). With `.burnInAnnotationsOption` it's baked in looking like that. A black `Square` annotation added in the same pass **is itself redacted away** (removal runs after burn-in). | **Two passes**: (1) write with `Redact` annotations, which removes the content; (2) reopen, delete the leftover `Redact` annotations, add black filled squares, write with burn-in. Result: solid black boxes, no annotations left, nothing extractable. Verified. |
+| P4 | Danger: a PDF from another app that already contains **unapplied `Redact` annotations** | PDFKit applies them on our next save. | On open, detect `Redact` annotations and ask before any save. Also: **our own redaction marks must not be `Redact` annotations until the user applies them**, or autosave would apply them early to the original. Keep marks in our model (or as a plain annotation tagged with a private key) until Apply. |
+| P5 | How to verify removal | Reopen the written data with a fresh `PDFDocument`. For each mark: `page.selection(for: rect)?.string` is empty, and `findString` finds none of the redacted terms. Plus `pdftotext` in the walkthrough. | The Apply flow verifies before it reports success. If verification fails, fall back to P6 for the affected pages and verify again. If that also fails, don't write. |
+| P6 | Fallback: rasterize the page | Render the page at 300 dpi, fill the boxes black, replace it with `PDFPage(image:options:[.mediaBox:])` (macOS 13+). The page has no text at all afterwards. Verified. | A safe fallback, but the page loses selectable text and its size grows (~240 KB per letter page at 300 dpi). Only use it per page, when P1 fails. |
+| P7 | `.burnInAnnotationsOption` (macOS 13+) for **flatten** | Highlights, ink, free text, form values (text field, checkbox) were baked in. 0 annotations remain, typed form text is now page text. | Flatten export is one write call. The checkbox "on" appearance looked unchecked in one test: **check widget appearances** in the walkthrough. |
+| P8 | `.saveTextFromOCROption` (macOS 13+) | **Did nothing** in a command-line test (instant, no text added) on a synthetic image-only page. | Don't rely on it for OCR. Re-test inside a real app run loop before writing it off. |
+| P9 | Vision `VNRecognizeTextRequest` / `RecognizeTextRequest` (macOS 15) on a 1700×2200 page render | Accurate. **~30 s on the first call in each new process** (model load, unsigned CLI), then **0.07 s/page** accurate, 0.03 s fast. | OCR is feasible. Making a searchable PDF means drawing an invisible text layer ourselves (a few hundred lines). Show progress, and expect a slow first page. |
+| P10 | Forms: create and fill widgets, persist | `widgetStringValue`, `buttonWidgetState` and choice values save and reload. | Form filling is mostly free with `PDFView`. |
+| P11 | Page ops | `exchangePage`, `insert(_:at:)` with `page.copy()` from another document, `removePage`, `rotation` all persist. `outlineRoot` is nil for a document with no outline. | Reorder, rotate, delete, insert, merge and extract are cheap. Merging outlines is up to us (later). |
+
+## Feature inventory
+
+Priority: **must** (v1 isn't worth shipping without it), **should** (v1 if cheap, else v1.1),
+**later**, **skip** (with the reason). "Nitro" describes how the original does it.
+
+### Opening and reading
+
+| # | Feature | How Nitro does it | Priority | Notes for us |
+|---|---|---|---|---|
+| 1 | Open PDFs | ⌘O, Open Recent, drag onto the Dock icon, Finder Open With. Also opens images and Word files (it converts them). | **must** | Document-based app, registered for `com.adobe.pdf` with rank *Alternate*, so it shows in Open With but never takes over from Preview on its own. |
+| 2 | Home / welcome window | Greeting, three actions, a recents list/grid. On by default. | skip | Extra step on launch. The empty state is the system Open panel plus File > Open Recent. |
+| 3 | Page layout | Single page, Facing pages, Continuous, cover page, right-to-left. Set from View and the sidebar dropdown. | **must** (continuous, single) / should (two-up, cover) | `PDFView.displayMode` and `displaysAsBook` make these cheap. |
+| 4 | Zoom | Actual size ⌘0, zoom in ⌘+ / out ⌘−, fit ⌥⌘0, fit width ⌥⌘9, an editable % field. Default: fit page. | **must** | Pinch and smart zoom come with `PDFView`. |
+| 5 | Thumbnails sidebar | Sidebar mode with a size slider. The current page is highlighted. | **must** | Our own grid (not `PDFThumbnailView`), so we can multi-select, drag-reorder and use a context menu (see 50–58). |
+| 6 | Outline sidebar | "Table of Contents" mode. Bookmarks on top, expand/collapse. Editing via Edit > Table of Contents (add entry, child, promote/demote). | **must** (read) / later (edit) | `PDFOutline`. Hide the tab when the document has no outline. |
+| 7 | Annotations sidebar | A list of every markup, filterable by type. Click to jump, double-click to edit. | should | Cheap and useful for reviewers. Pairs with 40. |
+| 8 | Attachments sidebar | List, add, extract, preview embedded files | later | Rare. |
+| 9 | Form fields sidebar | A field list with drag-to-set tab order | skip | Form-authoring feature. |
+| 10 | Search | ⌘F opens a panel with results in page order (optionally comments too). ⌘G / ⇧⌘G next/previous. ⌘E use selection, ⌘J jump to selection. | **must** | A sidebar results list with page number and context, matches highlighted on the page. If the document has no text layer, show one line saying so (the scan case) instead of "No results". |
+| 11 | Go to page | ⌥⌘G, the toolbar page field, first/last/next/previous, Back ⌘[ / Forward ⌘] | **must** | `PDFView` has history. |
+| 12 | Remember last page per document | General setting, on | should | Store per file bookmark in UserDefaults (capped). |
+| 13 | Links | Clickable. Optional detection of emails/phone numbers. "Highlight Links" toggle. | **must** (follow) / skip (detect) | `PDFView` follows links. External URLs open in the default browser. |
+| 14 | Tabs, multiple windows | Window tabs, Merge All Windows | should | Free with document windows. |
+| 15 | Split view of one document | Window > Split vertically/horizontally | later | Handy for long specs. Not v1. |
+| 16 | Compare two documents | ⌘K, side by side with differences | later | A big feature on its own. |
+| 17 | Magnifier window | ⌥⌘M | skip | System zoom and pinch already cover it. |
+| 18 | Dark page appearance | Not seen in Nitro (Preview has it on macOS 26) | later | Could be a simple inverted render. Not v1. |
+| 19 | Text-to-speech | Edit > Speech | skip | System Services / Spoken Content cover it. |
+| 20 | Full screen / slideshow | Enter Full Screen | should | Free. |
+| 21 | Copy text, select all | Select Text tool, ⌘C | **must** | `PDFView`. |
+| 22 | Print | ⌘P, page setup, print notes / annotation summary / stamps only | **must** (print) / later (summaries) | `PDFView.print(with:autoRotate:)`. |
+| 23 | Show page numbers / labels | View > Page Numbers. Edit > Page Labels. | skip | Thumbnails already show numbers. |
+
+### Annotating
+
+| # | Feature | How Nitro does it | Priority | Notes for us |
+|---|---|---|---|---|
+| 24 | Highlight text | ⌘5 tool. 7 swatches + 3 custom colors (setting). Works on the selection or as a sticky tool. | **must** | 5 system-ish colors (yellow, green, blue, pink, purple). Applies to the current selection, or stays as a tool to drag across text. |
+| 25 | Underline, strike-through | Highlight dropdown | **must** | `.underline`, `.strikeOut`. |
+| 26 | Squiggle | ⌥⇧⌘5 | later | PDFKit has no squiggly markup type. Needs a custom subtype. |
+| 27 | Remove markup from the selection | ⌥⇧⌘0 | should | Removes markup annotations that intersect the selection. |
+| 28 | Text box (typed text on the page) | Text tool ⌘6. Default font Helvetica 12 (setting). | **must** | `.freeText`. Doubles as "type on a flat form". Font size and color in a small inspector. |
+| 29 | Sticky note | Add Note ⌘8, edit note ⌘', delete note | **must** | `.text` with a popup. Edit in a popover, not a floating yellow window. |
+| 30 | Comment box, cloud, callout | Markup dropdown | later | Callout (box + arrow) is the most useful of the three. |
+| 31 | Shapes: rectangle, oval, line, arrow | Drawing dropdown (no dedicated arrow: line + line-end style) | **must** | `.square`, `.circle`, `.line` with end styles. Stroke color, fill, width. Shift constrains. |
+| 32 | Polygon, rounded rectangle | Drawing dropdown | later | |
+| 33 | Freehand drawing | Scribble ⌘7 | **must** | `.ink` from smoothed `NSBezierPath`. Pressure isn't needed. |
+| 34 | Select, move, resize, recolor, delete annotations | Pointer tool + editing bar (stroke, fill, line style/width, font) | **must** | One small contextual inspector (popover or a strip under the toolbar). Arrow keys nudge 1 pt (Nitro's default increment), ⇧ 10 pt. |
+| 35 | Annotation author | "Add name to annotations" (on). Name defaults to the Mac user's full name. | should | Use `NSFullUserName()`, with an override in Settings. |
+| 36 | Stamps (Approved, Draft, Sign Here, dynamic name/date) | Library > Stamps, custom stamps | later | A date stamp is covered by 44. |
+| 37 | Links, file attachments, sound notes | Markup dropdown | skip | Rare. Sound notes are obsolete in most viewers. |
+| 38 | Arrange: z-order, lock, grid, snap, guides | Arrange menu, grid every 18 pt, guides on | skip | That's a layout tool, not a PDF annotator. |
+| 39 | Measure tool | Tools > Measurement Tool | later | Niche (architecture/print). |
+| 40 | Export highlights and notes | Print annotation summary | should | "Copy Highlights & Notes" as Markdown (page number, quoted text, note). A reader feature Preview lacks. |
+| 41 | Proofreading marks library | Library | skip | Niche. |
+| 42 | Watermark; headers/footers/page numbers; Bates numbering; line numbers | Edit menu | later | "Add Page Numbers" is the most requested of these. v1.1 candidate. |
+
+### Signing
+
+| # | Feature | How Nitro does it | Priority | Notes for us |
+|---|---|---|---|---|
+| 43 | Create a signature | Draw it with Scribble and save it to the Library. Or import a scan and run "Make Transparent Image" (eyedropper + tolerance). | **must** (draw) / should (image) | A signature sheet: draw with trackpad or mouse on a baseline, Clear / Done. Image import: drop a photo and we knock out the light background (luminance threshold + crop to ink). Stored locally in Application Support, never synced by us. |
+| 44 | Place a signature, initials, date | Drag from the Library. Resize with Shift to keep proportions. | **must** (signature) / should (initials, today's date as text) | Toolbar Sign menu lists saved signatures (up to ~5) + "New Signature…". Click to place, drag to resize. It's an ink or stamp annotation, so it stays editable until flattened. |
+| 45 | Certificate-based digital signatures, validation | Digital ID signing and signature validation | skip | Out of scope (PKI, PAdES). |
+| 46 | Cloud e-sign request ("Get Signatures") | Nitro Sign account | skip | Needs an account and a server. |
+| 47 | Signature form fields | Forms dropdown | later | |
+
+### Forms
+
+| # | Feature | How Nitro does it | Priority | Notes for us |
+|---|---|---|---|---|
+| 48 | Fill interactive (AcroForm) forms | Click a field, type, Tab to the next, click checkboxes/radios. JavaScript calculations on by default. | **must** | `PDFView` does it. We add: a "Highlight Fields" toggle and an info bar "This form has 12 fields" with a Next Field button. |
+| 49 | Fill flat (non-interactive) forms | Use the Text tool to type anywhere | **must** | Covered by 28. On scans, the text box snaps its baseline to the click point. |
+| 50 | Reset form | Edit > Reset Form… | should | Confirm, undoable. |
+| 51 | Detect fields automatically / create fields | "Create Form Fields for Page/Document", the Forms tools | later | Vision rectangle detection could do this later. |
+| 52 | AutoFill from Contacts | System AutoFill menu (Preview does this well on macOS 14.2+) | later | Needs the Contacts permission. |
+| 53 | Run form JavaScript | Setting, on | skip | PDFKit doesn't run it, and it's a security surface. Note it in the README. |
+| 54 | Export/import form data | Extract Form Data (needs an account) | later | |
+
+### Pages and documents
+
+| # | Feature | How Nitro does it | Priority | Notes for us |
+|---|---|---|---|---|
+| 55 | Reorder pages | Drag thumbnails in the sidebar | **must** | Multi-select + drag, and also ⌥⌘↑/↓ "Move Page Up/Down" so it works without a mouse. |
+| 56 | Rotate pages | ⌘R right / ⇧⌘R left (View menu) | **must** | Applies to the selected thumbnails, otherwise the current page. We use ⌘L / ⌘R like Preview. |
+| 57 | Delete pages | Thumbnail context menu, Delete | **must** | ⌫ on selected thumbnails, undoable. |
+| 58 | Insert pages from a file | File > Insert… ⇧⌘I, after the current page. Or drag a PDF/image from Finder onto thumbnails at the drop point. | **must** | Both. Images become pages sized to fit Letter/A4 by locale. |
+| 59 | Combine several files into one | Drag thumbnails between windows, or the "Combine PDFs" AppleScript | **must** | **File > Combine Files…**: an ordered list sheet (add, drag to reorder, remove), then Combine creates a new untitled document. Preview has nothing like it. |
+| 60 | Extract pages to a new file | Thumbnail context menu | **must** | "Extract Selected Pages…" creates a new untitled document. Dragging thumbnails to Finder makes a PDF file there (should). |
+| 61 | Split into files | AppleScript: one file per page | should | "Split Document…": every page, every N pages, or at each top-level outline entry. Writes into a chosen folder as `name 1–4.pdf`… |
+| 62 | Interleave odd/even scans | AppleScript "Merge Every Other" | should | Tiny code, solves a real duplex-scanning pain. Option in Combine: "Interleave (front and back scans)", with the second file reversed. |
+| 63 | Reverse page order | Article in the guide | should | Pages > Reverse Order. |
+| 64 | Insert blank page | ⌥⌘B, ⌥⇧⌘B again | should | Same size as the current page. |
+| 65 | Crop pages | Crop Page/Document to Selection | later | Needs a crop-box UI. |
+| 66 | Images and scans to PDF | Opens images, Import from Scanner, Import from iPhone | should (images) / later (scanner, iPhone) | Opening a JPEG/PNG/HEIC makes an untitled PDF. AppKit's Import from iPhone (Continuity Camera) menu item is nearly free: v1.1. |
+| 67 | New blank document, templates | ⌘N From Stationery, Blank, Portfolio | skip | Not our job. |
+| 68 | Create from HTML/Office | File > New > From HTML; opens .docx | skip | Out of scope. |
+| 69 | Portfolios | | skip | Rare, poorly supported elsewhere. |
+
+### Saving, exporting, protecting
+
+| # | Feature | How Nitro does it | Priority | Notes for us |
+|---|---|---|---|---|
+| 70 | Save, autosave, versions, revert | Autosave and versions on (setting), Revert To, Duplicate ⇧⌘S, Rename, Move To | **must** | Standard document model. See Open question 1 about autosave in place. |
+| 71 | Undo/redo everything | ⌘Z / ⇧⌘Z | **must** | Every annotation, page and form action is undoable, including page moves. |
+| 72 | Export flattened PDF | File > Export > Flattened PDF… and Mail Document > Flattened | **must** | "Export Flattened Copy…": annotations, signatures and form values are baked in (P7). Never in place. |
+| 73 | Export pages as images | Export JPEG/PNG/TIFF | should | Per page, chosen DPI, into a folder. |
+| 74 | Export text | Plain text / Rich text | should (plain text) | `PDFDocument.string`. |
+| 75 | Export to Word/Excel/PowerPoint | Export menu | skip | Out of scope (conversion engine). |
+| 76 | PDF/A export and lock | 8 PDF/A variants. Lock PDF/A on open (on). | skip | PDFKit can't produce conformant PDF/A. We do warn when saving over one (Edge cases). |
+| 77 | Reduce file size | Create Optimized PDF… | later | Squish/PDF Squeezer territory. PDFKit has `.optimizeImagesForScreenOption` / `.saveImagesAsJPEGOption` (13.4+) if we add a quick option later. |
+| 78 | Open password-protected PDFs | File > Enter Password… | **must** | Unlock sheet. Respect owner permissions (no annotate/print when disallowed) and explain why. |
+| 79 | Add password / permissions | Inspector > Document Permissions ⌥⌘4 | should | PDFKit write options (user/owner password, `PDFAccessPermissions` on 12+). In the Export sheet. |
+| 80 | Document info / metadata | Inspector > Document Info ⌥⌘3 | should | View/edit title, author, subject, keywords. "Remove metadata" is also part of redaction (85). |
+| 81 | Share / mail | Share menu, Mail Document (regular / flattened) | should | `ShareLink`/`NSSharingServicePicker`, with an option to share a flattened copy. |
+| 82 | Cloud upload, iCloud integration, accounts | Account menu, Send for Signature, Upload | skip | Files in iCloud Drive just work as files. No accounts. |
+
+### Redaction
+
+| # | Feature | How Nitro does it | Priority | Notes for us |
+|---|---|---|---|---|
+| 83 | Redact a text selection or a drawn area | Select text or draw a rectangle, then Format > Redact Text > **Block** (black) or **Erase** (blank). Applied immediately. | **must** | Our flow separates *mark* from *apply* (see Flow 6). Marks are reversible, autosave can't apply them, and Apply writes a **new file** by default. |
+| 84 | Find and redact | ⇧⌘F: search, then redact the results | **must** | Search terms, case and whole-word options. A list of hits with checkboxes (all on), each with page and context. "Mark Selected". This is the headline feature Preview lacks. |
+| 85 | Scrub what search can't see | Nitro's guide says Find and Redact **doesn't** touch metadata. You clear it by hand in the Inspector. | **must** | Apply also: removes annotations and form fields that overlap a mark, strips redacted terms from annotation contents and outline titles, and offers "Remove document metadata" (on by default). |
+| 86 | Verify the result | Not offered | **must** | P5. Report: "12 areas on 5 pages removed. Verified: no redacted text remains." On failure, rasterize that page (P6) and say so. |
+| 87 | Erase style (white box) | Format > Redact Text – Erase | later | Same machinery, white fill. |
+| 88 | Pattern redaction (emails, phone numbers, card numbers) / AI "smart redact" | Smart Redact (AI, account) | later (patterns) / skip (AI) | Regex presets are a natural v1.1 on top of 84. |
+
+### OCR
+
+| # | Feature | How Nitro does it | Priority | Notes for us |
+|---|---|---|---|---|
+| 89 | OCR a page/document into a searchable text layer | Edit > OCR (page/document). Prompts when opening a scanned document (on). OCRs on text selection over a scan (on). About 20 languages, extra ones downloadable. MRC compression "Better Quality". | later (v1.1) | Vision is accurate and fast once warm (P9), but writing the invisible text layer is our own code, and `.saveTextFromOCROption` didn't work in our test (P8). Spike first. See Open question 3. |
+| 90 | Copy text from a scan without saving OCR | (Nitro does it by OCRing on selection) | should | Cheap with Vision: "Copy Text from Page" on an image-only page puts recognized text on the clipboard. Live Text in the canvas would be nicer but isn't PDFView-native. |
+| 91 | Rotate & deskew | OCR setting (on), Edit > OCR > Rotate & Deskew | later | |
+| 92 | Clear OCR layer, view OCR layer | ⌃⌘O, ⇧⌘O | skip | Power-user forensics. |
+| 93 | Batch OCR many files | File > OCR Files… | skip | Not our job in v1. |
+
+### Editing content and other
+
+| # | Feature | How Nitro does it | Priority | Notes for us |
+|---|---|---|---|---|
+| 94 | Edit existing text, fonts, find and replace | Edit tool ⌘1, Correct Text, Find and Replace ⌥⌘F, Format menu | skip | Out of scope. PDFKit can't edit content streams, and reviewers say even Nitro's version is weak. |
+| 95 | Edit/crop/adjust existing images, make transparent | Edit menu | skip | Out of scope (except our signature background knockout). |
+| 96 | Add images to a page | Drag an image in | later | Comes almost free after image signatures. |
+| 97 | Inspector (object properties) | ⌥⌘I | — | Folded into 34 and 80. |
+| 98 | Scripts menu, AppleScript, JavaScript console | Scripts menu, AppleScript dictionary | skip | App Intents (Combine, Extract Pages, Flatten) for Shortcuts are **later**. |
+| 99 | Knowledge Assistant (AI help chat), table/form extraction (AI, account) | Help menu, File > Extract | skip | Network, accounts. |
+| 100 | Update checks, beta channel, anonymous profile | Update pane (not in the Setapp build) | skip | Slopapp release pipeline. |
+| 101 | Window tiling submenu | Window > Move & Resize (system) | — | Free from macOS. |
+
+## Where v1 must beat Preview (and where it doesn't try)
+
+Preview already reads, highlights, adds notes, shapes and text boxes, signs (trackpad/camera),
+fills forms with AutoFill, reorders/rotates/deletes pages by dragging thumbnails, and has a
+one-box-at-a-time Redact tool (since Big Sur). Duplicating that adds nothing. v1 has to be
+clearly better at a few everyday jobs:
+
+| Job | Preview today | Paper v1 |
+|---|---|---|
+| **Redact** | One drawn box at a time. No search. No verification. Independent tests found it leaves hidden or off-page text and edge fragments behind. Metadata isn't touched. | Mark by search (every occurrence), text selection or area. Review the list. Apply to a **new file**. Overlapping notes, fields and metadata are scrubbed. **Verified** with a report. |
+| **Combine and split** | Possible only by dragging thumbnails between windows. Easy to drop pages in the wrong document. No split. | Combine Files… (ordered list, interleave option). Extract selected pages. Split by every N pages or by outline. Drag thumbnails to Finder. |
+| **Flatten** | No command. The workaround is Print > Save as PDF. | Export Flattened Copy… and Share Flattened. Annotations, signatures and form values are baked in. |
+| **Tools from the keyboard** | Markup toolbar, mostly mouse | ⌘1–⌘9 pick tools, Esc returns to Select. Every page action is in a **Pages menu** with shortcuts. |
+| **Saving that doesn't surprise** | Edits land in the original automatically. Destructive results (redaction) also go into the original. | Normal document saving for annotations (see Open question 1). Redaction and flattening **always** create a new file unless the person explicitly chooses to replace. |
+| **Reading notes out** | Highlights & Notes sidebar, no export | Annotations list + Copy Highlights & Notes as Markdown (should) |
+
+Not trying to beat Preview at: image viewing, Quartz filters, AutoFill from Contacts, camera
+or iPhone signatures, dark page mode. Those are later or never.
+
+## Key flows
+
+### Flow 1: open and read
+1. Double-click a PDF where Paper is the default, or use Open With > Paper, drag onto the Dock
+   icon, or ⌘O in Paper. Launching Paper with no document shows the Open panel (standard
+   document-app behavior). Recent files are in File > Open Recent.
+2. The window opens at the last size, **fit width** (Nitro defaults to fit page. Fit width
+   reads better on wide Mac screens. A setting). The sidebar shows Thumbnails. It reopens at
+   the last page viewed for this file.
+3. Scroll is continuous. The toolbar shows the page "3 of 40" (editable) and zoom. ⌥⌘G focuses
+   the page field.
+4. ⌘F focuses the search field in the toolbar. Return searches. Results appear in the sidebar
+   as rows (page number + a line of context). ⌘G / ⇧⌘G step through them. Matches are
+   highlighted on the page. Esc clears.
+5. The sidebar switches with ⌥⌘1 (hide), ⌥⌘2 Thumbnails, ⌥⌘3 Outline, ⌥⌘4 Annotations
+   (Preview's numbering, so Mac users' muscle memory works).
+
+### Flow 2: highlight and annotate
+1. With the Select tool (default), select text. A small floating bar appears over the
+   selection: 5 highlight colors, underline, strike, note, copy. One click applies. This
+   mirrors how people actually work: select, then decide.
+2. Or pick the Highlight tool (⌘2, or the toolbar). Every drag across text highlights it until
+   Esc. The color choice is remembered.
+3. ⌘4 Text box: click to place, type, Esc or a click outside ends editing. ⌘5 Note: click to
+   drop, type in a popover.
+4. ⌘6 Shapes (the dropdown picks rectangle, oval, line, arrow). ⌘3 Draw (freehand).
+5. Clicking an annotation with the Select tool selects it: handles, a contextual style strip
+   (color, fill, width, font size), ⌫ deletes, arrows nudge. Everything is undoable.
+6. The document shows as edited. It's saved by autosave/⌘S (Open question 1).
+
+### Flow 3: sign
+1. Toolbar **Sign** (⌘8 opens its menu). The first time, the menu has only "New Signature…".
+2. The sheet has two tabs. **Draw**: a wide canvas with a baseline, draw with trackpad or
+   mouse, Clear, Done. **Image**: drop or choose a photo of a signature. We remove the light
+   background and crop to the ink, with a preview and a threshold slider. Optional "Initials"
+   kind.
+3. Done saves it to the local library and returns to the page with the signature under the
+   pointer. Click to place, drag the corner to resize (aspect locked), drag to move.
+4. "Today's Date" (should) in the same menu places a text box with the localized date.
+5. Sharing: File > Share > Flattened Copy, or File > Export Flattened Copy…, so the
+   signature can't be lifted.
+
+### Flow 4: fill a form
+1. Open the PDF. If it has interactive fields, a slim info bar says "This document has 14 form
+   fields" with **Highlight Fields** and **Next Field** (Tab works too).
+2. Type into fields. Checkboxes, radios and dropdowns work as PDFKit renders them.
+3. If there are no fields (a scan), the info bar doesn't appear. The Text tool (⌘4) types
+   anywhere, and the font size defaults to 11 pt so it fits typical form lines.
+4. Save. Or Export Flattened Copy… for the version you send.
+
+### Flow 5: page surgery (reorder, rotate, delete, insert, combine, extract, split)
+1. Thumbnails sidebar. Click, ⇧-click and ⌘-click select pages. ⌘A selects all when the sidebar
+   has focus.
+2. Drag to reorder (an insertion line shows where they'll land), or ⌥⌘↑/↓ to move them.
+3. ⌘L / ⌘R rotate the selection. ⌫ deletes it (undoable).
+4. Insert: drag a PDF or image from Finder onto the sidebar at the drop line, or Pages >
+   Insert from File… (⇧⌘I) inserts after the current page.
+5. **Combine Files…** (File menu, also the empty-launch Open panel's accessory): a sheet with an
+   ordered list of files (Add…, drag in from Finder, drag to reorder, ⌫ to remove), an
+   "Interleave pages" checkbox for front/back scans, then **Combine**. A new untitled document
+   opens.
+6. **Extract Selected Pages…** (⌥⌘E): a new untitled document with copies of those pages.
+   The original is unchanged. Dragging thumbnails to Finder writes a PDF there.
+7. **Split Document…**: every page / every N pages / at top-level outline entries. Choose a
+   folder. Files are named `<name> 1.pdf`… or by outline title. Show in Finder when done.
+
+### Flow 6: redact
+1. **Tools > Redact** (⌘9). With the tool active, a drag over text marks those words and a drag
+   in empty space marks a rectangle (images, signatures). Marks show as a red outline with a
+   translucent hatch, clearly "pending", and can be selected and deleted like annotations.
+2. **Find and Redact…** (⇧⌘F): a sidebar panel with a search field (case-sensitive and
+   whole-word options). Results come back as a checklist with page and context. **Mark All** /
+   **Mark Selected**. Marks appear on every hit.
+3. The window shows "7 marks on 3 pages · Apply Redactions…" in an info bar. Saving the
+   document keeps the marks pending and the content intact (P4: we don't store them as
+   `Redact` annotations).
+4. **Apply Redactions…** opens a sheet: what will happen in one sentence ("Marked text and
+   images are permanently removed and replaced with black boxes"), a checkbox "Remove
+   document metadata (title, author, keywords)" (on), and a destination: **Save as New File**
+   (default, named `<name> (redacted).pdf`) or Replace Original (a second confirmation, since
+   it can't be undone).
+5. Apply runs off the main thread. Pass 1 writes `Redact` annotations, pass 2 draws black boxes
+   and burns them in. It also removes overlapping annotations and widgets, scrubs terms from
+   notes and outline titles, and clears metadata if chosen.
+6. **Verify** (P5) on the written data. On success: a sheet saying "Removed 7 areas on 3 pages.
+   Checked: none of the redacted text can be found in the new file." with **Open** and **Show in
+   Finder**. If a page fails verification, it's rasterized (P6) and the report says "Page 4 was
+   converted to an image to make sure the text is gone; its text can no longer be selected."
+   If that also fails: an error, and nothing is written.
+
+### Flow 7: export
+- **Export Flattened Copy…** (⌥⇧⌘S is taken by Save As, so this is in File > Export with no
+  default shortcut).
+- **Export as Images…**: format (PNG/JPEG/HEIC), resolution (72/150/300 dpi), pages (all /
+  selection). Writes into a folder.
+- **Export Text…** (should): plain `.txt`.
+- **Password** (should): in the standard Save/Export panel accessory, "Require password to
+  open", plus "Allow printing/copying" checkboxes.
+
+### Flow 8: first run
+1. No onboarding, no welcome window. First launch shows the Open panel, like TextEdit.
+2. No permission prompts, ever, for core features (see Permissions).
+3. Paper does **not** ask to become the default PDF app. Settings > General has a "Make Paper
+   the default PDF app" button that calls `NSWorkspace.setDefaultApplication` (macOS 12+)
+   when the person chooses to.
+
+## Settings inventory
+
+Nitro's panes (values seen on this Mac; they look like factory defaults but may not be):
+
+| Setting | Default seen | Options | Keep? |
+|---|---|---|---|
+| Define 100% scale as | 1 point = 1 screen pixel | or size on screen = size on printout | skip (PDFView's default is fine) |
+| Initial window size | Screen height | page height, screen height, screen width | skip (remember the last size) |
+| Initial sidebar mode | Thumbnails | hidden, thumbnails, TOC, annotations, attachments, form fields | skip (remember the last mode) |
+| Default view | Single page | single, facing | skip (View menu, remembered) |
+| Default zoom | Fit to Page | 100%, 150%, fit page, fit width | **keep** ("Open documents at": Fit Width / Fit Page / Actual Size) |
+| Remember last page viewed | on | | **keep** (on) |
+| Enable autosave and versions | on | | depends on Open question 1 |
+| Show Home Screen on launch | on | | skip |
+| Lock PDF/A documents when opened | on | | skip (warn instead) |
+| Enable JavaScript | on | | skip (never run) |
+| Enable clicking on detected links | on | | skip |
+| Restore all warning alerts (button) | | | keep if we add "don't ask again" anywhere |
+| Default font for text tools | Helvetica 12 | font panel | **keep** as "Text box font size" (system font) |
+| Keyboard increment | 1 pt | | skip (1 pt, ⇧ = 10 pt) |
+| Gridline every / units / show guides | 18 pt / points / on | | skip |
+| Automatically switch selection tools | on | | skip (always smart: text under the pointer selects text, otherwise marquee) |
+| Keep tools selected after use | off (double-click to lock) | | **keep the behavior**, not the setting: tools stay active until Esc (Open question 4) |
+| Lock images | Large enough to fill the page | always, never | skip |
+| Custom highlight colors | 3 wells | colors | later |
+| Add name to annotations / Name | on / Mac user's full name | | **keep** ("Author name for notes", default `NSFullUserName()`) |
+| Disable missing font warning | off | | skip |
+| OCR: prompt on scanned docs, OCR on selection, languages, sounds, deskew, MRC level | on / on / English / sounds / on / Better Quality | | later (with OCR) |
+
+Ours (SlopSettings, 480 pt, grouped form): **General**: Open documents at (Fit Width),
+Reopen at last page (on), Author name for notes, Make Paper the default PDF app (button).
+**About**. Nothing else in v1.
+
+## Menus and shortcuts
+
+Nitro's main menu (observed, abridged to what's relevant):
+
+- **App**: About, Settings ⌘, , Account (Log In), Services, Hide, Quit.
+- **File**: New (From Selection ⇧⌘N, From Stationery ⌘N, Blank, Portfolio, From HTML), Open ⌘O,
+  Open Recent, Close ⌘W, Close All ⌥⌘W, Save ⌘S, Save As ⌥⇧⌘S, Duplicate ⇧⌘S, Rename, Move To,
+  Create Optimized PDF, Export (Word, PowerPoint, Excel, JPEG, PNG, TIFF, Rich Text, Plain
+  Text, Flattened PDF, PDF/A ×8), Send for Signature, Revert To, Enter Password…, Mail
+  Document (Regular / Flattened), Insert… ⇧⌘I, Import from Scanner, Import from device, Share,
+  OCR Files…, Page Setup ⇧⌘P, Print ⌘P.
+- **Edit**: Undo/Redo, clipboard, Select All, Edit Note ⌘', Delete Note, Find (Find ⌘F, Find and
+  Replace ⌥⌘F, **Find and Redact ⇧⌘F**, Find and Highlight ⌥⇧⌘F, Next ⌘G, Previous ⇧⌘G, Use
+  Selection ⌘E, Jump to Selection ⌘J), Insert Blank Page ⌥⌘B / Again ⌥⇧⌘B, Crop Page/Document
+  to Selection, Create Links from URLs, Headers/Footers/Page Numbers, Page Labels, Line
+  Numbers, OCR (page, document, clear layer ⌃⌘O / ⌃⌥⌘O, deskew), Create Form Fields, Reset
+  Form, Attachments, Portfolio, Table of Contents (add ⇧⌘A, child, promote/demote, expand),
+  Bookmarks, Watermark, image tools (Make Transparent, Crop, Adjust, Resample, Deskew), Wrap
+  Text, Speech, AutoFill.
+- **View**: tab bar, Single/Facing/Continuous, Hide Editing Bar ⇧⌘E, OCR Layer ⇧⌘O, Compare
+  Documents ⌘K, Actual Size ⌘0, Zoom In ⌘+, Zoom Out ⌘−, Zoom to Fit ⌥⌘0, Zoom to Width ⌥⌘9,
+  Highlight Links, Highlight Form Fields, Page Numbers, Right-to-Left, Start with Cover,
+  Rotate Left ⇧⌘R / Right ⌘R, Hide Sidebar ⇧⌘D + sidebar modes, Hide Toolbar ⇧⌘B, Customize
+  Toolbar, Full Screen.
+- **Format**: Font (⌘T, ⌘B/I/U, sizes, kern, ligature, baseline, copy/paste style ⌥⌘C/⌥⌘V),
+  Text (alignment, ruler), Highlight (swatches, custom colors, Underline, Cross Out, Squiggle,
+  Remove ⌥⇧⌘0, **Redact Text – Block ⌃⌥⇧⌘B**, Redact Text – Erase), Show Colors ⇧⌘C.
+- **Go**: next/previous/first/last page, Go to Page ⌥⌘G, in split view, Back ⌘[, Forward ⌘].
+- **Tools**: Edit ⌘1, Select Text ⌘2, Select ⌘3, Hand ⌘4, Rectangle Selection, Measurement,
+  Highlight ⌘5, Text ⌘6, Scribble ⌘7, Note ⌘8, Comment ⌘9, Cloud, Link, Attach, Sound,
+  Polygon, Rectangle, Oval, Line, Rounded Rectangle, Callout, the 7 form field tools.
+- **Arrange**: z-order, Lock ⌘L, Unlock All ⇧⌘L, snap/grid, tab order.
+- **Window**: system tiling, Split, tabs, Review Tools ⌘Y, JavaScript Console ⌥⌘Y, Scripts ⌥⌘J,
+  Inspector ⌥⌘I, Magnifier ⌥⌘M, Alignment ⌥⌘1, Form Element Properties ⌥⌘2, Document Info
+  ⌥⌘3, Document Permissions ⌥⌘4.
+- **Help**: Help, Knowledge Assistant ⌃⌘/, home page, support, iOS app, legal.
+- Plus a **Scripts** menu (script icon) with "Populate Scripts Menu" and "Open Scripts Folder".
+
+**Paper's proposed menus** (standard items omitted; everything below has a toolbar or context
+menu twin):
+
+- **File**: Open ⌘O, Open Recent, **Combine Files…** (no shortcut), Close ⌘W, Save ⌘S, Duplicate ⇧⌘S, Rename, Move To, Revert To, **Export
+  Flattened Copy…**, **Export as Images…**, Export Text…, Share (Original / Flattened Copy),
+  Print ⌘P.
+- **Edit**: Undo/Redo, Cut/Copy/Paste/Delete, Select All, Find ⌘F, Find Next ⌘G, Find
+  Previous ⇧⌘G, Use Selection for Find ⌘E, **Find and Redact…** ⇧⌘F, Reset Form…, Copy
+  Highlights & Notes (should).
+- **View**: Single Page, Continuous, Two Pages, Book Mode (cover), Actual Size ⌘0, Zoom In ⌘+,
+  Zoom Out ⌘−, Zoom to Fit ⌥⌘0, Zoom to Width ⌥⌘9, Hide Sidebar ⌥⌘1, Thumbnails ⌥⌘2,
+  Outline ⌥⌘3, Annotations ⌥⌘4, Highlight Form Fields, Show/Hide Toolbar ⌥⌘T, Full Screen ⌃⌘F.
+- **Go**: Next Page, Previous Page, First Page ⌥↑/Home, Last Page ⌥↓/End, Go to Page… ⌥⌘G,
+  Back ⌘[, Forward ⌘].
+- **Tools** (number keys pick directly, Esc returns to Select): Select ⌘1, Highlight ⌘2,
+  Underline/Strike (via the highlight style), Draw ⌘3, Text Box ⌘4, Note ⌘5, Shapes ⌘6
+  (last used shape), Rectangle/Oval/Line/Arrow (unbound), ⌘7 left free, Sign ⌘8 (opens the
+  signature menu), Redact ⌘9. Highlight color submenu with the 5 colors.
+- **Pages** (new menu; Nitro scatters these): Rotate Left ⌘L, Rotate Right ⌘R, Delete Pages ⌫
+  (when thumbnails are focused) / ⌘⌫, Move Up ⌥⌘↑, Move Down ⌥⌘↓, Insert from File… ⇧⌘I,
+  Insert Blank Page ⌥⌘B, **Extract Selected Pages…** ⌥⌘E, **Split Document…**, Reverse Order,
+  **Combine Files…** (also here), **Apply Redactions…**.
+- **Window**: system. **Help**: Paper Help (opens the README).
+
+## Permissions and system integration
+
+- **No permissions needed** for any v1 feature: file access comes through the Open panel,
+  document opening and drag and drop (sandbox-friendly with `user-selected.read-write`).
+  Saving split output into a folder uses the folder the person picked in the panel.
+- **Later**: Contacts (AutoFill), Camera (signature from camera / Continuity Camera import).
+  Both through `PermissionGate`, only when chosen.
+- **Default app**: registered as an Editor for `com.adobe.pdf` with `LSHandlerRank` =
+  *Alternate*, so it shows up in Open With without taking over. An explicit button in Settings
+  makes it the default.
+- **Images**: opens `public.png`, `public.jpeg`, `public.heic`, `public.tiff` as untitled PDFs
+  (should).
+- **Services / Shortcuts**: none in v1. **Later**: App Intents "Combine PDFs", "Extract Pages",
+  "Flatten PDF", "Redact Text in PDF" (powerful for automation, and our core already supports
+  them). A Finder Quick Action "Combine in Paper".
+- Nitro integrates: Nitro account login (Account menu, `com.gonitro.*` URL schemes for auth),
+  cloud e-sign, update checks, an AppleScript dictionary and Scripts menu, scanner import, iOS
+  app handoff. We skip all of these.
+
+## UX patterns worth adopting
+
+- **Tool groups that remember the last choice**: each toolbar group is a button plus a
+  dropdown. The button repeats the last tool used from that group, so the common case is one
+  click. Our Shapes and Highlight buttons work the same way.
+- **Numbered tool shortcuts** (⌘1–⌘9) give every tool a key. It matches our design system's
+  "number keys pick directly".
+- **Select first, then act**: selecting text and then choosing highlight/underline/redact works
+  everywhere in Nitro (Format menu). We make it visible with a small bar over the selection.
+- **Search results as a list in page order**, with context, rather than a bare "3 of 12" counter.
+- **"Find and Redact" and "Find and Highlight"** reuse the same search. One search, many
+  actions. We do Find and Redact in v1. Find and Highlight is a natural extra (should, if
+  cheap).
+- **Flatten as a share option** ("Mail Document > Flattened"): the moment you send is when you
+  want it flattened.
+- **Interleave front/back scans**: a tiny feature that saves real pain.
+- **A sticky tool, with an explicit way out**: Nitro makes tools one-shot unless you double-click.
+  We'll keep tools active until Esc, because people highlight several passages in a row.
+- **Annotations carry an author name** taken from the Mac account, so a reviewer's notes are
+  attributed in Acrobat.
+- **Thumbnails as the page-surgery surface** with a size slider. Ours adds a Pages menu so it
+  works without a mouse.
+
+## What we won't copy, and what we'll do better
+
+- **Not copying**: the name, icons, the home-screen greeting, wording, the two-row toolbar
+  styling, the Library palette art, stamps, sounds, the account/upsell flows (Log In, Get
+  Signatures, AI assistant).
+- **Doing better**:
+  - **No account, no subscription, no network.** The loudest complaints about Nitro since it
+    bought PDFpen are forced login activation, a $140–180/yr subscription, double charges,
+    and support that doesn't answer (App Store reviews, Michael Tsai's blog, BBB). Paper is
+    local, free, and never phones home.
+  - **Redaction you can trust and check.** Nitro's own guide says Find and Redact leaves
+    metadata for you to clear by hand. Preview's tool was shown to leave hidden text and edge
+    fragments. We scrub overlapping notes, fields and metadata, and we verify.
+  - **Destructive results never overwrite by surprise.** Redaction and flattening write a new
+    file by default (Preview overwrites. Nitro applies redactions to the open document).
+  - **Page tools in one place** (a Pages menu) instead of four menus plus AppleScripts.
+  - **Simpler chrome**: one toolbar row, plus a contextual style strip only when an annotation
+    or text box is selected. Nitro's second row is mostly disabled controls.
+  - **No home window** between launch and the document.
+  - **Native and fast**: launch < 300 ms, lazy thumbnails, no Electron or web views.
+  - **Highlighting keeps text crisp**: an old PDFpen review said its highlights washed out the
+    text. PDFKit's highlight blend mode handles this, so check it in light and dark mode.
+  - **Honest scope**: we don't pretend to edit text. Reviews say Nitro's text editing is "worse
+    than free apps", so a half-done version would hurt more than help.
+
+## Edge cases
+
+The build and test steps must cover these. Most need a generated fixture PDF in the unit
+tests.
+
+- **Huge documents**: a 1,000-page, 300 MB scan. Thumbnails render lazily and off the main
+  thread. Search is cancellable with progress. Memory stays near budget while scrolling.
+  Combine/split of large files streams page by page with progress.
+- **Image-only (scanned) PDFs**: search finds nothing, so say "This document has no text to
+  search (it looks like a scan)". The redaction text tool falls back to area marks. Find and
+  Redact explains it can't find text in scans. With OCR later, offer it.
+- **Encrypted PDFs**: a user password shows the unlock sheet. Owner-restricted documents
+  (no modify/annotate/print) open read-only with an info bar saying why. Never strip
+  protection silently.
+- **Digitally signed PDFs**: any save invalidates the signature. On first edit, show an info
+  bar: "Editing will invalidate this document's digital signature. Changes will be saved as a
+  copy." Then force Save As.
+- **PDF/A files**: saving breaks conformance. Info bar on first edit, same Save As approach.
+- **PDFs with existing unapplied `Redact` annotations** (from Acrobat): PDFKit would apply them
+  on our next save (P4). On open: "This document has 3 pending redactions from another app.
+  They'll be applied when you save." Offer Review / Remove Them.
+- **XFA (dynamic) forms**: PDFKit shows the "please wait / upgrade your viewer" page. Detect
+  it and explain that this form needs Adobe Reader.
+- **Form JavaScript** (calculated totals, validation) doesn't run, so totals won't update. The
+  README says so. Consider an info bar when a document has JS actions.
+- **Merging two copies of the same form**: fields with the same name share a value, so filling
+  one fills both. On Combine, warn when field names collide, and offer to flatten the inserted
+  copy.
+- **Rotated pages** (`/Rotate 90`) and **crop box ≠ media box**: annotation, signature and
+  redaction rectangles must be converted to page space correctly. Test redaction on a rotated
+  page and on a page whose crop box hides content (content outside the crop box isn't visible,
+  so a visual mark can't reach it. "Remove hidden content outside the visible page" is a later
+  option).
+- **Mixed page sizes** in combine/interleave (A4 + Letter, landscape scans): keep each page's
+  size. Thumbnails use the right aspect.
+- **Saving without edits must not damage the file**: there's history of PDFKit/Preview saves
+  dropping OCR layers (ScanSnap, ABBYY) and stripping visible signatures, and of saves
+  ballooning file size. Test: open an invisible-text (OCR-like) fixture, add one highlight,
+  save, then the hidden text must still be extractable and the size must stay within ~1.2×.
+  Opening and closing with no edits must not write at all.
+- **File changed on disk** by another app while open, **iCloud Drive placeholders** (not yet
+  downloaded), **read-only locations** (mail attachments, DMG): standard document behavior,
+  where saving offers Duplicate.
+- **Undo** across page moves, rotations, deletes, combined inserts and annotation edits, after
+  autosave too. Redaction apply isn't undoable in place, which is why it writes a new file.
+- **Non-Latin text**: search, highlight and redaction for CJK, Arabic/Hebrew (RTL) and
+  accented text. Text boxes and signature names in any script. Redaction whole-word matching
+  for CJK, where there are no spaces.
+- **Ligatures and split words**: "ﬁnance" (a ligature glyph), words hyphenated across lines, and
+  text drawn as separate glyph runs. Find and Redact may miss these, so the hit count is shown
+  and the person can add area marks. The verifier searches the normalized text.
+- **Fonts**: free-text annotations use the system font. Check they render the same in Acrobat
+  and Chrome (appearance streams) by reopening the exported file in another viewer.
+- **Dark mode**: chrome follows the system, pages stay white. Highlight colors stay legible.
+  Light and dark both get screenshotted.
+- **Multiple displays / Retina changes**: thumbnails re-render at the right scale.
+- **Accessibility**: VoiceOver can name every toolbar control, every thumbnail ("Page 3 of
+  12, selected") and every annotation in the Annotations list. Tools work from the keyboard.
+  Reduce Motion: no animated page moves.
+- **Sleep / quit mid-task**: Combine, Split and Apply Redactions write to a temp file and move
+  it into place only at the end, so a quit leaves no half-written output.
+- **Empty and weird inputs**: a 0-page PDF, a corrupt/truncated file ("Couldn't open X. It may
+  be damaged."), a non-PDF with a `.pdf` extension, a 1×1 pt page, a 200-inch page.
+
+## Our v1 scope
+
+App shape: a **document window app**. It's a new archetype for Slopapp (closest to
+"browser/library window"), so see Open question 2. `NavigationSplitView`-style sidebar
+(Thumbnails / Outline / Annotations / Search results), a `PDFView` canvas (AppKit,
+wrapped), one toolbar row, a contextual style strip, standard document saving. Core logic
+(page ops, combine/split/interleave, flatten, redaction apply + verify, signature
+background knockout, search-to-marks) lives in `PaperCore` behind protocols, with tests on
+generated fixture PDFs.
+
+Must-haves (the test step walks each item):
+
+- [x] **Open**: ⌘O, Open Recent, Finder Open With and Dock drop open PDFs. Password PDFs prompt and unlock. Damaged files show a clear error.
+- [x] **Read**: continuous and single-page modes. Zoom in/out/actual/fit page/fit width. Go to page (⌥⌘G, page field). Back/forward. Links work.
+- [x] **Sidebar**: Thumbnails (lazy) and Outline (hidden when there's none), switched with ⌥⌘1–3.
+- [x] **Search**: ⌘F, a results list with page + context, ⌘G/⇧⌘G, matches highlighted. A clear message on scans.
+- [x] **Text markup**: highlight (5 colors), underline, strike-through on selected text, from a selection bar or a sticky tool.
+- [x] **Annotations**: text box, sticky note, rectangle, oval, line/arrow, freehand. Select, move, resize, recolor, change width/size, delete. All undoable.
+- [x] **Tools from the keyboard**: ⌘1–⌘9 per the menu plan, Esc back to Select. Every tool is in the Tools menu.
+- [x] **Sign**: draw a signature, save it (several allowed), place it and resize it on any page.
+- [x] **Forms**: fill AcroForm text fields, checkboxes, radios and dropdowns, with Tab order. Values survive save + reopen in Preview.
+- [x] **Pages**: reorder by drag and by ⌥⌘↑/↓, rotate ⌘L/⌘R, delete, insert from file (menu and Finder drop) on selected thumbnails. All undoable.
+- [x] **Combine Files…**: an ordered list makes a new document.
+- [x] **Extract Selected Pages…**: a new document. The original is unchanged.
+- [x] **Save**: standard document saving (per Open question 1), Revert To, Duplicate. Saving keeps an OCR-like text layer intact (edge-case fixture).
+- [x] **Export Flattened Copy…**: annotations, signatures and form values are baked in, with 0 annotations left (checked by reopening).
+- [x] **Redact – mark**: Redact tool marks text and areas. Find and Redact marks all hits from a reviewable list. Marks are reversible and **don't change content on save** (P4).
+- [x] **Redact – apply**: Apply Redactions… writes a new file by default. Content under marks is removed (text, invisible text, image pixels). Black boxes. Overlapping annotations and fields removed. Metadata cleared when checked.
+- [x] **Redact – verify**: the report confirms nothing redacted is extractable (checked independently with `pdftotext` in the walkthrough). Rasterize fallback per page. No write if verification fails.
+- [x] **Print** ⌘P.
+- [x] **Settings**: General (open-at zoom, reopen at last page, author name, Make default app button) + About.
+- [x] **Within budgets** (first window is borderline, see Build notes): launch < 300 ms, idle memory < 120 MB with a 100-page document open, idle CPU < 0.2%.
+
+Should (in v1 if cheap, in this order): Split Document… · Interleave option in Combine ·
+Annotations sidebar + Copy Highlights & Notes as Markdown · Image signatures with background
+knockout · Today's date · Remove markup from selection · Two-page/book modes · Insert blank page ·
+Reverse order · Export as Images · Export Text · Password protect on export · Document info view/edit ·
+Share (original / flattened) · Highlight Form Fields + Next Field bar · Reset Form ·
+Copy Text from Page (Vision) on scans · Open images as PDFs · Remember last page · Window tabs/full screen ·
+Find and Highlight.
+
+**Explicitly out of scope for v1** (and why):
+
+- **Editing existing text or images** in the PDF (content-stream editing, font matching, reflow).
+  PDFKit can't do it, and a weak version is worse than none.
+- **OCR to a searchable PDF**: deferred to v1.1 after a spike (P8/P9). v1 only offers Copy
+  Text from Page as a should.
+- **Certificate-based digital signatures** and signature validation (PKI, PAdES).
+- **Conversion** to or from Word/Excel/PowerPoint/HTML, and **PDF/A** output.
+- **Creating form fields**, form JavaScript, form data export.
+- **Cloud e-sign requests, accounts, sync, AI features.**
+- Stamps, watermarks, headers/footers/page numbers, Bates numbering, crop, measure, compare,
+  attachments, portfolios, batch processing, AppleScript (some are later, see the inventory).
+
+## Open questions
+
+1. **Saving model.** (a) Standard autosave in place with versions (native, what Nitro does by
+   default, recoverable via Revert To), or (b) explicit ⌘S with "Edited" in the title and a
+   save prompt on close (what many Preview complainers want)? Recommendation: **(a)** for
+   annotations, forms and page edits, because it's the Mac document model and Versions makes
+   it safe. Redaction and flattening always write new files regardless. Owner's call.
+2. **New archetype.** Paper is a document app (many windows, `NSDocument`-based, closing a
+   window doesn't quit). The design system doesn't define this yet. OK to add a "document
+   window" archetype section to `docs/design-system.md` as part of the build? Recommendation:
+   AppKit `NSDocument` + `PDFView` with SwiftUI for the sidebar, sheets and inspector, because
+   SwiftUI's `DocumentGroup` fights with PDFKit's reference model and undo.
+3. **OCR in v1 or v1.1?** Vision recognition is easy. Writing a correct invisible text layer
+   (positions, rotation, keeping existing content) is roughly a day of careful work plus tests.
+   Recommendation: v1.1, with Copy Text from Page in v1.
+4. **Sticky tools.** Tools stay active until Esc (better for runs of highlights), unlike Nitro's
+   one-shot default. Confirm.
+5. **Redaction relies on undocumented PDFKit behavior** (P1). It's verified on macOS 27.2.
+   It needs re-checking on macOS 14 before we promise it. If it doesn't hold on 14 or 15,
+   options: (a) rasterize redacted pages on those versions (safe, loses text on those pages),
+   (b) raise Paper's floor to the first macOS where it holds. Recommendation: (a), with the
+   verifier deciding per page automatically.
+6. **Default PDF app**: Paper never asks to become the default, and Settings has a button. OK?
+7. **Size**: 20 must-have checklist items is at the edge of "one session". If it needs
+   trimming, the first cuts are Outline sidebar → should, freehand → should, Print → should
+   (Share covers most cases). Redaction, combine/extract and flatten stay: they're why Paper
+   exists next to Preview.
+
+## Couldn't explore (and why)
+
+- **Search, Inspector, Review Tools/Library and Find and Redact panels**: they're floating
+  panels that didn't appear in the Accessibility tree while Nitro was driven in the
+  background (even after `activate`), and we don't use the mouse. Their behavior is taken from
+  Nitro's Mac user guide.
+- **Thumbnail context menu** (delete/extract pages): needs a right-click (mouse). From docs.
+- **Annotating, signing, redacting inside Nitro**: not done on purpose (look, don't touch). The
+  library could contain the owner's saved signatures, and editing documents isn't read-only.
+- **The Editing settings pane** shows the owner's name in the annotation-author field. It was
+  read for structure only, and no screenshot was taken.
+
+## Sources
+
+- Nitro PDF Pro Mac user guide (index): https://www.gonitro.com/user-guide/mac
+- Redact text (Mac): https://www.gonitro.com/user-guide/mac/article/redacting-text
+- Preferences (Mac): https://www.gonitro.com/user-guide/mac/article/preferences
+- Combining and splitting: https://www.gonitro.com/user-guide/mac/article/combinepdfs
+- Basic signature: https://www.gonitro.com/user-guide/mac/article/signbasic
+- Library: https://www.gonitro.com/user-guide/mac/article/library
+- Work with forms: https://www.gonitro.com/user-guide/mac/article/fillforms
+- Sidebar: https://www.gonitro.com/user-guide/mac/article/sidebar
+- Mac release notes: https://help.gonitro.com/product-details/release-notes/mac
+- Mac App Store listing, version history and reviews: https://apps.apple.com/us/app/nitro-pdf-pro-edit-sign/id6477621772?mt=12
+- Setapp listing and reviews: https://app.setapp.com/nitro-pdf-pro
+- Michael Tsai, "PDFpen, Nitro, and Cleverbridge" (2024): https://mjtsai.com/blog/2024/10/03/pdfpen-nitro-and-cleverbridge
+- Michael Tsai, Preview/PDFKit save bugs: https://mjtsai.com/blog/2016/12/21/more-macos-preview-pdf-trouble and https://mjtsai.com/blog/2020/12/16/preview-in-big-sur-destroying-pdfs-again/
+- Eclectic Light, "How effective and safe is Preview's redaction tool?": https://eclecticlight.co/2020/12/11/how-effective-and-safe-is-previews-redaction-tool/
+- Macworld, redacting with Preview, Acrobat and PDFpen: https://www.macworld.com/article/344869/how-to-redact-text-in-a-pdf-with-the-preview-app-adobe-acrobat-and-pdfpen.html
+- Smile (PDFpen) comparison with Acrobat and Preview: https://smile.helpscoutdocs.com/article/227-how-does-pdfpen-compare-to-adobe-acrobat-and-preview
+- MacHow2 Nitro PDF Pro review: https://machow2.com/nitro-pdf-pro-for-mac-windows-review/
+- Apple Preview User Guide (forms, AutoFill): https://support.apple.com/guide/preview/prvw35725
+- PDFKit headers (macOS SDK): `PDFDocument.h` write options (`BurnInAnnotations`, `SaveTextFromOCR`, `SaveImagesAsJPEG`, `OptimizeImagesForScreen`), `PDFAnnotationUtilities.h` (`kPDFMarkupTypeRedact`), `PDFPage.h` (`initWithImage:options:`)
+
+## Owner decisions (2026-11-03)
+
+The open questions above were settled by the owner's defaults. What we did with each:
+
+1. **Saving model: standard autosave with Versions.** Annotations, form entries and page edits
+   autosave in place; File > Revert To reaches earlier versions. Redaction and flattening always
+   write **new files** (Replace Original needs a second confirmation and first stores the old
+   file as a version). Pending redaction marks are never `Redact` annotations: they're plain
+   Square annotations named `paper.redaction.*`, so no save can apply them (P4). A PDF that
+   already contains `Redact` annotations from another app gets them converted to pending marks
+   on open, with an info bar saying so, and the document isn't marked edited, so nothing is
+   saved before the person sees the notice. `data(ofType:)` also refuses to write while any
+   `Redact` annotation exists (defense in depth).
+2. **Document app archetype: yes.** Added "e. Document app" to `docs/design-system.md` §2.
+   AppKit `NSDocument` + `PDFView`, SwiftUI inside; closing the last window doesn't quit (so
+   Paper has its own small app delegate instead of `SlopAppDelegate`).
+3. **OCR: v1.1.** Copy Text from Page (Vision) also moved to v1.1 (see deferred list); it's
+   cheap but every hour went into making redaction verifiable.
+4. **Tools stay active until Esc (or V).** Built that way; the strip under the toolbar says so.
+5. **Redaction verifies itself on every run.** After pass 1 and pass 2 the output is reopened
+   and checked: no character centered inside a mark; each removed word occurs fewer times than
+   before; no annotation left except links; no outline title mentioning a removed word; and a
+   pixel comparison of every marked region before/after (content that looks the same survived).
+   Failing pages are rasterized with black boxes and checked again; if that fails, nothing is
+   written. Unit tests drive both paths with fakes (a remover that removes nothing, a rasterizer
+   that returns the page unchanged).
+6. **Default PDF app: never asked.** Registered as Editor with `LSHandlerRank` Alternate.
+   Settings > General has "Make Paper the Default" (calls `NSWorkspace.setDefaultApplication`).
+   Never clicked during testing.
+7. **20 must-haves kept** (none cut). Drag-to-reorder thumbnails and Finder drops are built but
+   couldn't be walked with synthetic input (see Build notes). The should-list was trimmed; what
+   moved to v1.1 is listed below.
+
+## Build notes (2026-11-03)
+
+### More PDFKit facts (found while building, macOS 27.2)
+
+| # | Fact | What we did |
+|---|---|---|
+| P12 | `PDFPage.characterBounds(at:)` indexes drift from `page.string` by the number of line breaks before the character. | The verifier gets character boxes from `page.selection(for: NSRange)` instead. |
+| P13 | PDFKit **doesn't write outline changes**: new outlines, relabeled or removed entries are all written as the original outline. | Redaction drops the whole outline (rebuilds the document from its pages) when a title contains a removed word, and says so in the report. Outline editing stays out of scope. |
+| P14 | `characterIndex(at:)` returns the *nearest* character even over an image. | "Is there text under the pointer" also checks that character's box. |
+| P15 | Since macOS 15, PDFView runs Vision on each visible page (`PDFPageAnalyzerV2`, form-field and table detection): ~100 MB and Neural Engine time per page, and it would add fields our undo/form tracking don't know. No public switch. | Turned off through PDFView's `documentAnalysisEnabled`/`formDetectionEnabled` when the setters exist (KVC, guarded by `responds(to:)`, no-op on 14). Footprint with a 100-page document went from 170–190 MB to 85 MB. |
+| P16 | Mouse events on pages go to PDFKit's internal document view, so `PDFView.mouseDown` overrides aren't called; text drags run in PDFKit's own tracking loop (local event monitors only see the mouse-down); and the split view's/title bar's click recognizers delay quick clicks to sibling overlay views. | Tools are driven from a window-level event monitor: on mouse-down it asks the canvas whether the current tool claims the point (drawing tools, Redact over non-text, annotations/handles in Select) and then owns the down/drag/up; otherwise PDFKit gets the click, and after the button is released Highlight/Redact apply to the selection and the selection bar appears. |
+| P17 | Annotations loaded from a file keep their `/AP` appearance stream; changing bounds or color doesn't regenerate it. | Every geometry/style edit removes `/AP` first so PDFKit redraws from the properties. |
+| P18 | PDFKit applies `Redact` annotations on write, so a "foreign redaction" fixture can't be made with PDFKit. | The fixture is a hand-written PDF. |
+| P19 | A mark overlapping an image edge leaves black (zeroed) image pixels next to white page: a "region must be one flat color" check wrongly rejects it and rasterizes the page. | Replaced by the before/after pixel comparison in decision 5. A unit test covers the straddling case. |
+
+### Gates
+
+- **Unit tests:** 96 tests in 15 suites (Swift Testing), all passing: text matching (case,
+  whole word, CJK), page ordering/interleave/split math, page ops (persisted after write),
+  redaction (marks don't change content on save, foreign `Redact` conversion, apply removes
+  text/invisible OCR text/image pixels, partial-word boxes, rotated pages, metadata, overlapping
+  annotations, outline drop, find-and-redact every occurrence, rasterize fallback, never-success
+  on a failed fallback, write failure, P2 fake-redact guard), flatten (0 annotations, form values
+  and text boxes baked in, marks excluded), save safety (OCR layer survives a save, size ≤1.2×),
+  annotations (multi-line highlight quads persist, shapes, ink, resize scaling, handle math,
+  appearance invalidation), signatures (normalize, fit, library cap, file store), document facts,
+  search, last-page memory, Markdown notes export. Fixtures are generated (`PaperFixtures`).
+- **`scripts/check.sh Paper --perf`:** the final run passed every gate (test, universal
+  bundle, smoke, perf, catalog). Perf across runs: launch 125–151 ms, idle CPU 0.011–0.021 %,
+  footprint 19 MB with no document and **84.5 MB idle with a 100-page document** (release
+  build, `drive stats`), all PASS. **First window is borderline: 583–598 ms on passing runs,
+  617–662 ms on three earlier runs.** The first window at launch is the system Open panel (as
+  in TextEdit and Preview); measured in-process, `NSOpenPanel()` alone takes ~380 ms on a cold
+  launch (AppKit's own sidebar/file-provider setup; only 3 dylibs load, so there's nothing to
+  preload). Paper already shows it without the window animation. A home window would pass
+  reliably, but the research rejected it as an extra step; left for the owner to call.
+- **Accessibility:** no `[unlabeled]` controls in Paper's own UI (document window in every
+  sidebar mode and tool, Combine, Settings/About, Apply Redactions, signature and split sheets).
+  PDF form fields are labeled from the PDF's `/TU` names; a PDF without them shows unlabeled
+  fields (document content, not Paper's controls). The system Open/Save/Print panels have a
+  few unlabeled controls of their own.
+
+### Walkthrough (release and debug builds, `/tmp/paper-test/` fixtures, light and dark)
+
+Screenshots in `/tmp/paper-test/shots/` (not in the repo). Real-mouse steps were run only after
+60 s without owner input, one action at a time.
+
+| Must-have | Result |
+|---|---|
+| Open | `open -a` (Open With path), Open panel at launch, File > Open Recent (one menu), password sheet (wrong password message, unlock), damaged and non-PDF files show "could not be opened … It may be damaged or not a PDF" with a suggestion. Dock drop not walked (needs the Dock). |
+| Read | Continuous, Two Pages, zoom in/actual/fit/width from the View menu, page field + ⌥⌘G (went to page 5), outline sidebar jumps, reopens at the last page viewed. |
+| Sidebar | Thumbnails render lazily and track the current page; Outline tab only when the document has one; Notes list. |
+| Search | Toolbar search → results list with page and context; scan says "No Text to Search… It looks like a scan". |
+| Text markup | Highlight tool on text (yellow, text stays crisp), selection bar → Underline. |
+| Annotations | Text box (click, type, Esc), note (popover), rectangle, freehand; select, move, Shift-arrow nudge, recolor from the strip, resize by handle; Notes list selects them; all undoable. Oval/line/arrow share the shape path (unit-tested), not walked one by one. |
+| Keyboard tools | ⌘3 Draw, ⌘9 Redact, ⌘5 Note, Esc → Select, V → Select, ⌘R rotate, ⌘Z ×4 undid rotate/insert/move. |
+| Sign | New Signature sheet (draw, Save), click to place, placed selected with handles; stored in `PAPER_DATA_DIR/signatures.json`. |
+| Forms | Text field, checkbox, radio, pop-up filled via Accessibility; "Undo Fill Form"; values survive save/reopen (unit test); flattened copy shows them (`pdftotext`, Poppler render). The fixture's PDFKit-made checkbox has no check glyph appearance (fixture limitation; real forms carry their own `/AP`). |
+| Pages | Rotate, insert blank, move down (⌥⌘↓/menu), reverse, extract, undo chain. Drag-to-reorder thumbnails: built with SwiftUI `onMove`, **not walkable** (SlopDrive's synthetic drag is too fast to start a list drag session). Insert from File / Finder drop: built, not walked (the Open panel doesn't take synthetic typing; Finder drops aren't allowed by the brief). |
+| Combine | Combine Files window: Add Open Documents, list with page counts, interleave toggle (2 files), Combine → untitled "Combined" (A4 landscape + Letter pages kept their sizes). |
+| Extract | "pages (page 3)" untitled document, original untouched (`pdfinfo` 3 pages). |
+| Save | Autosave wrote annotations and marks; reopened intact; marks stored as Square annotations (`/Redact` count 0 in the file, secret still extractable until Apply). |
+| Flatten | `sign (flattened).pdf`: `/Annots` 0, name and pop-up value and signature baked in. |
+| Redact mark | Find and Redact "secret-4417" → 3 hits on 3 pages → Mark 3 Results; Redact tool area box over an image; foreign `Redact` file → converted to marks + notice, not marked edited. |
+| Redact apply/verify | New file `text (redacted).pdf`: `pdftotext` has no `SECRET-4417`, the rest of each line survives, `strings` finds nothing, `pdfinfo` shows no title/author; report sheet "Removed 3 areas on 3 pages. Checked: none of the redacted text can be found in the new file." Area box: `pdfimages` shows the embedded image's pixels under the box zeroed, page text still selectable. |
+| Print | Print sheet with preview of all pages; cancelled. |
+| Settings | General (launch at login, open zoom, reopen at last page, author name with the account name as placeholder, default-app button) and About. |
+
+### Design review (§10)
+
+1 pass (open, pick a tool with one key, act) · 2 pass (system controls, accent color for
+selection; document content colors are fixed sRGB on purpose so files look the same everywhere)
+· 3 pass (every action in a menu with its shortcut) · 4 pass (Esc leaves tools/sheets, ⌘, ⌘Q) ·
+5 pass · 6 pass · 7 pass (`ContentUnavailableView` in empty sidebars, DropZone in Combine) ·
+8 n/a (no permissions) · 9 pass (undo for every edit; destructive results go to new files) ·
+10 pass (no network code; Help opens the README only when chosen) · 11 pass, borderline on
+first window (above) · 12 pass · 13 pass (no motion beyond system defaults) · 14 pass (window frame, sidebar
+width, tool styles, sidebar mode persist).
+
+### Deferred to v1.1 (from the should list)
+
+Image signatures with background knockout · Remove markup from selection · Export as Images ·
+Password protection on export · Document info view/edit · Share menu (original/flattened) ·
+Next Field button (the form bar has Highlight Fields and says Tab moves on) · Copy Text from
+Page (Vision) · Find and Highlight · thumbnail drag to Finder · OCR (decision 3).
+
+### Risks
+
+- The redaction path relies on undocumented PDFKit behaviour (P1) and was only run on macOS
+  27.2. The verifier and the rasterize fallback make a silent failure unlikely, but **verify on
+  14**: on a version where P1 doesn't hold, every marked page will be rasterized (text on those
+  pages no longer selectable), which the report states.
+- P15 uses two private PDFView properties through KVC (guarded). If Apple renames them, Paper
+  keeps working with higher memory use.
+- Tool input depends on P16's event routing; a future PDFKit change to its tracking loop could
+  need a revisit. Drag-reorder in the thumbnail list is untested by automation.
+- Restricted (owner-password) PDFs open read-only on purpose; encrypted PDFs keep their user
+  password on save but lose a distinct owner password (PDFKit can't write one it doesn't know).
+
+### Test hooks
+
+`PAPER_DATA_DIR` (signature library location), `PAPER_APPEARANCE=light|dark` (screenshots
+without changing the system appearance), `PAPER_DEBUG_EVENTS=1` (canvas event log in the temp
+directory), `swift run --package-path apps/Paper paper-fixtures /tmp/paper-test/fixtures`.
+
+## Blind test log
+
+One section per round, newest last. See docs/dev-cycle.md step 5.
+
+### Round 1 (<date>)
+| Finding | Severity | Decision | Why / fix |
+|---|---|---|---|

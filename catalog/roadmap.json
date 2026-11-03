@@ -1,0 +1,470 @@
+{
+  "$comment": "Planned Slopapp apps, in build order. priority 1-2 = the owner's favourite Setapp apps (ranked by real usage), 3 = later. 'icon' is a Lucide icon name (lucide.dev) for the app icon and website. Once apps/<Name>/app.json exists, that file wins. Regenerate the website catalog with: node scripts/catalog.mjs",
+  "skipped": [
+    {
+      "app": "ClearVPN",
+      "why": "A VPN needs servers and an operator. Not something a free app collection should run. Use WireGuard or Tailscale."
+    },
+    {
+      "app": "Luminar",
+      "why": "An AI photo editor is a product company, not a utility. Revisit much later."
+    }
+  ],
+  "apps": [
+    {
+      "slug": "slopapp",
+      "name": "Slopapp",
+      "tagline": "Every Slopapp app, installed and up to date.",
+      "replaces": [
+        "Setapp"
+      ],
+      "category": "Hub",
+      "icon": "layout-grid",
+      "size": "M",
+      "menuBarOnly": false,
+      "hub": true,
+      "spec": "The hub app. Library window (Discover, Installed, Updates, Also great) plus a menu bar item. Browse and search every app from the release feed, install (sha256 + code signature checked), open, update, update all, uninstall to the Trash. Finds apps installed elsewhere. Background update check at most every 6 hours, no telemetry. Links to great free apps we do not rebuild.",
+      "priority": 0
+    },
+    {
+      "slug": "switchboard",
+      "name": "Switchboard",
+      "tagline": "Open every link in the right browser.",
+      "replaces": [
+        "OpenIn"
+      ],
+      "category": "Utilities",
+      "icon": "route",
+      "size": "M",
+      "menuBarOnly": true,
+      "favourite": true,
+      "spec": "Registers as the default browser (and optional file handler). Each opened link is matched against rules (domain, source app, modifier keys) or shows a small picker near the cursor with the installed browsers and apps; number keys choose, Esc cancels. Browser profiles where the browser exposes them. Rules editor in Settings. Must add near-zero latency to opening a link.",
+      "priority": 1
+    },
+    {
+      "slug": "clips",
+      "name": "Clips",
+      "tagline": "Clipboard history you can search.",
+      "replaces": [
+        "Paste"
+      ],
+      "category": "Productivity",
+      "icon": "clipboard-list",
+      "size": "M",
+      "menuBarOnly": true,
+      "spec": "Polls NSPasteboard changeCount, stores text/images/files in SwiftData. Global hotkey opens a search panel; Enter pastes. Ignore list for password managers (respect org.nspasteboard.ConcealedType). Pinned items.",
+      "favourite": true,
+      "priority": 1
+    },
+    {
+      "slug": "squish",
+      "name": "Squish",
+      "tagline": "Drop in images and PDFs, get smaller files out.",
+      "replaces": [
+        "Squash",
+        "PDF Squeezer"
+      ],
+      "category": "Utilities",
+      "icon": "shrink",
+      "size": "S",
+      "menuBarOnly": false,
+      "spec": "Drag-and-drop window. Images: resize and re-encode (JPEG/HEIC/PNG/WebP) with ImageIO, strip metadata. PDFs: downsample images with PDFKit/Quartz filters. Show before/after sizes.",
+      "favourite": true,
+      "priority": 1
+    },
+    {
+      "slug": "snapper",
+      "name": "Snapper",
+      "tagline": "Screenshots, annotated and shared in seconds.",
+      "replaces": [
+        "CleanShot X"
+      ],
+      "category": "Productivity",
+      "icon": "camera",
+      "size": "L",
+      "menuBarOnly": true,
+      "favourite": true,
+      "spec": "v1: area, window and full-screen capture on global hotkeys; quick-access thumbnail after each capture (copy, save, drag out, annotate, pin, dismiss); annotation editor (arrow, text, shapes, highlight, blur/pixelate, crop, step counter); pin captures as floating windows; hide desktop icons while capturing. v2: screen recording (MP4/GIF), scrolling capture, OCR via Vision.",
+      "priority": 1
+    },
+    {
+      "slug": "convert",
+      "name": "Convert",
+      "tagline": "Drop in audio, video or images and convert them.",
+      "replaces": [
+        "Permute"
+      ],
+      "category": "Media",
+      "icon": "refresh-cw",
+      "size": "M",
+      "menuBarOnly": false,
+      "favourite": true,
+      "spec": "Drop audio, video or images; pick a preset (MP4/H.264, HEVC, MP3, AAC, WAV, GIF, JPEG, PNG, HEIC, WebP); convert in a queue with progress. AVFoundation + ImageIO only. Merge, trim and extract-audio as stretch goals.",
+      "priority": 1
+    },
+    {
+      "slug": "tidy",
+      "name": "Tidy",
+      "tagline": "Uninstall apps completely and clear out the junk.",
+      "replaces": [
+        "CleanMyMac"
+      ],
+      "category": "Utilities",
+      "icon": "brush-cleaning",
+      "size": "L",
+      "menuBarOnly": false,
+      "favourite": true,
+      "spec": "v1: app uninstaller that finds leftovers (Application Support, Caches, Preferences, Containers, LaunchAgents, Saved State); user caches, logs and developer junk (Xcode DerivedData, simulators) with sizes; large and old files. Always review-before-delete, always to the Trash. No malware or 'speed up' claims.",
+      "priority": 1
+    },
+    {
+      "slug": "dropper",
+      "name": "Dropper",
+      "tagline": "Pick any color on screen and copy it in the format you need.",
+      "replaces": [
+        "Sip"
+      ],
+      "category": "Design",
+      "icon": "pipette",
+      "size": "S",
+      "menuBarOnly": true,
+      "spec": "Global hotkey opens NSColorSampler. Copies HEX/RGB/HSL/SwiftUI/CSS. Keeps history and saved palettes. Contrast checker between two colors.",
+      "favourite": true,
+      "priority": 2
+    },
+    {
+      "slug": "ruler",
+      "name": "Ruler",
+      "tagline": "Measure anything on screen, to the pixel.",
+      "replaces": [
+        "PixelSnap"
+      ],
+      "category": "Design",
+      "icon": "ruler",
+      "size": "M",
+      "menuBarOnly": true,
+      "favourite": true,
+      "priority": 2
+    },
+    {
+      "slug": "iconsmith",
+      "name": "Iconsmith",
+      "tagline": "Turn any image into app and folder icons.",
+      "replaces": [
+        "Image2icon"
+      ],
+      "category": "Design",
+      "icon": "shapes",
+      "size": "M",
+      "menuBarOnly": false,
+      "favourite": true,
+      "spec": "Drop an image; get macOS .icns/.iconset, Xcode asset catalogs, iOS sets, favicons. Squircle masks, padding, background fill. Also sets custom icons on files and folders.",
+      "priority": 2
+    },
+    {
+      "slug": "specimen",
+      "name": "Specimen",
+      "tagline": "Browse and compare your fonts.",
+      "replaces": [
+        "Typeface"
+      ],
+      "category": "Design",
+      "icon": "type",
+      "size": "M",
+      "menuBarOnly": false,
+      "favourite": true,
+      "spec": "Grid of installed fonts with live custom preview text and size slider; filter by classification (serif, sans, mono, script, display); favourites and tags; side-by-side compare; activate/deactivate user fonts.",
+      "priority": 2
+    },
+    {
+      "slug": "zones",
+      "name": "Zones",
+      "tagline": "World clocks and meeting times, in the menu bar.",
+      "replaces": [
+        "World Clock Pro"
+      ],
+      "category": "Productivity",
+      "icon": "globe",
+      "size": "S",
+      "menuBarOnly": true,
+      "favourite": true,
+      "spec": "Menu bar list of cities with local time, offset and day/night cue; a time scrubber to plan across zones; copy a time in several zones; optional second clock in the menu bar.",
+      "priority": 2
+    },
+    {
+      "slug": "crate",
+      "name": "Crate",
+      "tagline": "Open, preview and make archives.",
+      "replaces": [
+        "Archiver"
+      ],
+      "category": "Utilities",
+      "icon": "package",
+      "size": "M",
+      "menuBarOnly": false,
+      "favourite": true,
+      "spec": "Open zip/7z/tar/gz/rar (read), preview contents before extracting, extract selected files, create zip/tar.gz with optional password, split large archives. libarchive.",
+      "priority": 2
+    },
+    {
+      "slug": "paper",
+      "name": "Paper",
+      "tagline": "Read, annotate and edit PDFs.",
+      "replaces": [
+        "Nitro PDF Pro"
+      ],
+      "category": "Productivity",
+      "icon": "file-pen-line",
+      "size": "L",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 3
+    },
+    {
+      "slug": "dual",
+      "name": "Dual",
+      "tagline": "A two-pane file manager with remote servers.",
+      "replaces": [
+        "ForkLift"
+      ],
+      "category": "Utilities",
+      "icon": "folder-tree",
+      "size": "L",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 3
+    },
+    {
+      "slug": "commit",
+      "name": "Commit",
+      "tagline": "A calm Git client.",
+      "replaces": [
+        "Gitfox"
+      ],
+      "category": "Developer",
+      "icon": "git-branch",
+      "size": "L",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 3
+    },
+    {
+      "slug": "awake",
+      "name": "Awake",
+      "tagline": "Keep your Mac awake, from the menu bar.",
+      "replaces": [
+        "Lungo",
+        "Amphetamine"
+      ],
+      "category": "Utilities",
+      "icon": "coffee",
+      "size": "S",
+      "menuBarOnly": true,
+      "spec": "Menu bar toggle that holds an IOPMAssertion. Durations: 15m, 1h, 2h, 4h, until turned off. Option to keep the display on or just the system. Icon shows state. Launch at login.",
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "focus",
+      "name": "Focus",
+      "tagline": "A calm focus timer that lives in your menu bar.",
+      "replaces": [
+        "Session"
+      ],
+      "category": "Productivity",
+      "icon": "timer",
+      "size": "S",
+      "menuBarOnly": true,
+      "spec": "Pomodoro-style timer: work/break lengths, remaining time in the menu bar, notification at the end, daily count of sessions. Optional: turn on a macOS Focus mode via Shortcuts.",
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "tally",
+      "name": "Tally",
+      "tagline": "A notepad that does the math as you type.",
+      "replaces": [
+        "Numi"
+      ],
+      "category": "Productivity",
+      "icon": "calculator",
+      "size": "M",
+      "menuBarOnly": false,
+      "spec": "Each line is an expression; results align on the right. Variables, percentages, units (length, mass, data, time), currency with a cached rate file, previous-line references. Parser is a pure Swift library with heavy unit tests.",
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "devkit",
+      "name": "Devkit",
+      "tagline": "Offline developer tools: JSON, Base64, JWT, hashes and more.",
+      "replaces": [
+        "DevUtils"
+      ],
+      "category": "Developer",
+      "icon": "braces",
+      "size": "M",
+      "menuBarOnly": false,
+      "spec": "Sidebar of tools: JSON format/validate, Base64, URL encode, JWT decode, UUID/ULID, hashes, timestamps, regex tester, color convert, diff. Optional clipboard auto-detect picks the right tool. All logic in a pure, tested core.",
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "snip",
+      "name": "Snip",
+      "tagline": "Copy text from anything on your screen.",
+      "replaces": [
+        "TextSniper"
+      ],
+      "category": "Utilities",
+      "icon": "scan-text",
+      "size": "M",
+      "menuBarOnly": true,
+      "spec": "Global hotkey, drag a region, ScreenCaptureKit grabs it, Vision recognizes text, result goes to the clipboard. Also reads QR codes and barcodes. Language picker.",
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "gauge",
+      "name": "Gauge",
+      "tagline": "CPU, memory, network and battery in your menu bar.",
+      "replaces": [
+        "iStat Menus"
+      ],
+      "category": "Utilities",
+      "icon": "gauge",
+      "size": "M",
+      "menuBarOnly": true,
+      "spec": "Menu bar items for CPU, memory, network, disk, battery. Dropdown with sparkline history and top processes. Sampling via host_statistics64, sysctl, IOKit. Low CPU overhead is a requirement.",
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "tiles",
+      "name": "Tiles",
+      "tagline": "Snap windows into place with the keyboard.",
+      "replaces": [
+        "Mosaic"
+      ],
+      "category": "Utilities",
+      "icon": "layout-grid",
+      "size": "M",
+      "menuBarOnly": true,
+      "spec": "Keyboard shortcuts for halves, thirds, quarters, maximize, center, next display. Uses AXUIElement; first-run screen walks through the Accessibility permission. Layout math in a pure, tested core.",
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "switches",
+      "name": "Switches",
+      "tagline": "One menu for dark mode, hidden desktop icons and more.",
+      "replaces": [
+        "One Switch"
+      ],
+      "category": "Utilities",
+      "icon": "toggle-right",
+      "size": "S",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "quit",
+      "name": "Quit",
+      "tagline": "Quit every app at once, except the ones you keep.",
+      "replaces": [
+        "QuitAll"
+      ],
+      "category": "Utilities",
+      "icon": "square-x",
+      "size": "S",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "shelf",
+      "name": "Shelf",
+      "tagline": "A place to park files while you drag.",
+      "replaces": [
+        "Yoink"
+      ],
+      "category": "Productivity",
+      "icon": "inbox",
+      "size": "M",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "margin",
+      "name": "Margin",
+      "tagline": "Quick notes tucked into the edge of your screen.",
+      "replaces": [
+        "SideNotes"
+      ],
+      "category": "Productivity",
+      "icon": "panel-right",
+      "size": "M",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "hours",
+      "name": "Hours",
+      "tagline": "See where your time went, automatically and privately.",
+      "replaces": [
+        "Timing"
+      ],
+      "category": "Productivity",
+      "icon": "chart-column",
+      "size": "M",
+      "menuBarOnly": false,
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "twins",
+      "name": "Twins",
+      "tagline": "Find and remove duplicate files.",
+      "replaces": [
+        "Gemini"
+      ],
+      "category": "Utilities",
+      "icon": "copy",
+      "size": "M",
+      "menuBarOnly": false,
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "glance",
+      "name": "Glance",
+      "tagline": "Your calendar and world clocks, one click away.",
+      "replaces": [
+        "Dato"
+      ],
+      "category": "Productivity",
+      "icon": "calendar",
+      "size": "M",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false
+    },
+    {
+      "slug": "seek",
+      "name": "Seek",
+      "tagline": "Find files by name, kind, size and date.",
+      "replaces": [
+        "HoudahSpot"
+      ],
+      "category": "Utilities",
+      "icon": "search",
+      "size": "M",
+      "menuBarOnly": false,
+      "priority": 3,
+      "favourite": false
+    }
+  ]
+}

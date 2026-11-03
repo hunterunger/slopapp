@@ -1,0 +1,168 @@
+# Releases one app. Push a tag named <slug>-v<version>, e.g.:
+#
+#   git tag awake-v0.1.0 && git push origin awake-v0.1.0
+#
+# The version must match apps/<Name>/app.json. The zip (and its icon) is attached to a
+# GitHub Release under that tag, which is where the website's download links point.
+#
+# Then the update feed is regenerated from the latest release of every app
+# (scripts/feed.mjs) and published to the gh-pages branch as feed.json, which is what the
+# Slopapp launcher reads (brand.json feedUrl). Turn on GitHub Pages for the repo with
+# "Deploy from a branch: gh-pages / (root)". See docs/pipeline.md, "Releases and the feed".
+#
+# Signing and notarization are optional. Without secrets you get an ad-hoc signed
+# build (users must right-click > Open the first time). To ship properly signed and
+# notarized builds, add these repository secrets:
+#
+#   DEVELOPER_ID_CERT_P12        base64 of your "Developer ID Application" .p12
+#   DEVELOPER_ID_CERT_PASSWORD   password for that .p12
+#   DEVELOPER_ID_IDENTITY        e.g. "Developer ID Application: Jane Doe (TEAMID1234)"
+#   NOTARY_APPLE_ID              Apple ID email used for notarization
+#   NOTARY_TEAM_ID               10-character team ID
+#   NOTARY_PASSWORD              app-specific password for that Apple ID
+name: Release app
+
+on:
+  push:
+    tags: ["*-v*"]
+
+permissions:
+  contents: write
+
+# One release at a time, so two tags pushed together can't race on the feed.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      HAS_SIGNING: ${{ secrets.DEVELOPER_ID_CERT_P12 != '' }}
+      HAS_NOTARY: ${{ secrets.NOTARY_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Resolve app from tag
+        id: app
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          SLUG="${TAG%-v*}"
+          VERSION="${TAG##*-v}"
+          MANIFEST=""
+          for m in apps/*/app.json; do
+            [ "$(jq -r .slug "$m")" = "$SLUG" ] && MANIFEST="$m" && break
+          done
+          [ -n "$MANIFEST" ] || { echo "::error::no app with slug '$SLUG'"; exit 1; }
+          NAME="$(jq -r .name "$MANIFEST")"
+          APP_VERSION="$(jq -r .version "$MANIFEST")"
+          [ "$VERSION" = "$APP_VERSION" ] || { echo "::error::tag version $VERSION != app.json version $APP_VERSION"; exit 1; }
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Import Developer ID certificate
+        if: env.HAS_SIGNING == 'true'
+        env:
+          P12: ${{ secrets.DEVELOPER_ID_CERT_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Test
+        run: scripts/test.sh SlopKit "${{ steps.app.outputs.name }}"
+
+      - name: Bundle
+        env:
+          SLOPAPP_SIGN_IDENTITY: ${{ env.HAS_SIGNING == 'true' && secrets.DEVELOPER_ID_IDENTITY || '-' }}
+        run: |
+          scripts/bundle.sh "${{ steps.app.outputs.name }}"
+          scripts/smoke.sh "${{ steps.app.outputs.name }}" --no-bundle
+
+      - name: Notarize
+        if: env.HAS_SIGNING == 'true' && env.HAS_NOTARY == 'true'
+        env:
+          NAME: ${{ steps.app.outputs.name }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          xcrun notarytool submit "build/$NAME.zip" \
+            --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD" --wait
+          xcrun stapler staple "build/$NAME.app"
+          rm "build/$NAME.zip"
+          ditto -c -k --keepParent "build/$NAME.app" "build/$NAME.zip"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ steps.app.outputs.name }}
+          VERSION: ${{ steps.app.outputs.version }}
+        run: |
+          NOTE="Ad-hoc signed: right-click the app and choose Open the first time."
+          [ "$HAS_NOTARY" = "true" ] && [ "$HAS_SIGNING" = "true" ] && NOTE="Signed and notarized."
+          gh release create "$GITHUB_REF_NAME" "build/$NAME.zip" "build/$NAME-icon.png" \
+            --title "$NAME $VERSION" \
+            --notes "$NOTE" \
+            --generate-notes
+
+      # The feed lists the newest release of every app, so fetch the other apps' zips (the
+      # one just built is already in build/), hash them all, and publish feed.json.
+      - name: Collect the latest release of every other app
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ steps.app.outputs.name }}
+        run: |
+          TAGS="$(gh release list --limit 1000 --json tagName --jq '.[].tagName')"
+          for m in apps/*/app.json; do
+            slug="$(jq -r .slug "$m")"; name="$(jq -r .name "$m")"
+            [ "$name" = "$NAME" ] && continue
+            tag="$(printf '%s\n' "$TAGS" | grep "^$slug-v" | head -n 1 || true)"
+            [ -n "$tag" ] || { echo "$name: not released yet (coming soon in the feed)"; continue; }
+            gh release download "$tag" --pattern "$name.zip" --dir build --clobber
+            gh release download "$tag" --pattern "$name-icon.png" --dir build --clobber || true
+          done
+
+      - name: Generate feed.json
+        run: node scripts/feed.mjs
+
+      - name: Publish feed.json to gh-pages
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          PAGES="$RUNNER_TEMP/pages"
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git fetch --depth 1 origin gh-pages
+            git worktree add -B gh-pages "$PAGES" FETCH_HEAD
+          else
+            git worktree add --detach "$PAGES"
+            git -C "$PAGES" checkout --orphan gh-pages
+            git -C "$PAGES" rm -rf --quiet .
+          fi
+          cp build/feed.json "$PAGES/feed.json"
+          touch "$PAGES/.nojekyll"
+          git -C "$PAGES" add feed.json .nojekyll
+          if git -C "$PAGES" diff --cached --quiet; then echo "feed unchanged"; exit 0; fi
+          git -C "$PAGES" -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -m "feed: $TAG"
+          git -C "$PAGES" push origin gh-pages
+
+      - name: Upload feed
+        uses: actions/upload-artifact@v4
+        with:
+          name: feed
+          path: build/feed.json

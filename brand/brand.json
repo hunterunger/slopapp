@@ -1,0 +1,18 @@
+{
+  "name": "Slopapp",
+  "tagline": "The name is a joke. The apps aren't.",
+  "description": "Free, open-source Mac apps, built with an unreasonable amount of care. No subscription, no account, no tracking.",
+  "bundleIdPrefix": "app.slopapp",
+  "repoUrl": "https://github.com/hunterunger/slopapp",
+  "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
+  "teamId": null,
+  "license": "MIT",
+  "colors": {
+    "forest": "#0F3D2E",
+    "leaf": "#3DBE74",
+    "mint": "#D4F2DF",
+    "cream": "#FAF6EC",
+    "ember": "#E5603D",
+    "ink": "#13201A"
+  }
+}
