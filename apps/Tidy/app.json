@@ -1,0 +1,16 @@
+{
+  "slug": "tidy",
+  "name": "Tidy",
+  "tagline": "Uninstall apps completely and clear out the junk.",
+  "replaces": [
+    "CleanMyMac"
+  ],
+  "category": "Utilities",
+  "icon": "brush-cleaning",
+  "menuBarOnly": false,
+  "status": "beta",
+  "version": "0.2.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.tidy"
+}
