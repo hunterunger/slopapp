@@ -1,0 +1,16 @@
+{
+  "slug": "tally",
+  "name": "Tally",
+  "tagline": "A notepad that does the math as you type.",
+  "replaces": [
+    "Numi"
+  ],
+  "category": "Productivity",
+  "icon": "calculator",
+  "menuBarOnly": false,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.tally"
+}
