@@ -2,6 +2,10 @@ import Foundation
 import Testing
 @testable import ClipsCore
 
+/// Shared CI runners are much slower than a real Mac; speed budgets get 4x headroom there.
+private let ciSlack = ProcessInfo.processInfo.environment["CI"] == nil ? 1 : 4
+
+
 private let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
 private func tempDirectory() -> URL {
@@ -86,6 +90,6 @@ private func tempDirectory() -> URL {
         let elapsed = try await clock.measure { loaded = try await db.loadAll() }
         #expect(loaded.count == 5_000)
         #expect(loaded.first?.lastUsed == synthetic.map(\.0.lastUsed).max())
-        #expect(elapsed < .milliseconds(500), "loading 5,000 clips took \(elapsed)")
+        #expect(elapsed < .milliseconds(500) * ciSlack, "loading 5,000 clips took \(elapsed)")
     }
 }

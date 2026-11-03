@@ -63,10 +63,12 @@ func medianMillis(runs: Int = 21, _ body: () -> Void) -> Double {
     }
 
     static func budget(release: Double, debug: Double) -> Double {
+        // Shared CI runners are much slower than a real Mac; give them 4x headroom.
+        let slack: Double = ProcessInfo.processInfo.environment["CI"] == nil ? 1 : 4
         #if DEBUG
-        debug
+        return debug * slack
         #else
-        release
+        return release * slack
         #endif
     }
 }

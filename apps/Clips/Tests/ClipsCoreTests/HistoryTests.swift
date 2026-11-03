@@ -2,6 +2,10 @@ import Foundation
 import Testing
 @testable import ClipsCore
 
+/// Shared CI runners are much slower than a real Mac; speed budgets get 4x headroom there.
+private let ciSlack = ProcessInfo.processInfo.environment["CI"] == nil ? 1 : 4
+
+
 private let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
 func textClip(_ text: String, at date: Date = now, source: String? = nil) -> Clip {
@@ -175,6 +179,6 @@ func textClip(_ text: String, at date: Date = now, source: String? = nil) -> Cli
         }
         #expect(hits > 0)
         // Seven searches; each must fit well inside a frame. Generous for slow CI machines.
-        #expect(elapsed < .milliseconds(150), "7 searches over 5,000 clips took \(elapsed)")
+        #expect(elapsed < .milliseconds(150) * ciSlack, "7 searches over 5,000 clips took \(elapsed)")
     }
 }

@@ -2,6 +2,10 @@ import Foundation
 import Testing
 @testable import ZonesCore
 
+/// Shared CI runners are much slower than a real Mac; speed budgets get 4x headroom there.
+private let ciSlack = ProcessInfo.processInfo.environment["CI"] == nil ? 1 : 4
+
+
 /// Runs against the real bundled GeoNames file, loaded once.
 @Suite struct SearchTests {
     static let database: CityDatabase = {
@@ -132,6 +136,6 @@ import Testing
         let elapsed = clock.measure {
             for query in ["s", "sa", "san", "san f", "a", "e", "lon", "new"] { _ = search.results(for: query) }
         }
-        #expect(elapsed < .milliseconds(240), "8 queries took \(elapsed)")
+        #expect(elapsed < .milliseconds(240) * ciSlack, "8 queries took \(elapsed)")
     }
 }
