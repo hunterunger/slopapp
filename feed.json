@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-03T19:50:54.586Z",
+  "generatedAt": "2026-11-03T19:56:48.249Z",
   "name": "Slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "apps": [
@@ -118,7 +118,17 @@
       ],
       "icon": "brush-cleaning",
       "menuBarOnly": false,
-      "status": "planned"
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.tidy",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/tidy-v0.2.0/Tidy.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/tidy-v0.2.0/Tidy-icon.png",
+      "sha256": "db0643d3c403bc7b775dbcf30fd77d5bef6d7d74e9d5d123e60ec117f53a2975",
+      "size": 2900033,
+      "installedSize": 9091153,
+      "releaseNotes": ""
     },
     {
       "slug": "dropper",
