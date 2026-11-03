@@ -1,0 +1,31 @@
+{
+  "slug": "iconsmith",
+  "name": "Iconsmith",
+  "tagline": "Turn any image into app and folder icons.",
+  "replaces": [
+    "Image2icon"
+  ],
+  "category": "Design",
+  "icon": "shapes",
+  "menuBarOnly": false,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.iconsmith",
+  "infoPlist": {
+    "CFBundleDocumentTypes": [
+      {
+        "CFBundleTypeName": "Image",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "public.image",
+          "com.adobe.pdf",
+          "public.svg-image",
+          "com.apple.icns"
+        ]
+      }
+    ]
+  }
+}
