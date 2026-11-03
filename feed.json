@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-03T20:03:54.146Z",
+  "generatedAt": "2026-11-03T20:09:22.766Z",
   "name": "Slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "apps": [
@@ -140,7 +140,17 @@
       ],
       "icon": "pipette",
       "menuBarOnly": true,
-      "status": "planned"
+      "status": "beta",
+      "version": "0.2.0",
+      "build": 2,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.dropper",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/dropper-v0.2.0/Dropper.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/dropper-v0.2.0/Dropper-icon.png",
+      "sha256": "664d664b7c039a7886dd40d60953147ed7b40e27ce89a52e525459f827f3e6a7",
+      "size": 1947775,
+      "installedSize": 5965256,
+      "releaseNotes": ""
     },
     {
       "slug": "ruler",
