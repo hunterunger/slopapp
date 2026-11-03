@@ -1,0 +1,8 @@
+// The system libarchive (/usr/lib/libarchive.2.dylib, BSD-2-Clause), linked through the
+// macOS SDK's libarchive.tbd. Apple ships the library but not its headers, so
+// crate_archive.h declares the small part of the API Crate uses.
+module CArchive [system] {
+    header "crate_archive.h"
+    link "archive"
+    export *
+}

@@ -1,0 +1,91 @@
+{
+  "slug": "crate",
+  "name": "Crate",
+  "tagline": "Open, preview and make archives.",
+  "replaces": [
+    "Archiver"
+  ],
+  "category": "Utilities",
+  "icon": "package",
+  "menuBarOnly": false,
+  "status": "beta",
+  "version": "0.2.0",
+  "build": 2,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.crate",
+  "infoPlist": {
+    "CFBundleDocumentTypes": [
+      {
+        "CFBundleTypeName": "Archive",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "public.zip-archive",
+          "org.7-zip.7-zip-archive",
+          "public.rar-archive",
+          "public.tar-archive",
+          "org.gnu.gnu-zip-archive",
+          "org.gnu.gnu-zip-tar-archive",
+          "public.bzip2-archive",
+          "public.tar-bzip2-archive",
+          "org.tukaani.xz-archive",
+          "org.tukaani.tar-xz-archive",
+          "public.z-archive",
+          "public.cpio-archive",
+          "com.apple.xar-archive",
+          "com.microsoft.cab"
+        ]
+      },
+      {
+        "CFBundleTypeName": "Split Archive Part",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+        "CFBundleTypeExtensions": [
+          "001",
+          "z01",
+          "zipx",
+          "lzh",
+          "lha",
+          "deb"
+        ]
+      }
+    ],
+    "NSServices": [
+      {
+        "NSMenuItem": {
+          "default": "Extract with Crate"
+        },
+        "NSMessage": "extractFiles",
+        "NSPortName": "Crate",
+        "NSRequiredContext": {},
+        "NSSendFileTypes": [
+          "public.zip-archive",
+          "org.7-zip.7-zip-archive",
+          "public.rar-archive",
+          "public.tar-archive",
+          "org.gnu.gnu-zip-archive",
+          "org.gnu.gnu-zip-tar-archive",
+          "public.bzip2-archive",
+          "public.tar-bzip2-archive",
+          "org.tukaani.xz-archive",
+          "org.tukaani.tar-xz-archive",
+          "public.z-archive",
+          "public.cpio-archive",
+          "com.apple.xar-archive",
+          "com.microsoft.cab"
+        ]
+      },
+      {
+        "NSMenuItem": {
+          "default": "Compress with Crate"
+        },
+        "NSMessage": "compressFiles",
+        "NSPortName": "Crate",
+        "NSRequiredContext": {},
+        "NSSendFileTypes": [
+          "public.item"
+        ]
+      }
+    ]
+  }
+}
