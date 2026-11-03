@@ -1,0 +1,16 @@
+{
+  "slug": "dropper",
+  "name": "Dropper",
+  "tagline": "Pick any color on screen and copy it in the format you need.",
+  "replaces": [
+    "Sip"
+  ],
+  "category": "Design",
+  "icon": "pipette",
+  "menuBarOnly": true,
+  "status": "beta",
+  "version": "0.2.0",
+  "build": 2,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.dropper"
+}
