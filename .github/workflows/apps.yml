@@ -24,10 +24,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # One job per app, in parallel: faster than checking every app in sequence, and a
+  # failure names the app.
+  list:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.apps.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: apps
+        run: |
+          apps=$(for f in apps/*/app.json; do basename "$(dirname "$f")"; done | jq -R . | jq -sc .)
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
+
   check:
-    name: Test, bundle, smoke
+    name: ${{ matrix.app }}
+    needs: list
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.list.outputs.apps) }}
+    env:
+      CI: "true"
     steps:
       - uses: actions/checkout@v4
 
@@ -40,14 +60,14 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: scripts/check.sh
-        run: scripts/check.sh
+      - name: scripts/check.sh ${{ matrix.app }}
+        run: scripts/check.sh "${{ matrix.app }}"
 
-      - name: Upload apps and logs
+      - name: Upload app and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: slopapp-apps
+          name: ${{ matrix.app }}
           path: |
             build/*.zip
             build/*-icon.png
