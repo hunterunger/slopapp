@@ -149,7 +149,8 @@ final class CanvasController: NSViewController, NSTextViewDelegate, NSPopoverDel
             deleteSelection: { [weak self] in self?.delegate?.deleteSelectedAnnotation(nil) },
             editSelection: { [weak self] in self?.delegate?.editSelectedAnnotation(nil) },
             toggleFields: { [weak self] in self?.delegate?.toggleFieldHighlight(nil) },
-            duplicate: { [weak self] in self?.delegate?.paperDocument?.duplicate(nil) }
+            duplicate: { [weak self] in self?.delegate?.paperDocument?.duplicate(nil) },
+            recognizeText: { [weak self] in self?.delegate?.recognizeText(nil) }
         )
     }
 
@@ -196,7 +197,10 @@ final class CanvasController: NSViewController, NSTextViewDelegate, NSPopoverDel
         editor.delegate = self
         editor.isRichText = false
         editor.drawsBackground = true
-        editor.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.9)
+        // The editor sits on the page, which is white in dark mode too: a dark text background
+        // here put the box's black text on dark grey.
+        editor.backgroundColor = NSColor.white.withAlphaComponent(0.9)
+        editor.appearance = NSAppearance(named: .aqua)
         editor.textContainerInset = NSSize(width: 2, height: 2)
         editor.textContainer?.lineFragmentPadding = 2
         editor.isHorizontallyResizable = true

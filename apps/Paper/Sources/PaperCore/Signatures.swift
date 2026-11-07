@@ -12,14 +12,22 @@ public struct Signature: Codable, Identifiable, Sendable, Equatable {
     public var strokes: [[CGPoint]]
     /// width / height of the ink's bounding box.
     public var aspect: CGFloat
+    /// Stroke width relative to the drawing's width, for signatures imported from an image
+    /// (their strokes are bands of ink, see `SignatureImport`). Nil for drawn signatures.
+    public var lineWidth: CGFloat?
 
-    public init(id: UUID = UUID(), kind: Kind = .signature, created: Date = Date(), strokes: [[CGPoint]], aspect: CGFloat) {
+    public init(id: UUID = UUID(), kind: Kind = .signature, created: Date = Date(), strokes: [[CGPoint]], aspect: CGFloat,
+                lineWidth: CGFloat? = nil) {
         self.id = id
         self.kind = kind
         self.created = created
         self.strokes = strokes
         self.aspect = aspect
+        self.lineWidth = lineWidth
     }
+
+    /// Imported from a photo or scan rather than drawn.
+    public var isImage: Bool { lineWidth != nil }
 
     /// Normalizes raw strokes (any coordinate space, y up). Nil when there's nothing drawn
     /// or the ink is a dot.
@@ -55,14 +63,15 @@ public struct Signature: Codable, Identifiable, Sendable, Equatable {
     public func annotation(centeredAt center: CGPoint, width: CGFloat, color: NSColor, factory: AnnotationFactory) -> PDFAnnotation? {
         let height = width / max(aspect, 0.1)
         let rect = CGRect(x: center.x - width / 2, y: center.y - height / 2, width: width, height: height)
-        let lineWidth = max(1.2, min(2.5, width / 120))
+        let fit = Signature.fitted(aspect: aspect, in: rect)
+        let lineWidth = self.lineWidth.map { $0 * fit.width } ?? max(1.2, min(2.5, width / 120))
         guard let ink = factory.ink(strokes(fitting: rect), color: color, lineWidth: lineWidth) else { return nil }
-        ink.setValue("paper.signature.\(id.uuidString)", forAnnotationKey: .name)
+        AnnotationTags.tag(ink, as: .signature)
         return ink
     }
 
     public static func isSignature(_ annotation: PDFAnnotation) -> Bool {
-        (annotation.value(forAnnotationKey: .name) as? String)?.hasPrefix("paper.signature.") ?? false
+        AnnotationTags.has(.signature, annotation)
     }
 }
 

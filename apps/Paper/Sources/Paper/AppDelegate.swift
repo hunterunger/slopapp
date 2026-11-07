@@ -11,6 +11,7 @@ final class PaperAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         Prefs.register()
+        ShareFiles.clearOld()
         // Test hook: screenshot light and dark without changing the system appearance.
         switch ProcessInfo.processInfo.environment["PAPER_APPEARANCE"] {
         case "light": NSApp.appearance = NSAppearance(named: .aqua)
@@ -25,7 +26,11 @@ final class PaperAppDelegate: NSObject, NSApplicationDelegate {
     /// Launching with no document, or clicking the Dock icon with no windows, shows the Open
     /// panel (as TextEdit does). Paper doesn't create empty documents.
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        ProcessInfo.processInfo.environment["SLOPAPP_SMOKE_TEST"] == nil
+        ProcessInfo.processInfo.environment["SLOPAPP_SMOKE_TEST"] == nil && !Snapshots.isActive
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        Snapshots.runIfAsked()
     }
 
     func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {

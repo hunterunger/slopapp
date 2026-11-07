@@ -121,6 +121,15 @@ final class DocumentEditor {
         changed(annotation.page)
     }
 
+    func setAuthor(_ annotation: PDFAnnotation, _ name: String) {
+        let old = annotation.userName ?? ""
+        let new = name.trimmingCharacters(in: .whitespaces)
+        guard old != new else { return }
+        annotation.userName = new.isEmpty ? nil : new
+        register("Change Author") { $0.setAuthor(annotation, old) }
+        changed(annotation.page)
+    }
+
     func setFormValue(_ annotation: PDFAnnotation, old: FormTracker.Value) {
         let new = FormTracker.value(of: annotation)
         register("Fill Form") { editor in
@@ -195,5 +204,32 @@ final class DocumentEditor {
     func insert(pages newPages: [PDFPage], at index: Int, name: String) {
         let items = newPages.enumerated().map { (index: index + $0.offset, page: $0.element) }
         insert(items, name: name)
+    }
+
+    /// Swaps pages for rebuilt ones (OCR text layer, stamped headers). Annotations move to the
+    /// new page; undo swaps the originals back with their annotations.
+    func replace(_ replacements: [(index: Int, page: PDFPage)], name: String) {
+        var originals: [(index: Int, page: PDFPage)] = []
+        for item in replacements.sorted(by: { $0.index < $1.index }) {
+            guard let old = pdf.page(at: item.index) else { continue }
+            PageRewriter.moveAnnotations(from: old, to: item.page)
+            pdf.removePage(at: item.index)
+            pdf.insert(item.page, at: item.index)
+            originals.append((item.index, old))
+        }
+        guard !originals.isEmpty else { return }
+        model.refreshPages()
+        register(name) { $0.replace(originals, name: name) }
+        onPagesChange()
+    }
+
+    // MARK: Document
+
+    func setInfo(_ info: DocumentInfo) {
+        let old = DocumentInfo(pdf)
+        guard old != info else { return }
+        info.apply(to: pdf)
+        model.infoRevision += 1
+        register("Change Document Info") { $0.setInfo(old) }
     }
 }

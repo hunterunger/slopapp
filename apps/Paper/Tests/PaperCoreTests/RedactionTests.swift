@@ -29,14 +29,18 @@ struct CopiesInstead: PageRasterizing {
         #expect(allText(doc(document.dataRepresentation()!)).contains("\(Fixtures.secret)-1"))
     }
 
-    @Test func pendingMarksDoNotChangeContentOnSave() {
+    @Test func pendingMarksDoNotChangeContentOnSave() throws {
         let document = doc(Fixtures.textDocument())
         mark("\(Fixtures.secret)-1", in: document)
-        let saved = doc(document.dataRepresentation()!)
+        let data = try #require(document.dataRepresentation())
+        let saved = try #require(AnnotationTags.open(data))
         #expect(allText(saved).contains("\(Fixtures.secret)-1"))
         let marks = RedactionMarks.marks(in: saved)
+        // On failure, say what PDFKit read back and what's in the file, so a CI run on
+        // another macOS shows which keys were lost.
+        let mark = try #require(marks.first, "No mark after reopen. \(tagDiagnostics(saved, data))")
         #expect(marks.count == 1)
-        #expect(!RedactionMarks.isRedactAnnotation(marks[0].annotation))
+        #expect(!RedactionMarks.isRedactAnnotation(mark.annotation))
         #expect(RedactionMarks.redactAnnotations(in: saved).isEmpty)
     }
 

@@ -51,6 +51,25 @@ enum Tool: String, CaseIterable, Identifiable {
     var edits: Bool { self != .select }
 }
 
+enum InspectorTab: String, CaseIterable, Identifiable {
+    case document, security, selection
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .document: "Document"
+        case .security: "Security"
+        case .selection: "Selection"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .document: "info.circle"
+        case .security: "lock"
+        case .selection: "slider.horizontal.3"
+        }
+    }
+}
+
 enum SidebarMode: String, CaseIterable, Identifiable {
     case thumbnails, outline, annotations, search, redact
     var id: String { rawValue }
@@ -102,6 +121,25 @@ final class DocumentModel {
         didSet { Prefs.defaults.set(textColor.rawValue, forKey: Prefs.textColor) }
     }
     var fillShapes = false
+    /// The Draw group's button repeats the last drawing tool: freehand, or the last shape.
+    var drawUsesShape = Prefs.defaults.bool(forKey: Prefs.drawUsesShape) {
+        didSet { Prefs.defaults.set(drawUsesShape, forKey: Prefs.drawUsesShape) }
+    }
+    /// The Comment group's button repeats the last of Text Box and Note.
+    var commentUsesNote = Prefs.defaults.bool(forKey: Prefs.commentUsesNote) {
+        didSet { Prefs.defaults.set(commentUsesNote, forKey: Prefs.commentUsesNote) }
+    }
+    /// The editing bar under the toolbar (View > Hide Editing Bar).
+    var showsEditingBar = !Prefs.defaults.bool(forKey: Prefs.hidesEditingBar) {
+        didSet { Prefs.defaults.set(!showsEditingBar, forKey: Prefs.hidesEditingBar) }
+    }
+    var inspectorTab: InspectorTab = InspectorTab(rawValue: Prefs.defaults.string(forKey: Prefs.inspectorTab) ?? "") ?? .document {
+        didSet { Prefs.defaults.set(inspectorTab.rawValue, forKey: Prefs.inspectorTab) }
+    }
+    /// Bumped when title/author/subject/keywords change, so the inspector re-reads them.
+    var infoRevision = 0
+    /// Page count/size or the file changed (inspector facts).
+    var fileURL: URL?
     /// The signature waiting to be placed with the next click.
     var pendingSignature: Signature?
 
@@ -144,6 +182,7 @@ final class DocumentModel {
     var importedRedactions = 0
     var dismissedImportNotice = false
     var dismissedFormBar = false
+    var dismissedScanBar = false
     var highlightFields = false
     var isLocked = false
     var hasTextLayer = true

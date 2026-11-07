@@ -869,6 +869,243 @@ Page (Vision) · Find and Highlight · thumbnail drag to Finder · OCR (decision
 without changing the system appearance), `PAPER_DEBUG_EVENTS=1` (canvas event log in the temp
 directory), `swift run --package-path apps/Paper paper-fixtures /tmp/paper-test/fixtures`.
 
+## Parity pass (2026-11-03)
+
+Governed by `docs/parity-pass.md`: look and work more like Nitro PDF Pro, and don't miss
+features. Sources for the look: Nitro's four official Mac App Store screenshots (downloaded to
+`/tmp/paper-parity/dl/`, not committed), its Mac user guide (Toolbar, Inspector, Sidebar
+articles), and the menus and panes recorded in the research above. Nitro wasn't launched again in
+this pass (the screen was locked), so nothing of the owner's was seen.
+
+### Fix first: pending marks lost after save on macOS 26 (CI)
+
+**What CI showed** (GitHub `macos-26-arm64`, macOS 26.6.2, Xcode 26.6):
+`pendingMarksDoNotChangeContentOnSave()` found 0 marks after `dataRepresentation()` + reopen,
+then crashed the test process with "Index out of range" (the test indexed `marks[0]` after a
+failed `#expect`).
+
+**Why.** A mark was a Square annotation identified *only* by its `/NM` (annotation name),
+read back through `value(forAnnotationKey: .name)`. Experiments on macOS 27.2 (P20 below)
+show that PDFKit's *writer* keeps every key we set, but its *reader* only surfaces the keys its
+annotation model knows, and that set differs between releases. On 26 the name didn't come back,
+so marks vanished after any save/reopen: the info bar lost them, Apply Redactions said "nothing
+marked" (it reads the saved bytes), and Export Flattened Copy would have baked the red boxes in.
+Signatures used the same `/NM` tagging and had the same exposure.
+
+**Fix (`PaperCore/AnnotationTags.swift`), independent of PDFKit's model on any version:**
+
+1. **Written redundantly** into standard entries every PDF writer keeps: `/NM`
+   (`paper.redaction.<UUID>` as before), `/Subj` ("Pending Redaction" / "Signature", the
+   standard comment subject Acrobat shows), and for marks `/Contents` ("Pending redaction", which
+   every file saved by Paper 0.1 already has).
+2. **Read from the file's own bytes** with CoreGraphics' `CGPDFDocument` (the low-level parser
+   PDFKit sits on, unchanged since 10.x): the raw `/Annots` dictionaries of each page. A PDFKit
+   annotation is matched to its raw dictionary by page, subtype and `/Rect` (±1 pt). The raw
+   parse only runs when PDFKit hands back a Square or Ink annotation it can't identify, so
+   ordinary documents pay nothing.
+3. **Pinned in memory** as an associated object on the `PDFAnnotation`, so identity never
+   depends on PDFKit echoing a key between edits. Page copies (extract, combine, insert) carry it.
+
+Any one signal is enough. `AnnotationTags.open(_:)` replaces `PDFDocument(data:)` wherever
+Paper reads back bytes it may have written (document open, unlock, Apply Redactions, flatten,
+combine, insert). **Migration:** opening re-tags everything found (including Paper 0.1 files
+whose only trace is a Square with `/Contents` "Pending redaction"), and the next save writes the
+full set of keys. The crash path is gone: tests use `try #require(marks.first)` and print what
+PDFKit and the raw file each hold when it fails, so a future CI failure explains itself.
+Tests simulate the macOS 26 behaviour by stripping the keys from reopened annotations
+(`AnnotationTagTests`, 9 tests). CI on GitHub still has to confirm on 26.
+
+### More PDFKit facts (macOS 27.2)
+
+| # | Fact | What we did |
+|---|---|---|
+| P20 | `dataRepresentation()` writes custom annotation keys (`/PaperMark`, `/Subj`, `/IT`, `/NM` all in the bytes), but a reopened annotation's `annotationKeyValues` only shows keys PDFKit models (`/PaperMark`, `/Subj`, `/IT` missing; `/NM`, `/T`, `/Contents` present on 27, `/NM` apparently not on 26). | Tags are redundant and read from the raw file with CGPDF (above). |
+| P21 | A `PDFAnnotation` subclass that overrides `draw(with:in:)` (an image stamp) is written with PDFKit's default stamp look, and burn-in loses the image too. There's no public way to set an appearance stream. | Image signatures are traced into Ink (see below). Images on pages stay deferred. |
+| P22 | Vision on the scan fixture inside a test process: 0.3 s here (the model was already prepared by the system). P9's ~30 s first call is still the worst case on a fresh Mac. | OCR shows a progress sheet that warns about the first page; real-Vision test gated by `PAPER_VISION_TESTS=1`. |
+| P23 | `CGContext.drawPDFPage` copies a page's content stream as-is (vector stays vector) into a new one-page PDF; `setTextDrawingMode(.invisible)` text is found by `PDFPage.string`/search and selection at the drawn position. | `PageRewriter` (OCR text layer, headers and footers). Annotations are moved to the new page; undo swaps the old page back. |
+
+### Gap table
+
+| Nitro feature or design element | Paper now | Notes |
+|---|---|---|
+| Toolbar: labeled items (icon + label) | **Done** | `iconAndLabel` toolbar: Sidebar · Zoom (−/+) · Fit Width · Scale (editable %, dropdown of steps) · Page (field + "of N") · tool groups · Search · Share · Inspector. |
+| Tool groups = button + dropdown, button repeats the last tool | **Done** | Select · Highlight▾ (style, 5 colors, Highlight All Results, Remove Markup) · Draw▾ (freehand, rectangle, oval, line, arrow) · Comment▾ (text box, note, today's date) · Sign▾ (saved signatures, new, from image) · Redact▾ (mark tool, Find and Redact, Apply, Remove All). Nitro's *Forms* group creates form fields: out of scope (see below), so Paper's 4th group is Sign. |
+| Second row "editing bar" | **Done** | The style strip is now always shown (View > Hide Editing Bar ⇧⌘E, Nitro's shortcut); controls that don't apply are dimmed, as in Nitro. |
+| Inspector (⌥⌘I): Document Info, Permissions, element properties | **Done** | Trailing inspector with Document (edit title/author/subject/keywords, undoable; pages, page size, PDF version, file size, dates, creator, producer, encrypted), Security (current permissions; Save Protected Copy), Selection (kind, page, date, author editable, text, delete). Nitro's Alignment tab: skip (no multi-object layout). |
+| Sidebar: thumbnails with numbers, size slider, modes | Done (before) / slider deferred | Size slider: deferred, ~1 h (thumbnail width is fixed at 110 pt). |
+| Search panel with results list | Done (before) | Now also **Find and Highlight** (⌥⇧⌘F; "Highlight All N" under the results). |
+| OCR to searchable PDF | **Done** | Edit > Recognize Text…: pages without text (default) or the current page; progress sheet with a first-run warning; Stop keeps finished pages; one undo step. Info bar on scans offers it (Nitro prompts on open). |
+| OCR on selection / Copy text from a scan | **Done** | Edit > Copy Text from Page (page text, or Vision on a scan). |
+| Rotate & deskew, OCR language list, clear OCR layer | Deferred | Deskew ~0.5 day (Vision horizon detection + page rotate); languages are automatic; clearing a layer is power-user. |
+| Image signatures ("Make Transparent Image") | **Done** | Signature sheet has Draw / Image tabs; drop or choose a photo, automatic paper threshold (Otsu) with a Thinner–Bolder slider, crop to ink, dust removal. Stored as Ink bands (P21), so place/resize/flatten work as for drawn ones. |
+| Export JPEG/PNG/TIFF | **Done** | File > Export as Images…: PNG/JPEG/TIFF/HEIC, 72/150/300 dpi, all or selected pages, into a folder, with progress. |
+| Export text | Done (before) | Rich text: skip. |
+| Passwords and permissions | **Done** | Save Protected Copy… (open password with verify; permissions password + printing, copying, page changes, comments). Writes a new file and verifies it by reopening. Nitro edits the open document's security; Paper writes a copy so autosave can never lock you out with a typo. |
+| Document info editing | **Done** | Inspector > Document. |
+| Share / Mail Document (regular, flattened) | **Done** | Toolbar Share button and File > Share > Share… / Share Flattened Copy…. Edited or untitled documents share a fresh copy. |
+| Headers, footers, page numbers, Bates | **Done** | Pages > Headers & Footers…: six slots, tokens {page} {pages} {date} {name} {bates}, Bates prefix/start/digits, size, margin, all or selected pages; presets; stamped into page content (prints everywhere); undoable. |
+| Remove markup (⌥⇧⌘0) | **Done** | Edit menu and Highlight dropdown. |
+| Next-field navigation | Deferred, ~0.5 day | PDFView has no public API to focus a widget's field editor; Tab inside a field works. Needs a spike (synthesized click on the widget). |
+| Compare documents (⌘K) | Deferred, 2–3 days | Text diff per page plus a side-by-side view; its own feature. |
+| Edit existing text / images | Out of scope | PDFKit can't edit content streams; reviewers rate Nitro's own editor poorly. A weak editor would hurt more than help. |
+| Add images to pages | Deferred, ~1 day | Needs our own appearance stream or content stamping (P21). Image signatures cover the main use. |
+| Watermark | Deferred, ~2 h | `PageRewriter` makes it cheap (diagonal text, opacity). |
+| Crop pages | Deferred, ~0.5 day | Needs a crop-box drag UI. |
+| Stamps / Review Tools library | Deferred, ~1 day | Today's date covers the dynamic stamp. |
+| Form field creation, form data export | Out of scope | Authoring tool. |
+| Squiggle underline, cloud, callout, polygon | Deferred, 2–4 h each | No PDFKit subtype for squiggle; callout is the most useful. |
+| Digital ID signatures, Get Signatures, account, AI | Out of scope | PKI, servers, accounts. |
+| PDF/A, Office conversion, optimize | Out of scope / deferred | Optimize ~2 h via `.saveImagesAsJPEGOption`. |
+| Home screen | Skip (decided before) | The Open panel is the start. |
+
+### Deviations from the design system (and why)
+
+- **Toolbar shows labels** (icon and text) instead of icons only: Nitro's toolbar is labeled,
+  and a switcher should find every group where they expect it. Customize Toolbar can turn
+  labels off.
+- **Editing bar always visible** with dimmed controls: matches Nitro's second row. Hideable.
+- **Inspector docked in the window**, not a floating panel as in Nitro: floating panels don't
+  follow window tabs or full screen and hide behind other windows. Same tabs, same ⌥⌘I.
+- No colour or visual changes: system controls, SF Symbols, accent colour; no Nitro artwork.
+
+### Shared components built in-app (candidates for SlopKit)
+
+`AnnotationTags`/`RawAnnotationReader` (PDF-specific, stays), `PageRewriter` (PDF-specific),
+`Clipboard` (env-switchable pasteboard: a SlopKit candidate; Convert has the same idea),
+`ShareFiles` (temp share copies: SlopKit candidate), `Snapshots.shoot` (offscreen window PNG:
+Convert and Zones have near-copies; a SlopKit `SnapshotHook` would dedupe all three).
+
+### Gates (this pass)
+
+- **Tests:** 134 in 23 suites, all pass (was 96). New: annotation tags (9), image signatures (6),
+  OCR (6 + 1 real-Vision test, run once locally with `PAPER_VISION_TESTS=1`: pass), image export
+  (5), protection (3), document info (3), text markup (2), headers and footers (3).
+- **`scripts/check.sh Paper --perf`**: all pass, twice (plain and `CI=true`), on a busy machine
+  (load 6–11): launch 117 ms, first window 570–579 ms (< 600), idle CPU 0.006–0.012 %,
+  footprint 19 MB with no document.
+- **Offscreen renders** (the screen was locked, so no `scripts/drive` walkthrough): `PAPER_SNAPSHOT`
+  renders Paper's own windows. 30 PNGs in `/tmp/paper-parity/shots/` (light and dark): document
+  window, inspector Document/Security/Selection, Highlight and Shape tools, Find and Highlight,
+  Export as Images, signature Draw and Image tabs, OCR options and progress, Headers & Footers,
+  scan notice, and a scan after Recognize Text with search finding "invoice". Reviewed; fixed from
+  them: inspector didn't expand offscreen (animation), Security tab shouted "Enter a password"
+  before typing, footers right-aligned, image-signature bands showed hairline stripes (now
+  overlap 1.5×), search results lacked a visible Highlight All button, snapshot author used the
+  account name (now "Sample Reviewer"). PDFKit's page tiles don't draw into offscreen captures,
+  so page content shows blank in these images (thumbnails do render); page content is covered by
+  unit tests that render pages.
+
+### On-screen checks still owed (need an unlocked screen)
+
+1. `scripts/drive tree` on the release build: no `[unlabeled]` controls (new: tool-group
+   segments, scale combo box, inspector panes, new sheets).
+2. Tool-group clicks: button part picks the remembered tool, chevron opens the menu under the
+   group; Sign button opens the signature menu; selected state follows ⌘1–⌘9.
+3. Scale combo: typing 150 + Return and picking from the dropdown both zoom.
+4. Share toolbar button and File > Share (picker appears; don't complete a share).
+5. Recognize Text with real Vision on `/tmp/paper-test/fixtures/scan.pdf`; time the first page;
+   select and highlight recognized text; undo.
+6. Image signature: choose a generated image, place, resize (bands stay solid), flatten.
+7. Save Protected Copy: `pdfinfo` shows encryption; Preview asks for the password.
+8. Export as Images into a `/tmp` folder; Headers & Footers on a fixture, then `pdftotext`.
+9. Inspector: edit Title, save, reopen; `pdfinfo` shows the new title.
+10. Pending marks survive save/reopen on macOS 14 and 26 (CI covers 26 in unit tests).
+
+## Polish pass (2026-11-05)
+
+Governed by `docs/polish-pass.md` (including the mid-pass Golden Gate addition). Measured on
+release builds (`build/Paper.app`, SDK 27 stamp) with `scripts/drive shot` + `scripts/measure`,
+light and dark, test data only (`/tmp/paper-test/`, `PAPER_DATA_DIR`, `PAPER_DEFAULTS_SUITE`,
+`PAPER_PASTEBOARD`, `PAPER_FAKE_OCR`). Sheets that need a key window were also rendered with the
+`PAPER_SNAPSHOT` walk (offscreen; it now covers 22 surfaces per mode). Screenshots:
+`/tmp/slopapp-polish/paper/` (`before/`, `b-*.png`, `snap-before/` = before; `after/`,
+`tools/`, `snap-after/` with `pair-*.png` light|dark side by side = after).
+
+### Defects fixed (before → after)
+
+| # | Surface | Before | After |
+|---|---|---|---|
+| 1 | Lint | 4 corner literals (signature pad `8`), 5 colour literals, 15 spacing warnings | `Radius.m`; the colours are generated test art and fixture page content (`// lint:allow`); 0 warnings |
+| 2 | Toolbar, default size | A new window was 980 pt wide; at 1240 pt Redact and Share sat in », and with the inspector open Comment, Sign, Redact and Share did | New windows 1280 pt: all 14 default items visible. Fit Width moved into the zoom menu (Actual Size, Fit Page, Fit Width, then percentages; still in Customize Toolbar and ⌥⌘9). Search/Share/Inspector sit after the inspector separator, over the inspector. Tool groups have high visibility priority, zoom/scale/page/share low, so a narrow window loses zoom controls first. Toolbar id bumped to `PaperDocumentToolbar3` so the new default applies |
+| 3 | Toolbar, 560 pt minimum, 86-character file name | (overflow order undefined) | Sidebar, », Search, Share, Inspector; title truncates at the end (system); nothing clipped |
+| 4 | Scale field | "173%" clipped by its dropdown button (76 pt field) | 92 pt: fits "1600%" |
+| 5 | Page item | "of 3" 0 pt from the item's capsule edge, glyphs clipped | 12 pt inset, field and label on one baseline |
+| 6 | Bars under the toolbar | Editing bar 32 pt (hairline y = 98), sidebar picker row 36 pt (y = 102); editing bar height changed with the tool | Every bar (sidebar picker, editing bar, inspector picker, Search/Find panel headers, info bars) is 36 pt (`PaperMetrics.barHeight`); hairlines measured at y = 102.0–102.5 in sidebar, canvas and inspector |
+| 7 | Separators | SwiftUI `Divider` (1 pt) in 11 places | `Hairline()` (one device pixel); menus keep their separators |
+| 8 | Canvas | Page 6 pt from the left edge, 8 pt right, 8 pt top, 4 pt between pages; background the same near-white as the sidebar; fit-width left room for a legacy scroller (21 pt sides after widening margins) | `underPageBackgroundColor`, page shadows on, 12-unit gap on every side and between pages (16 pt at 133 %, 21 pt at 174 %; measured left 16 / right 16 / top 16 / between 17). Fit Width is computed (gap included, scroller only when scrollers take space) and refits when the sidebar or inspector opens. Thumbnail clicks and reopen-at-page no longer put the page flush (0 pt) against the bar |
+| 9 | Thumbnails | No selection shown on open (selection empty until the page changed); the list's pill would sit behind the whole row | The page gets a 3 pt ring 3 pt outside it, outer radius 6 = `Radius.s` (concentric with the square page: inner radius = gap), and its number sits in a capsule; list pill turned off (`ListSelectionHighlightRemover`). Inactive window: system-grey ring, unemphasized capsule. Row padding 8 pt so the ring never clips. Shadow 1.5 pt / 25 % |
+| 10 | Colour swatches | Selection ring touched the swatch (0 pt gap); `.separator` border invisible on black in dark mode; `.plain` buttons had no pressed or disabled look | 16 pt swatch, 1 pt gap, 2 pt ring (measured 2/1/15.5/1.5/2 px-pairs); `tertiaryLabelColor` hairline; `PressDimmingButtonStyle` (55 % pressed, 40 % disabled) |
+| 11 | Editing bar labels | "Width"/"Size" at 13 pt beside 11 pt pop-ups | Callout, secondary, same as the hint. Under 520 pt the labels go; the hint shows whole or not at all (`ViewThatFits`); anything left over clips at the trailing end instead of centring off both sides (it did at 560 pt) |
+| 12 | Selection handles | Handles centred on the annotation's corners, 2 pt inside the outline's corners | On the outline's corners (`PaperMetrics.selectionOutset`); outline and handles go system grey when the window isn't key |
+| 13 | Selection bar | 1 pt stroke, 10/6 pt padding | Hairline border, 4 pt padding: 28 pt capsule, first swatch centred 14 pt in (concentric with the end cap) |
+| 14 | Inspector | Page size, dates and Producer dropped below their labels at 240 pt; empty fields (Subject, passwords) looked like static rows; AX label "Inspector, Inspector pane" | Label and value on one baseline, value wraps beside it; numeric dates; minimum 260 pt; callout text; prompts "None"/"Required"; AX "Inspector pane" |
+| 15 | Signature sheet | Sheet grew 40 pt switching Draw → Image; placeholder `.tertiary` (1.9:1); Image preview a pure-white slab in dark mode; no typed signature | Every tab 480 × 200 pt (sheet 520 × 344 in all three); placeholder `.secondary`; preview on the same surface as Draw with label-colour ink; **Type** tab (name + Script/Hand/Marker, traced into ink like an image, `TypedSignature`, 4 tests); previews inset 24 pt |
+| 16 | Split sheet | "This document isn't chang…" truncated | Wraps |
+| 17 | Redaction progress | "…checking the re…" truncated | 420 pt, wraps |
+| 18 | Redaction report | Pale `.green` shield in light mode | `.textGreen` |
+| 19 | OCR progress | Proportional digits in "page 1 (1 of 12)" | `.monospacedDigit()` |
+| 20 | Headers & Footers | Every box left-aligned; column titles all leading | Text sits where it will on the page (left/centre/right); titles aligned to their columns |
+| 21 | Combine Files | Footer 12 pt from the edge vs 20 pt for list and options; with files the status text wrapped between the buttons and "Add Open Documents" truncated to "Add Open…" | Footer 20 pt; status line moved under the interleave option; buttons never truncate |
+| 22 | Notes list | Yellow highlighter icon ~1.3:1 on the light sidebar; black-ink icons invisible in dark | Annotation colour kept (it's information) but darkened in light / lightened in dark when it wouldn't read (`NSColor.readableSymbol`) |
+| 23 | Locked (password) document | Toolbar tool groups drawn as blank capsules (symbols never set) | Symbols set before the locked early return |
+| 24 | Text box editor | Dark mode put the box's black text on `textBackgroundColor` (dark grey) | White at 90 % with an aqua appearance: it sits on the page, which stays white |
+| 25 | Settings | Author field explanation missing | Subtitle under the control |
+| 26 | Test isolation | With `PAPER_DEFAULTS_SUITE` set, window frame, last pages, split positions, toolbar layout, Settings (`@AppStorage` on `.standard`) and window autosaves still wrote the real domain; the snapshot walk autosaved its highlights into the fixtures | All go to the suite or aren't autosaved in test runs; the walk works on a temporary copy of the fixtures |
+
+### Golden Gate + light/dark
+
+- **Sidebar**: the system sidebar (`NSSplitViewItem(sidebarWithViewController:)`), edge to edge;
+  no card. Notes icons keep the annotation's colour (meaningful), made readable per mode.
+- **Menus**: decorative symbols removed from the Highlight, Draw, Comment and Redact
+  dropdowns; colour swatches (Highlight colours, annotation context menu) and saved-signature
+  previews kept. Main menu was already text-only.
+- **Toolbar**: standard `NSToolbar` with system glass; no drawn strips. The editing bar is a
+  `.bar`-material row under it, as before.
+- **Inactive windows**: thumbnail ring and number, swatch rings, annotation outline/handles go
+  grey (`appearsActive`, key-window notifications in the overlay). Every on-screen shot in this
+  pass is of an inactive window (the owner was using the Mac); the key-window accent states are
+  verified in code only.
+- **Glass**: system materials only (toolbar, `.bar`, `.thickMaterial` selection bar).
+- **Light/dark**: every surface shot in both. Fixed for dark: signature image preview, text
+  box editor, black swatch border, notes icon colours. The canvas colour re-resolves on an
+  appearance change (`viewDidChangeEffectiveAppearance`); overlay colours are resolved at draw.
+  Pages, the page-white thumbnail placeholder and the white signature handles stay white in
+  both modes on purpose: they're page content.
+
+### Gates (this pass)
+
+- `scripts/lint.sh Paper`: pass, 0 warnings.
+- Tests: 138 in 24 suites, all pass (4 new typed-signature tests).
+- `scripts/check.sh Paper --perf`: lint, test, bundle, smoke, catalog pass. Perf: launch
+  115–144 ms, idle CPU 0.016–0.029 %, footprint 18.5–19.3 MB, all pass; **first window
+  596 ms (pass, load 4.6) and 603–626 ms (fail, four runs at load 5–9)**. The first window is the system
+  Open panel (see Build notes: ~380 ms of it is `NSOpenPanel()` itself); nothing in this pass
+  touches that path. Same borderline as recorded in the build and parity passes.
+- `scripts/drive tree`: no `[unlabeled]` in the document window (thumbnails, Notes, Search,
+  each inspector tab, selection) or the signature sheet (all three tabs).
+- Window buttons 16 × 16.
+
+### Not done, and why
+
+- **Key-window (active) screenshots and real-pointer hover**: the owner was at the Mac the whole
+  pass (HID idle 0–24 s), so Paper was never activated; accent states are code-verified.
+  Opening Settings or Combine from the menu activates the app, so those were rendered offscreen
+  (snapshot walk) after one light Settings shot.
+- **Text box editor in dark**: changed in code; an on-screen check needs a key window.
+- **Tool-group chevrons** stay 37 pt wide: macOS 26/27 gives toolbar segments a minimum width
+  (`setWidth(14)` is ignored); the default window width was raised instead.
+- **Toolbar menus while the app is inactive** show their items disabled without swatches
+  (first-responder validation with no key window); with the app active they should show swatches.
+  Not checked with the app active (owner present).
+- A stray drawing appeared once in the open signature pad during the walkthrough (pointer input
+  that wasn't ours); the sheet was cancelled, nothing saved.
+
+### Shared components built in-app (SlopKit candidates)
+
+`ListSelectionHighlightRemover` (turn off a SwiftUI List's selection pill for rows that draw
+their own selection), `PressDimmingButtonStyle`, `NSColor.readableSymbol` (SlopKit's
+`readableText` is internal; a public "readable on this surface" colour would cover both).
+
 ## Blind test log
 
 One section per round, newest last. See docs/dev-cycle.md step 5.

@@ -53,7 +53,7 @@ public enum PageOps {
     public static func extract(_ document: PDFDocument, pages indices: IndexSet) -> PDFDocument {
         let output = PDFDocument()
         for index in indices.sorted() {
-            guard let copy = document.page(at: index)?.copy() as? PDFPage else { continue }
+            guard let source = document.page(at: index), let copy = AnnotationTags.copy(source) else { continue }
             output.insert(copy, at: output.pageCount)
         }
         return output
@@ -64,7 +64,7 @@ public enum PageOps {
     public static func combine(_ documents: [PDFDocument], interleave: Bool = false) -> PDFDocument {
         let output = PDFDocument()
         func append(_ document: PDFDocument, _ index: Int) {
-            guard let copy = document.page(at: index)?.copy() as? PDFPage else { return }
+            guard let source = document.page(at: index), let copy = AnnotationTags.copy(source) else { return }
             output.insert(copy, at: output.pageCount)
         }
         if interleave, documents.count == 2 {

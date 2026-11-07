@@ -105,6 +105,7 @@ struct SplitView: View {
                 .disabled(mode != .everyN)
                 .monospacedDigit()
             Text(countText).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
                 Button("Cancel") { finish(nil) }.keyboardShortcut(.cancelAction)

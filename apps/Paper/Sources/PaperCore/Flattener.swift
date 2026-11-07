@@ -20,7 +20,7 @@ public enum Flattener {
     /// A flattened copy of `source`. Pending redaction marks are left out: flattening isn't
     /// redaction, and a baked-in red box over intact text would look like it was.
     public static func flatten(_ source: Data) throws -> Data {
-        guard let document = PDFDocument(data: source), !document.isLocked else { throw FlattenError.unreadable }
+        guard let document = AnnotationTags.open(source), !document.isLocked else { throw FlattenError.unreadable }
         for mark in RedactionMarks.marks(in: document) {
             document.page(at: mark.pageIndex)?.removeAnnotation(mark.annotation)
         }

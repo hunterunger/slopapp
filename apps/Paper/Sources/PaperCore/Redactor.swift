@@ -62,6 +62,16 @@ public struct RedactionReport: Sendable, Equatable {
     /// The outline (table of contents) was dropped because a title held redacted text.
     public var outlineRemoved: Bool = false
 
+    public init(areaCount: Int, pageCount: Int, rasterizedPages: [Int], removedAnnotations: Int,
+                metadataCleared: Bool, outlineRemoved: Bool = false) {
+        self.areaCount = areaCount
+        self.pageCount = pageCount
+        self.rasterizedPages = rasterizedPages
+        self.removedAnnotations = removedAnnotations
+        self.metadataCleared = metadataCleared
+        self.outlineRemoved = outlineRemoved
+    }
+
     public var summary: String {
         let areas = areaCount == 1 ? "1 area" : "\(areaCount) areas"
         let pages = pageCount == 1 ? "1 page" : "\(pageCount) pages"
@@ -143,7 +153,7 @@ public struct Redactor: Sendable {
     }
 
     public func apply(to source: Data) throws -> (data: Data, report: RedactionReport) {
-        guard let work = PDFDocument(data: source), !work.isLocked else { throw RedactionError.unreadable }
+        guard let work = AnnotationTags.open(source), !work.isLocked else { throw RedactionError.unreadable }
         RedactionMarks.convertRedactAnnotations(in: work)
         let marks = RedactionMarks.marks(in: work)
         guard !marks.isEmpty else { throw RedactionError.noMarks }

@@ -14,6 +14,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
     let canvas: CanvasController
     let splitController = NSSplitViewController()
     private var sidebarItem: NSSplitViewItem!
+    private(set) var inspectorItem: NSSplitViewItem!
     let toolbarController: ToolbarController
     private var searchTask: Task<Void, Never>?
     private var lastPageSave: Task<Void, Never>?
@@ -22,8 +23,9 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
     private var awaitingMouseUp = false
     /// A tool owns the current mouse-down/drag/up sequence.
     private var toolTracking = false
-    private let lastPages = LastPageMemory(store: UserDefaultsStore())
-    private var zoomMode: ZoomPreference? = Prefs.zoom
+    private let lastPages = LastPageMemory(store: UserDefaultsStore(Prefs.defaults))
+    /// The fit mode the zoom follows, or nil after a manual zoom.
+    var zoomMode: ZoomPreference? = Prefs.zoom
 
     /// `document` is only set after `addWindowController`, so keep our own reference for init.
     private weak var owningDocument: PaperDocument?
@@ -156,13 +158,15 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
     required init?(coder: NSCoder) { fatalError("not used") }
 
     private static func initialFrame() -> NSRect {
-        if let saved = UserDefaults.standard.string(forKey: "documentWindowFrame") {
+        if let saved = Prefs.defaults.string(forKey: "documentWindowFrame") {
             let frame = NSRectFromString(saved)
             if frame.width >= 560, frame.height >= 420 { return frame }
         }
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
         let height = min(screen.height - 40, 900)
-        let width = min(screen.width - 80, 980)
+        // Wide enough for every default toolbar item without the overflow menu (macOS 26
+        // gives toolbar controls a minimum size, so the row needs about 1,250 pt).
+        let width = min(screen.width - 80, 1280)
         return NSRect(x: screen.midX - width / 2, y: screen.midY - height / 2, width: width, height: height)
     }
 
@@ -174,9 +178,16 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         sidebarItem.canCollapse = true
         let content = NSSplitViewItem(viewController: canvas)
         content.minimumThickness = 360
+        let inspector = NSHostingController(rootView: InspectorView(model: model, actions: inspectorActions()))
+        inspectorItem = NSSplitViewItem(inspectorWithViewController: inspector)
+        inspectorItem.minimumThickness = 260
+        inspectorItem.maximumThickness = 360
+        inspectorItem.canCollapse = true
+        inspectorItem.isCollapsed = !Prefs.defaults.bool(forKey: "showsInspector")
         splitController.addSplitViewItem(sidebarItem)
         splitController.addSplitViewItem(content)
-        splitController.splitView.autosaveName = "PaperSidebar"
+        splitController.addSplitViewItem(inspectorItem)
+        splitController.splitView.autosaveName = Prefs.isTestSuite ? nil : "PaperSidebar"
         contentViewController = splitController
     }
 
@@ -193,6 +204,8 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         model.importedRedactions = document.importedRedactions
         model.isLocked = document.pdf.isLocked
         model.hasTextLayer = document.facts.hasTextLayer
+        model.fileURL = document.fileURL
+        model.infoRevision += 1
         model.hasOutline = (document.pdf.outlineRoot?.numberOfChildren ?? 0) > 0
         if model.sidebarMode == .outline, !model.hasOutline { model.sidebarMode = .thumbnails }
         model.selectedAnnotation = nil
@@ -207,18 +220,17 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         }
         guard !model.isLocked else {
             pdfView.document = nil
+            // The tool groups get their symbols here; without it a locked window's groups are blank.
+            toolbarController.refresh()
             return
         }
         pdfView.document = document.pdf
         // The canvas already sits below the toolbar; PDFView's own titlebar inset would hide
         // the top of the first page under it.
-        if let scroll = pdfView.documentView?.enclosingScrollView {
-            scroll.automaticallyAdjustsContentInsets = false
-            scroll.contentInsets = NSEdgeInsetsZero
-        }
         if model.isReadOnly { model.tool = .select }
         pdfView.displayMode = .singlePageContinuous
         pdfView.displaysPageBreaks = true
+        CanvasLook.apply(to: pdfView)
         if firstLoad {
             DispatchQueue.main.async { [weak self] in self?.applyInitialPosition() }
         }
@@ -233,10 +245,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
            let page = lastPages.page(for: url), page > 0, page < model.pdf.pageCount {
             index = page
         }
-        if let target = model.pdf.page(at: index) {
-            let box = target.bounds(for: pdfView.displayBox)
-            pdfView.go(to: PDFDestination(page: target, at: CGPoint(x: box.minX, y: box.maxY)))
-        }
+        if let target = model.pdf.page(at: index) { CanvasLook.scroll(pdfView, toTopOf: target) }
         updateCurrentPage()
         canvas.keepsContentStill = true
     }
@@ -246,8 +255,14 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         observers.append(center.addObserver(forName: .PDFViewPageChanged, object: pdfView, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateCurrentPage() }
         })
+        pdfView.postsFrameChangedNotifications = true
+        observers.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: pdfView, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refit() }
+        })
         observers.append(center.addObserver(forName: .PDFViewScaleChanged, object: pdfView, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
+                self?.forgetFitIfZoomedByHand()
+                if let pdfView = self?.pdfView { CanvasLook.scaleChanged(pdfView) }
                 self?.toolbarController.refresh()
                 self?.canvas.refreshOverlay()
             }
@@ -261,7 +276,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         guard let page = pdfView.currentPage else { return }
         let index = model.pdf.index(for: page)
         guard index != NSNotFound else { return }
-        if model.currentPageIndex != index {
+        if model.currentPageIndex != index || model.selectedPages.isEmpty {
             model.currentPageIndex = index
             if model.selectedPages.count <= 1, index < model.pages.count {
                 model.selectedPages = [model.pages[index].id]
@@ -294,6 +309,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
     private func pagesDidChange() {
         pdfView.layoutDocumentView()
         model.refreshPages()
+        if model.hasTextLayer != PDFSearch.hasTextLayer(model.pdf) { textLayerChanged() }
         updateCurrentPage()
         canvas.refreshOverlay()
     }
@@ -301,7 +317,8 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
     // MARK: NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
-        if let window { UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: "documentWindowFrame") }
+        if let window { Prefs.defaults.set(NSStringFromRect(window.frame), forKey: "documentWindowFrame") }
+        Prefs.defaults.set(!inspectorItem.isCollapsed, forKey: "showsInspector")
         if let url = paperDocument?.fileURL { lastPages.remember(page: model.currentPageIndex, for: url) }
         searchTask?.cancel()
         observers.forEach(NotificationCenter.default.removeObserver)
@@ -311,8 +328,27 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
     }
 
     func windowDidResize(_ notification: Notification) {
-        if zoomMode == .fitPage { applyZoom(.fitPage) }
+        refit()
         canvas.refreshOverlay()
+    }
+
+    /// A pinch or another zoom that isn't the fit's own: stop refitting on resize.
+    private func forgetFitIfZoomedByHand() {
+        guard zoomMode == .fitWidth, let page = pdfView.currentPage else { return }
+        if abs(pdfView.scaleFactor - CanvasLook.fitWidthScale(for: page, in: pdfView)) > 0.01 { zoomMode = nil }
+    }
+
+    /// Keeps a fit zoom fitting when the canvas changes width (window, sidebar, inspector).
+    func refit() {
+        switch zoomMode {
+        case .fitPage: applyZoom(.fitPage)
+        case .fitWidth:
+            guard let page = pdfView.currentPage else { return }
+            let scale = CanvasLook.fitWidthScale(for: page, in: pdfView)
+            if abs(pdfView.scaleFactor - scale) > 0.001 { pdfView.scaleFactor = scale }
+            toolbarController.refresh()
+        default: break
+        }
     }
 
     // MARK: CanvasDelegate
@@ -344,6 +380,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         guard !model.isReadOnly || tool == .select else { NSSound.beep(); return }
         canvas.endTextEditing()
         if tool != .sign { model.pendingSignature = nil }
+        rememberGroupChoice(tool)
         model.tool = tool
         if tool != .select { pdfView.select(nil) }
         toolbarController.refresh()
@@ -396,9 +433,13 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         HUD.show("Click where the signature goes", systemImage: "signature")
     }
 
-    @objc func newSignature(_ sender: Any?) {
+    @objc func newSignatureFromImage(_ sender: Any?) { presentSignatureSheet(.image) }
+
+    @objc func newSignature(_ sender: Any?) { presentSignatureSheet(.draw) }
+
+    private func presentSignatureSheet(_ source: SignatureSource) {
         guard let window else { return }
-        SignatureSheet.present(on: window) { [weak self] signature in
+        SignatureSheet.present(on: window, source: source) { [weak self] signature in
             guard let self, let signature else { return }
             self.model.pendingSignature = signature
             self.model.tool = .sign
@@ -494,8 +535,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
             return
         }
         let title = paperDocument?.displayName ?? "Notes"
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(NotesExport.markdown(title: title, items: items), forType: .string)
+        Clipboard.write(NotesExport.markdown(title: title, items: items))
         HUD.show("Copied \(items.count) highlights and notes", systemImage: "doc.on.doc")
     }
 
@@ -505,13 +545,16 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         zoomMode = zoom
         switch zoom {
         case .fitWidth:
-            pdfView.autoScales = true
+            // Computed here rather than with autoScales, so the sides get the same gap as the
+            // space between pages (see CanvasLook).
+            pdfView.autoScales = false
+            if let page = pdfView.currentPage { pdfView.scaleFactor = CanvasLook.fitWidthScale(for: page, in: pdfView) }
         case .fitPage:
             pdfView.autoScales = false
             if let page = pdfView.currentPage {
                 let bounds = page.bounds(for: pdfView.displayBox)
                 let rotated = page.rotation % 180 == 0 ? bounds.size : CGSize(width: bounds.height, height: bounds.width)
-                let area = pdfView.bounds.insetBy(dx: 16, dy: 16).size
+                let area = pdfView.bounds.insetBy(dx: PaperMetrics.pageGap, dy: PaperMetrics.pageGap).size
                 pdfView.scaleFactor = max(0.1, min(area.width / rotated.width, area.height / rotated.height))
                 pdfView.go(to: page)
             }
@@ -536,7 +579,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         let page = pdfView.currentPage
         pdfView.displayMode = mode
         if let page { pdfView.go(to: page) }
-        if zoomMode == .fitPage { applyZoom(.fitPage) }
+        refit()
         canvas.refreshOverlay()
     }
 
@@ -571,7 +614,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
 
     func goToPage(_ index: Int) {
         guard let page = model.pdf.page(at: index) else { return }
-        pdfView.go(to: page)
+        CanvasLook.scroll(pdfView, toTopOf: page)
         updateCurrentPage()
     }
 
@@ -754,9 +797,9 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         for url in urls {
             if PaperDocumentController.isImage(url) {
                 if let image = NSImage(contentsOf: url), let page = ImagePages.page(for: image) { pages.append(page) } else { skipped.append(url.lastPathComponent) }
-            } else if let source = PDFDocument(url: url), !source.isLocked {
+            } else if let source = AnnotationTags.open(url: url), !source.isLocked {
                 for pageIndex in 0..<source.pageCount {
-                    if let copy = source.page(at: pageIndex)?.copy() as? PDFPage { pages.append(copy) }
+                    if let page = source.page(at: pageIndex), let copy = AnnotationTags.copy(page) { pages.append(copy) }
                 }
             } else {
                 skipped.append(url.lastPathComponent)
@@ -816,6 +859,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
     // MARK: Validation
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if let answer = validateParityItem(item) { return answer }
         let locked = model.isLocked
         let editable = !model.isReadOnly
         switch item.action {
@@ -832,7 +876,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         case #selector(chooseShape(_:)):
             item.state = (item.representedObject as? String) == model.shapeKind.rawValue ? .on : .off
             return editable
-        case #selector(placeSignature(_:)), #selector(newSignature(_:)), #selector(insertTodaysDate(_:)):
+        case #selector(placeSignature(_:)), #selector(newSignature(_:)), #selector(newSignatureFromImage(_:)), #selector(insertTodaysDate(_:)):
             return editable
         case #selector(deleteSelectedAnnotation(_:)), #selector(delete(_:)), #selector(setAnnotationColor(_:)):
             return editable && model.selectedAnnotation != nil
@@ -906,6 +950,33 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         }
     }
 
+    // MARK: Inspector actions
+
+    private func inspectorActions() -> InspectorActions {
+        InspectorActions(
+            setInfo: { [weak self] info in self?.editor.setInfo(info) },
+            saveProtectedCopy: { [weak self] protection in
+                guard let self, let window = self.window, let document = self.paperDocument else { return }
+                self.commitEditing()
+                Exporting.saveProtected(document: document, protection: protection, window: window)
+            },
+            editSelection: { [weak self] in self?.editSelectedAnnotation(nil) },
+            deleteSelection: { [weak self] in self?.deleteSelectedAnnotation(nil) },
+            setAuthor: { [weak self] name in
+                guard let self, let annotation = self.model.selectedAnnotation else { return }
+                self.editor.setAuthor(annotation, name)
+            }
+        )
+    }
+
+    /// OCR added (or undo removed) a text layer: search and Find and Redact can work again.
+    func textLayerChanged() {
+        let has = PDFSearch.hasTextLayer(model.pdf)
+        model.hasTextLayer = has
+        model.facts.hasTextLayer = has
+        paperDocument?.updateTextLayer(has)
+    }
+
     // MARK: Sidebar actions
 
     private func sidebarActions() -> SidebarActions {
@@ -935,7 +1006,8 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
             goToOutline: { [weak self] destination in
                 self?.pdfView.go(to: destination)
                 self?.updateCurrentPage()
-            }
+            },
+            highlightAll: { [weak self] in self?.highlightSearchResults(nil) }
         )
     }
 }
@@ -956,4 +1028,5 @@ struct SidebarActions {
     var selectAnnotation: (PDFAnnotation) -> Void
     var copyNotes: () -> Void
     var goToOutline: (PDFDestination) -> Void
+    var highlightAll: () -> Void
 }

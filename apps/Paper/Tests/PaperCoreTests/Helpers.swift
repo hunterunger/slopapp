@@ -31,3 +31,19 @@ func mark(_ text: String, in document: PDFDocument, page index: Int = 0) -> PDFA
 func pageNames(_ document: PDFDocument) -> [String] {
     (0..<document.pageCount).map { document.page(at: $0)?.string?.components(separatedBy: "\n").first ?? "" }
 }
+
+/// What PDFKit read back for each annotation and what the file holds, for failure messages.
+func tagDiagnostics(_ document: PDFDocument, _ data: Data) -> String {
+    let os = ProcessInfo.processInfo.operatingSystemVersionString
+    var lines = ["macOS \(os)"]
+    for index in 0..<document.pageCount {
+        for annotation in document.page(at: index)?.annotations ?? [] {
+            let keys = annotation.annotationKeyValues.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
+            lines.append("PDFKit p\(index): \(keys)")
+        }
+    }
+    for (page, entries) in RawAnnotationReader.read(data).sorted(by: { $0.key < $1.key }) {
+        for entry in entries { lines.append("file p\(page): \(entry)") }
+    }
+    return lines.joined(separator: "\n")
+}

@@ -16,6 +16,7 @@ struct HeaderActions {
     var editSelection: () -> Void
     var toggleFields: () -> Void
     var duplicate: () -> Void
+    var recognizeText: () -> Void
 }
 
 /// Slim bars above the page: document notices, then the style strip for the current tool
@@ -29,11 +30,13 @@ struct CanvasHeader: View {
             if model.isLocked {
                 EmptyView()
             } else {
-                notices
-                if let style = styleContext {
-                    StyleStrip(model: model, context: style, actions: actions)
-                    Divider()
+                // The editing bar: always there (View > Hide Editing Bar), like the original's
+                // second toolbar row; controls that don't apply are dimmed.
+                if model.showsEditingBar {
+                    StyleStrip(model: model, context: styleContext ?? .idle, actions: actions)
+                    Hairline()
                 }
+                notices
             }
         }
     }
@@ -65,6 +68,19 @@ struct CanvasHeader: View {
                 Button("Remove All", action: actions.removeMarks)
                 Button("Apply Redactions…", action: actions.applyRedactions)
                     .buttonStyle(.borderedProminent)
+            }
+        }
+        if !model.hasTextLayer, !model.dismissedScanBar, !model.facts.isReadOnly {
+            InfoBar(symbol: "doc.viewfinder", text: "This looks like a scan, so its text can't be searched or selected yet.") {
+                Button("Recognize Text…", action: actions.recognizeText)
+                Button {
+                    model.dismissedScanBar = true
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+                .help("Hide")
+                .accessibilityLabel("Hide scan notice")
             }
         }
         if model.facts.formFieldCount > 0, !model.dismissedFormBar {
@@ -133,8 +149,9 @@ struct InfoBar<Buttons: View>: View {
                 buttons.controlSize(.small)
             }
             .padding(.horizontal, Spacing.m)
-            .padding(.vertical, 6)
-            Divider()
+            .padding(.vertical, Spacing.xs)
+            .frame(minHeight: PaperMetrics.barHeight)
+            Hairline()
         }
         .background(.bar)
     }
@@ -143,13 +160,16 @@ struct InfoBar<Buttons: View>: View {
 /// Color, width and size controls for the current tool or selected annotation.
 struct StyleStrip: View {
     enum Context: Equatable {
-        case markupTool, drawTool, shapeTool, textTool, redactTool, signTool
+        case idle, markupTool, drawTool, shapeTool, textTool, redactTool, signTool
         case selectedMarkup, selectedText, selectedNote, selectedShape(fillable: Bool), selectedOther, mark
     }
 
     @Bindable var model: DocumentModel
     let context: Context
     let actions: HeaderActions
+    @Environment(\.appearsActive) private var appearsActive
+    /// Narrow windows drop the pop-ups' labels so the controls still fit.
+    @State private var isCompact = false
 
     static let widths: [CGFloat] = [1, 2, 3, 5, 8]
     static let fontSizes: [CGFloat] = [9, 10, 11, 12, 14, 18, 24, 36]
@@ -189,10 +209,7 @@ struct StyleStrip: View {
                 hint(context == .drawTool ? "Draw on the page. Esc returns to Select." : context == .shapeTool ? "Drag on the page. Shift keeps it square or straight." : nil)
             case .textTool, .selectedText:
                 swatches([.black, .red, .blue, .green, .purple], selected: selectedColor ?? model.textColor)
-                Picker("Size", selection: Binding(get: { selectedFontSize ?? model.fontSize }, set: actions.setFontSize)) {
-                    ForEach(Self.fontSizes, id: \.self) { Text("\(Int($0)) pt").tag($0) }
-                }
-                .fixedSize()
+                sizePicker(Binding(get: { selectedFontSize ?? model.fontSize }, set: actions.setFontSize))
                 if context == .selectedText { Button("Edit Text", action: actions.editSelection) }
                 hint(context == .textTool ? "Click where the text goes. Works on flat forms too." : nil)
             case .selectedNote:
@@ -206,6 +223,12 @@ struct StyleStrip: View {
                 hint("Pending redaction mark. Delete removes it.")
             case .selectedOther:
                 Spacer()
+            case .idle:
+                swatches(InkColor.allCases, selected: nil)
+                    .disabled(true)
+                widthPicker.disabled(true)
+                sizePicker(.constant(model.fontSize)).disabled(true)
+                hint(model.tool == .note ? "Click where the note goes." : "Select an annotation or pick a tool to set its color and size.")
             }
             if isSelection {
                 Button(role: .destructive, action: actions.deleteSelection) {
@@ -214,9 +237,12 @@ struct StyleStrip: View {
             }
         }
         .controlSize(.small)
-        .padding(.horizontal, Spacing.m)
-        .padding(.vertical, 6)
+        .padding(.horizontal, PaperMetrics.pageGap)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: PaperMetrics.barHeight)
+        // If it still doesn't fit, it's cut at the trailing end, never centred off both sides.
+        .clipped()
+        .onGeometryChange(for: Bool.self) { $0.size.width < 520 } action: { isCompact = $0 }
         .background(.bar)
     }
 
@@ -244,10 +270,30 @@ struct StyleStrip: View {
     }
 
     private var widthPicker: some View {
-        Picker("Width", selection: Binding(get: { selectedWidth ?? model.lineWidth }, set: actions.setLineWidth)) {
-            ForEach(Self.widths, id: \.self) { Text("\(Int($0)) pt").tag($0) }
+        labeled("Width") {
+            Picker("Width", selection: Binding(get: { selectedWidth ?? model.lineWidth }, set: actions.setLineWidth)) {
+                ForEach(Self.widths, id: \.self) { Text("\(Int($0)) pt").tag($0) }
+            }
         }
-        .fixedSize()
+    }
+
+    private func sizePicker(_ selection: Binding<CGFloat>) -> some View {
+        labeled("Size") {
+            Picker("Size", selection: selection) {
+                ForEach(Self.fontSizes, id: \.self) { Text("\(Int($0)) pt").tag($0) }
+            }
+        }
+    }
+
+    /// A pop-up with its label in the strip's text style (a Picker's own label comes out a
+    /// size larger than its small pop-up).
+    private func labeled<Content: View>(_ title: String, @ViewBuilder _ picker: () -> Content) -> some View {
+        HStack(spacing: Spacing.xs) {
+            if !isCompact {
+                Text(title).font(.callout).foregroundStyle(.secondary).fixedSize().accessibilityHidden(true)
+            }
+            picker().labelsHidden().fixedSize()
+        }
     }
 
     private var selectedWidth: CGFloat? {
@@ -256,19 +302,24 @@ struct StyleStrip: View {
     }
 
     private func swatches(_ colors: [InkColor], selected: InkColor?) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.xs) {
             ForEach(colors, id: \.self) { color in
                 Button {
                     actions.setColor(color)
                 } label: {
+                    // 16 pt swatch, 1 pt gap, 2 pt ring: concentric circles in a 22 pt target.
                     Circle()
                         .fill(Color(nsColor: color.nsColor))
-                        .overlay(Circle().strokeBorder(.separator))
+                        // Stronger than a separator, so black reads on the dark bar and
+                        // yellow on the light one.
+                        .hairlineBorder(Circle(), color: Color(nsColor: .tertiaryLabelColor))
                         .frame(width: 16, height: 16)
-                        .padding(2)
-                        .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: selected == color ? 2 : 0))
+                        .padding(3) // lint:allow 1 pt gap + 2 pt ring around a 16 pt swatch
+                        .overlay(Circle().strokeBorder(appearsActive ? Color.accentColor : Color(nsColor: .systemGray), lineWidth: 2)
+                            .opacity(selected == color ? 1 : 0))
+                        .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressDimmingButtonStyle())
                 .help(color.title)
                 .accessibilityLabel(color.title)
                 .accessibilityAddTraits(selected == color ? .isSelected : [])
@@ -276,9 +327,15 @@ struct StyleStrip: View {
         }
     }
 
+    /// The hint takes what's left of the bar, and leaves altogether when a whole sentence
+    /// doesn't fit (a sentence cut to "Sel…" reads worse than none).
     @ViewBuilder private func hint(_ text: String?) -> some View {
         if let text {
-            Text(text).font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+            ViewThatFits(in: .horizontal) {
+                Text(text).font(.callout).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                Color.clear.frame(width: 0, height: 0)
+            }
+            .layoutPriority(-1)
         }
         Spacer(minLength: 0)
     }
@@ -298,27 +355,31 @@ struct SelectionBar: View {
     let actions: SelectionActions
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             ForEach(InkColor.highlighters, id: \.self) { color in
                 Button { actions.highlight(color) } label: {
-                    Circle().fill(Color(nsColor: color.nsColor)).overlay(Circle().strokeBorder(.separator)).frame(width: 14, height: 14)
+                    Circle().fill(Color(nsColor: color.nsColor)).hairlineBorder(Circle()).frame(width: 14, height: 14)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Circle())
                 }
                 .help("Highlight \(color.title)")
                 .accessibilityLabel("Highlight \(color.title)")
             }
-            Divider().frame(height: 16)
+            Hairline(axis: .vertical).frame(height: 16)
             button("underline", "Underline", actions.underline)
             button("strikethrough", "Strikethrough", actions.strike)
             button("note.text.badge.plus", "Add Note", actions.note)
             button("rectangle.fill.badge.xmark", "Mark for Redaction", actions.redact)
             button("doc.on.doc", "Copy", actions.copy)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressDimmingButtonStyle())
         .foregroundStyle(.primary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        // 20 pt items with 4 pt around them: a 28 pt capsule, and the first swatch's centre sits
+        // 14 pt from the edge, concentric with the capsule's end cap.
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, Spacing.xs)
         .background(.thickMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.separator))
+        .hairlineBorder(Capsule())
         .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
         .fixedSize()
     }
@@ -389,7 +450,7 @@ struct LockedView: View {
             if failed {
                 Text("That password didn't work. Check it and try again.")
                     .font(.callout)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.textRed)
             }
         }
         .padding(Spacing.xxl)
@@ -401,5 +462,16 @@ struct LockedView: View {
     private func tryUnlock() {
         failed = !unlock(password)
         if failed { password = "" }
+    }
+}
+
+/// A plain button (swatches, the selection bar's symbols) that shows it was pressed and dims
+/// when disabled, which `.plain` doesn't do on its own.
+struct PressDimmingButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(isEnabled ? (configuration.isPressed ? 0.55 : 1) : 0.4)
     }
 }

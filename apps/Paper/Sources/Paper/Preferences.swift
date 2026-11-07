@@ -27,8 +27,21 @@ enum Prefs {
     static let fontSize = "fontSize"
     static let textColor = "textColor"
     static let sidebarMode = "sidebarMode"
+    static let drawUsesShape = "drawUsesShape"
+    static let commentUsesNote = "commentUsesNote"
+    static let hidesEditingBar = "hidesEditingBar"
+    static let inspectorTab = "inspectorTab"
+    static let imageFormat = "imageExportFormat"
+    static let imageDPI = "imageExportDPI"
 
-    static var defaults: UserDefaults { .standard }
+    /// Test hook: PAPER_DEFAULTS_SUITE keeps snapshot and walkthrough runs out of the real
+    /// preferences.
+    nonisolated(unsafe) static let defaults: UserDefaults =
+        ProcessInfo.processInfo.environment["PAPER_DEFAULTS_SUITE"].flatMap(UserDefaults.init(suiteName:)) ?? .standard
+
+    /// True when a test run keeps its preferences in a separate suite. Window frames, split
+    /// positions and the toolbar layout aren't autosaved then, so nothing reaches the real domain.
+    static let isTestSuite = ProcessInfo.processInfo.environment["PAPER_DEFAULTS_SUITE"] != nil
 
     static func register() {
         defaults.register(defaults: [
@@ -41,6 +54,8 @@ enum Prefs {
             lineWidth: 2.0,
             fontSize: 12.0,
             textColor: InkColor.black.rawValue,
+            imageFormat: ImageExport.Format.png.rawValue,
+            imageDPI: 150,
         ])
     }
 

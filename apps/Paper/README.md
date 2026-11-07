@@ -19,13 +19,24 @@ network.
 - **Mark up**: highlight, underline and strike through text (five colors), text boxes (also
   for typing on flat forms), sticky notes, rectangles, ovals, lines, arrows and freehand
   drawing. Select, move, resize, recolor and delete. Everything is undoable.
-- **Sign**: draw a signature or initials once, place them on any page, resize them.
+- **Find and Highlight**: search, then highlight every result in one step.
+- **Sign**: draw a signature or initials, or import a photo or scan of one (the paper is
+  removed and the ink traced). Place them on any page and resize them.
+- **Recognize Text (OCR)**: makes scanned pages searchable and selectable with an invisible
+  text layer. It runs on this Mac with Apple's Vision; the very first page can take up to a
+  minute while macOS prepares it. **Copy Text from Page** reads a scan without changing it.
 - **Fill forms**: text fields, checkboxes, radio buttons and pop-ups, with Tab between fields.
 - **Pages**: reorder by dragging thumbnails or with ⌥⌘↑/↓, rotate, delete, insert from a file
   or a Finder drop, insert blank pages, reverse, extract to a new document, split into files.
 - **Combine Files…**: an ordered list of PDFs and images becomes one document, with an option
   to interleave front and back scans.
-- **Export Flattened Copy…**: annotations, signatures and form entries become part of the page.
+- **Headers & Footers…**: page numbers, Bates numbers, dates or any text in six positions.
+- **Export**: a flattened copy (annotations, signatures and form entries become part of the
+  page), images of the pages (PNG, JPEG, TIFF, HEIC at 72–300 dpi), plain text, or a
+  **protected copy** with an open password and/or printing and copying restrictions.
+- **Inspector** (⌥⌘I): edit the title, author, subject and keywords; see page size, PDF
+  version and file size; the security panel; details of the selected annotation.
+- **Share**: the document or a flattened copy, from the toolbar or File > Share.
 - **Redact**: mark text or areas with the Redact tool, or find every occurrence with Find and
   Redact. Marks stay pending (and saving never applies them) until you choose Apply
   Redactions…, which writes a **new file** by default, removes the content under the marks
@@ -50,7 +61,9 @@ their password when saved.
 | Delete selected annotation | ⌫ |
 | Nudge selected annotation | arrows (⇧ for 10 pt) |
 | Find, next, previous, use selection | ⌘F, ⌘G, ⇧⌘G, ⌘E |
-| Find and Redact | ⇧⌘F |
+| Find and Highlight / Find and Redact | ⌥⇧⌘F / ⇧⌘F |
+| Remove markup from the selection | ⌥⇧⌘0 |
+| Show inspector / hide editing bar | ⌥⌘I / ⇧⌘E |
 | Rotate left / right | ⌘L / ⌘R |
 | Delete pages | ⌘⌫ (⌫ in the thumbnails) |
 | Move pages up / down | ⌥⌘↑ / ⌥⌘↓ |
@@ -70,10 +83,9 @@ Paper never asks to become the default PDF app; Settings has a button if you wan
 ## Not there yet (on purpose)
 
 - Editing the existing text or images of a PDF.
-- OCR to make scans searchable (planned for 1.1).
-- Certificate-based digital signatures.
-- Form JavaScript (calculated totals don't update) and dynamic XFA forms.
-- Stamps, watermarks, page numbers, crop, compare.
+- Certificate-based digital signatures, and cloud signing requests.
+- Form JavaScript (calculated totals don't update), dynamic XFA forms, creating form fields.
+- Stamps, watermarks, crop, compare, conversion to Office formats.
 
 ## Develop
 
@@ -89,5 +101,10 @@ architecture with a `PDFView` canvas and SwiftUI for the sidebar, bars and sheet
 Test hooks: `PAPER_DATA_DIR` points the signature library somewhere else (tests use
 `/tmp/paper-test`), `PAPER_APPEARANCE=light|dark` forces an appearance for screenshots, and
 `PAPER_DEBUG_EVENTS=1` logs canvas events to `paper-events.log` in the temporary directory.
+`PAPER_DEFAULTS_SUITE=<name>` keeps preferences out of the real ones, `PAPER_PASTEBOARD=<name>`
+sends copies to a private pasteboard, and `PAPER_SNAPSHOT=<folder>` with
+`PAPER_SNAPSHOT_FIXTURES=<fixtures folder>` (plus `PAPER_FAKE_OCR=1`) renders the document
+window and sheets offscreen to PNGs in light and dark, then quits. Real-Vision OCR tests run with
+`PAPER_VISION_TESTS=1 swift test --package-path apps/Paper`.
 
 Design follows [`docs/design-system.md`](../../docs/design-system.md) (archetype 2e, document app).

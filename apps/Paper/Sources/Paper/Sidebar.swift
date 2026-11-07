@@ -1,3 +1,4 @@
+import AppKit
 import PDFKit
 import PaperCore
 import SlopKit
@@ -20,10 +21,12 @@ struct SidebarView: View {
                 .pickerStyle(.segmented)
                 .labelStyle(.iconOnly)
                 .labelsHidden()
+                .fixedSize()
                 .padding(.horizontal, Spacing.s)
-                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+                .frame(height: PaperMetrics.barHeight)
                 .disabled(model.isLocked)
-                Divider()
+                Hairline()
             case .search, .redact:
                 EmptyView()
             }
@@ -83,7 +86,8 @@ struct ThumbnailList: View {
                 ForEach(Array(model.pages.enumerated()), id: \.element.id) { index, item in
                     ThumbnailRow(page: item.page, number: index + 1, count: model.pages.count,
                                  version: model.pageVersions[item.id, default: 0],
-                                 isCurrent: index == model.currentPageIndex)
+                                 isCurrent: index == model.currentPageIndex,
+                                 isSelected: model.selectedPages.contains(item.id))
                         .tag(item.id)
                         .id(item.id)
                 }
@@ -106,6 +110,8 @@ struct ThumbnailList: View {
                 }
             }
             .listStyle(.sidebar)
+            // The rows draw their own selection (a ring around the page), not the list's pill.
+            .background(ListSelectionHighlightRemover())
             .accessibilityLabel("Pages")
             .contextMenu(forSelectionType: ObjectIdentifier.self) { ids in
                 if !ids.isEmpty {
@@ -148,32 +154,45 @@ struct ThumbnailRow: View {
     let count: Int
     let version: Int
     let isCurrent: Bool
+    let isSelected: Bool
     @State private var image: NSImage?
-    static let width: CGFloat = 110
+    @Environment(\.appearsActive) private var appearsActive
+    static let width = PaperMetrics.thumbnailWidth
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: Spacing.s) {
             Group {
                 if let image {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                 } else {
+                    // A blank sheet while the thumbnail renders: paper is white in both modes.
                     Rectangle().fill(.white).aspectRatio(aspect, contentMode: .fit)
                 }
             }
             .frame(width: Self.width)
-            .shadow(color: .black.opacity(0.2), radius: 1, y: 0.5)
+            .shadow(color: .black.opacity(0.25), radius: 1.5, y: 0.5)
+            .overlay {
+                RoundedRectangle(cornerRadius: PaperMetrics.thumbnailRingRadius)
+                    .strokeBorder(appearsActive ? Color.accentColor : Color(nsColor: .systemGray), lineWidth: PaperMetrics.thumbnailRingWidth)
+                    .padding(-PaperMetrics.thumbnailRingRadius)
+                    .opacity(isSelected ? 1 : 0)
+            }
             Text("\(number)")
                 .font(.caption)
                 .monospacedDigit()
-                .foregroundStyle(isCurrent ? .primary : .secondary)
                 .fontWeight(isCurrent ? .semibold : .regular)
+                .foregroundStyle(numberStyle)
+                .padding(.horizontal, Spacing.xs + 2) // lint:allow capsule padding: 6 pt around a caption digit
+                .padding(.vertical, 1)
+                .background(Capsule().fill(ringColor).opacity(isSelected ? 1 : 0))
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
+        .padding(.vertical, Spacing.s)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Page \(number) of \(count)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .task(id: version) {
             if let cached = ThumbnailCache.shared.image(for: page, version: version, width: Self.width) {
                 image = cached
@@ -183,6 +202,19 @@ struct ThumbnailRow: View {
             guard !Task.isCancelled else { return }
             image = ThumbnailCache.shared.render(page, version: version, width: Self.width)
         }
+    }
+
+    private var numberStyle: AnyShapeStyle {
+        if isSelected {
+            return appearsActive ? AnyShapeStyle(Color(nsColor: .alternateSelectedControlTextColor)) : AnyShapeStyle(.primary)
+        }
+        return isCurrent ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary)
+    }
+
+    /// The number's capsule: accent in the key window, the list's inactive selection grey
+    /// otherwise (the ring uses system gray instead: a thin line needs the stronger grey).
+    private var ringColor: Color {
+        appearsActive ? Color.accentColor : Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
     }
 
     private var aspect: CGFloat {
@@ -256,7 +288,7 @@ struct AnnotationList: View {
                         HStack(alignment: .top, spacing: Spacing.s) {
                             Image(systemName: item.symbol)
                                 .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(item.annotation.color.alphaComponent < 0.1 ? Color.secondary : Color(nsColor: item.annotation.color))
+                                .foregroundStyle(item.annotation.color.alphaComponent < 0.1 ? Color.secondary : Color.readable(item.annotation.color.withAlphaComponent(1), on: .windowBackgroundColor, target: ReadableColor.symbolTarget))
                                 .frame(width: 16)
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 2) {
@@ -274,7 +306,7 @@ struct AnnotationList: View {
                     .accessibilityLabel("\(item.title), page \(item.pageIndex + 1)\(item.detail.map { ": \($0)" } ?? "")")
                 }
                 .listStyle(.sidebar)
-                Divider()
+                Hairline()
                 Button("Copy Highlights & Notes", action: actions.copyNotes)
                     .controlSize(.small)
                     .padding(Spacing.s)
@@ -337,8 +369,8 @@ struct PanelHeader: View {
                     .accessibilityLabel("Close \(title)")
             }
             .padding(.horizontal, Spacing.m)
-            .padding(.vertical, Spacing.s)
-            Divider()
+            .frame(height: PaperMetrics.barHeight)
+            Hairline()
         }
     }
 }
@@ -362,7 +394,7 @@ struct SearchResults: View {
                     if model.isSearching { ProgressView().controlSize(.small) }
                 }
                 .padding(.horizontal, Spacing.m)
-                .padding(.vertical, 6)
+                .padding(.vertical, Spacing.s)
                 List(selection: Binding(get: { model.searchIndex }, set: { if let index = $0 { actions.selectHit(index) } })) {
                     ForEach(Array(model.searchHits.enumerated()), id: \.offset) { index, hit in
                         VStack(alignment: .leading, spacing: 2) {
@@ -375,6 +407,26 @@ struct SearchResults: View {
                 }
                 .listStyle(.sidebar)
                 .accessibilityLabel("Search results")
+                if !model.isReadOnly, !model.searchHits.isEmpty {
+                    Hairline()
+                    HStack(spacing: Spacing.s) {
+                        Button {
+                            actions.highlightAll()
+                        } label: {
+                            Label(model.searchHits.count == 1 ? "Highlight Result" : "Highlight All \(model.searchHits.count)",
+                                  systemImage: "highlighter")
+                        }
+                        Circle()
+                            .fill(Color(nsColor: model.highlightColor.nsColor))
+                            .overlay(Circle().strokeBorder(.separator))
+                            .frame(width: 12, height: 12)
+                            .help("\(model.markupStyle.title), \(model.highlightColor.title). Change it in the Highlight menu.")
+                            .accessibilityLabel("Highlight color \(model.highlightColor.title)")
+                        Spacer(minLength: 0)
+                    }
+                    .controlSize(.small)
+                    .padding(Spacing.s)
+                }
             }
         }
     }
@@ -415,7 +467,7 @@ struct FindAndRedact: View {
             }
             .controlSize(.small)
             .padding(Spacing.m)
-            Divider()
+            Hairline()
             if !model.hasTextLayer {
                 FillingUnavailable("No Text to Find", systemImage: "doc.viewfinder",
                                        description: Text("This document looks like a scan. Use the Redact tool (⌘9) to drag boxes over what to hide."))
@@ -435,7 +487,7 @@ struct FindAndRedact: View {
                     .controlSize(.small)
                 }
                 .padding(.horizontal, Spacing.m)
-                .padding(.vertical, 6)
+                .padding(.vertical, Spacing.s)
                 List(model.redactHits) { hit in
                     Toggle(isOn: Binding(
                         get: { model.redactChecked.contains(hit.id) },
@@ -450,8 +502,8 @@ struct FindAndRedact: View {
                 }
                 .listStyle(.sidebar)
                 .accessibilityLabel("Results to redact")
-                Divider()
-                VStack(alignment: .leading, spacing: 6) {
+                Hairline()
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     Button(model.redactChecked.count == 1 ? "Mark 1 Result" : "Mark \(model.redactChecked.count) Results",
                            action: actions.markRedactionHits)
                         .buttonStyle(.borderedProminent)
@@ -484,5 +536,43 @@ struct FillingUnavailable: View {
     var body: some View {
         ContentUnavailableView(title, systemImage: systemImage, description: description)
             .frame(maxHeight: .infinity)
+    }
+}
+
+/// Turns off the selection pill of the list it sits behind, for lists whose rows draw their own
+/// selection (the page thumbnails' ring). Selection, keyboard navigation, drag and the context
+/// menu keep working; only the drawing changes. If AppKit's structure ever changes, the list
+/// simply keeps its standard pill.
+struct ListSelectionHighlightRemover: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Probe() }
+    func updateNSView(_ view: NSView, context: Context) { (view as? Probe)?.apply() }
+
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+        }
+
+        func apply() {
+            DispatchQueue.main.async { [weak self] in
+                var ancestor = self?.superview
+                for _ in 0..<6 {
+                    guard let view = ancestor else { return }
+                    if let table = Self.firstTable(in: view) {
+                        if table.selectionHighlightStyle != .none { table.selectionHighlightStyle = .none }
+                        return
+                    }
+                    ancestor = view.superview
+                }
+            }
+        }
+
+        private static func firstTable(in view: NSView) -> NSTableView? {
+            if let table = view as? NSTableView { return table }
+            for subview in view.subviews {
+                if let table = firstTable(in: subview) { return table }
+            }
+            return nil
+        }
     }
 }

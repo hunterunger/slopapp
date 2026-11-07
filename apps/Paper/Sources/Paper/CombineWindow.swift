@@ -54,7 +54,7 @@ enum CombineWindow {
             newWindow.isReleasedWhenClosed = false
             newWindow.setContentSize(NSSize(width: 480, height: 420))
             newWindow.center()
-            newWindow.setFrameAutosaveName("CombineFiles")
+            if !Prefs.isTestSuite { newWindow.setFrameAutosaveName("CombineFiles") }
             window = newWindow
         }
         NSApp.activate()
@@ -72,7 +72,7 @@ enum CombineWindow {
             } else if let open = NSDocumentController.shared.document(for: file.url) as? PaperDocument, !open.pdf.isLocked {
                 // Open in Paper: use what's on screen, including unsaved edits.
                 documents.append(open.pdf)
-            } else if let document = PDFDocument(url: file.url), !document.isLocked {
+            } else if let document = AnnotationTags.open(url: file.url), !document.isLocked {
                 documents.append(document)
             }
         }
@@ -117,7 +117,7 @@ struct CombineView: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(file.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
                                 if let problem = file.problem {
-                                    Text(problem).font(.caption).foregroundStyle(.red)
+                                    Text(problem).font(.caption).foregroundStyle(.textRed)
                                 } else if let count = file.pageCount {
                                     Text(count == 1 ? "1 page" : "\(count) pages").font(.caption).foregroundStyle(.secondary).monospacedDigit()
                                 }
@@ -138,32 +138,35 @@ struct CombineView: View {
                     return true
                 }
                 .accessibilityLabel("Files to combine")
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     Toggle("Interleave pages (front and back scans)", isOn: $model.interleave)
                         .disabled(model.usable.count != 2)
                     Text("Takes page 1 of the first file, then the last page of the second, and so on.")
                         .font(.caption).foregroundStyle(.secondary)
+                    // The status line lives here, not between the buttons, so the button row
+                    // never truncates or wraps.
+                    Text("Drag to reorder. \(model.totalPages == 1 ? "1 page" : "\(model.totalPages) pages") in all.")
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        .padding(.top, Spacing.xs)
                 }
                 .padding(.horizontal, Spacing.windowMargin)
                 .padding(.vertical, Spacing.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Divider()
+            Hairline()
             HStack {
                 Button("Add Files…", action: addFiles)
                 Button("Add Open Documents") { model.add(Self.openDocumentURLs()) }
                     .disabled(Self.openDocumentURLs().allSatisfy { url in model.files.contains { $0.url == url } })
-                if !model.files.isEmpty {
-                    Text("Drag to reorder. \(model.totalPages) pages in all.")
-                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                }
                 Spacer()
                 Button("Cancel", action: close).keyboardShortcut(.cancelAction)
                 Button("Combine", action: combine)
                     .keyboardShortcut(.defaultAction)
                     .disabled(model.usable.isEmpty)
             }
-            .padding(Spacing.m)
+            // Same leading edge as the interleave option above it.
+            .padding(.horizontal, Spacing.windowMargin)
+            .padding(.vertical, Spacing.m)
         }
         .frame(minWidth: 420, minHeight: 320)
     }

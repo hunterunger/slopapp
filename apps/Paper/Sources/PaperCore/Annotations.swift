@@ -256,13 +256,18 @@ public enum AnnotationGeometry {
         switch annotation.type ?? "" {
         case "Ink":
             let paths = annotation.paths ?? []
+            // Image signatures are bands of horizontal strokes: their thickness has to follow
+            // the height, or resizing opens gaps between the bands.
+            let bands = isBanded(paths)
             for path in paths { annotation.remove(path) }
             annotation.bounds = target
             for path in paths {
                 let scaled = path.copy() as! NSBezierPath
                 scaled.transform(using: AffineTransform(scaleByX: sx, byY: sy))
+                if bands { scaled.lineWidth = path.lineWidth * sy }
                 annotation.add(scaled)
             }
+            if bands, let border = annotation.border { border.lineWidth *= sy }
         case "Line":
             let start = annotation.startPoint, end = annotation.endPoint
             annotation.bounds = target
@@ -270,6 +275,18 @@ public enum AnnotationGeometry {
             annotation.endPoint = CGPoint(x: end.x * sx, y: end.y * sy)
         default:
             annotation.bounds = target
+        }
+    }
+
+    /// Ink made of many straight horizontal strokes (an imported image signature).
+    static func isBanded(_ paths: [NSBezierPath]) -> Bool {
+        guard paths.count >= 8 else { return false }
+        return paths.allSatisfy { path in
+            guard path.elementCount == 2 else { return false }
+            var a = [CGPoint](repeating: .zero, count: 3), b = [CGPoint](repeating: .zero, count: 3)
+            path.element(at: 0, associatedPoints: &a)
+            path.element(at: 1, associatedPoints: &b)
+            return abs(a[0].y - b[0].y) < 0.001
         }
     }
 

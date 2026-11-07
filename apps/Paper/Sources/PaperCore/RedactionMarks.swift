@@ -3,8 +3,8 @@ import PDFKit
 
 /// Pending redaction marks.
 ///
-/// A mark is a plain **Square** annotation whose `/NM` starts with `paper.redaction.`.
-/// It is never a `Redact` annotation: PDFKit applies `Redact` annotations on every write
+/// A mark is a plain **Square** annotation tagged as `PaperTag.redactionMark` (see
+/// `AnnotationTags` for how the tag survives every macOS's PDFKit). It is never a `Redact` annotation: PDFKit applies `Redact` annotations on every write
 /// (research P1/P4), so storing marks that way would let autosave destroy content in the
 /// original before the person chose Apply. A Square changes nothing on save and shows up in
 /// other viewers as a red dashed box over intact content.
@@ -14,8 +14,7 @@ public enum RedactionMarks {
     public static let redactSubtype = PDFAnnotationSubtype(rawValue: "Redact")
 
     public static func isMark(_ annotation: PDFAnnotation) -> Bool {
-        guard let name = annotation.value(forAnnotationKey: .name) as? String else { return false }
-        return name.hasPrefix(namePrefix)
+        AnnotationTags.has(.redactionMark, annotation)
     }
 
     /// A `Redact` annotation that came from another app (or anywhere else).
@@ -26,7 +25,6 @@ public enum RedactionMarks {
 
     public static func makeMark(bounds: CGRect) -> PDFAnnotation {
         let mark = PDFAnnotation(bounds: bounds.standardized, forType: .square, withProperties: nil)
-        mark.setValue(namePrefix + UUID().uuidString, forAnnotationKey: .name)
         mark.color = NSColor.systemRed
         mark.interiorColor = NSColor.systemRed.withAlphaComponent(0.18)
         let border = PDFBorder()
@@ -34,7 +32,7 @@ public enum RedactionMarks {
         border.style = .dashed
         border.dashPattern = [3, 2]
         mark.border = border
-        mark.contents = "Pending redaction"
+        AnnotationTags.tag(mark, as: .redactionMark)
         return mark
     }
 

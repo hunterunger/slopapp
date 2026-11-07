@@ -15,7 +15,7 @@ enum SettingsWindow {
             newWindow.styleMask = [.titled, .closable]
             newWindow.isReleasedWhenClosed = false
             newWindow.center()
-            newWindow.setFrameAutosaveName("PaperSettings")
+            if !Prefs.isTestSuite { newWindow.setFrameAutosaveName("PaperSettings") }
             window = newWindow
         }
         NSApp.activate()
@@ -24,9 +24,9 @@ enum SettingsWindow {
 }
 
 struct PaperGeneralSettings: View {
-    @AppStorage(Prefs.openZoom) private var zoom = ZoomPreference.fitWidth.rawValue
-    @AppStorage(Prefs.reopenAtLastPage) private var reopenAtLastPage = true
-    @AppStorage(Prefs.authorName) private var author = ""
+    @AppStorage(Prefs.openZoom, store: Prefs.defaults) private var zoom = ZoomPreference.fitWidth.rawValue
+    @AppStorage(Prefs.reopenAtLastPage, store: Prefs.defaults) private var reopenAtLastPage = true
+    @AppStorage(Prefs.authorName, store: Prefs.defaults) private var author = ""
     @State private var isDefault = SettingsDefaultApp.isPaperDefault
 
     var body: some View {
@@ -34,7 +34,10 @@ struct PaperGeneralSettings: View {
             ForEach(ZoomPreference.allCases) { Text($0.title).tag($0.rawValue) }
         }
         Toggle("Reopen documents at the last page viewed", isOn: $reopenAtLastPage)
-        TextField("Author name for notes", text: $author, prompt: Text(NSFullUserName()))
+        TextField(text: $author, prompt: Text(NSFullUserName())) {
+            Text("Author name for notes")
+            Text("Shown on the highlights and notes you add, in Paper and other PDF apps.")
+        }
         LabeledContent("Default PDF app") {
             if isDefault {
                 Text("Paper opens PDFs").foregroundStyle(.secondary)

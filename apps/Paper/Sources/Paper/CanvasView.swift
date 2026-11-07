@@ -30,6 +30,13 @@ final class PaperPDFView: PDFView {
     weak var canvasDelegate: CanvasDelegate?
     private(set) var preview: CanvasPreview?
 
+    /// The canvas colour is resolved again when light/dark changes while the app runs
+    /// (PDFView may cache it in a layer).
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        backgroundColor = .underPageBackgroundColor
+    }
+
     private enum Drag {
         case none
         case passThrough
@@ -77,7 +84,9 @@ final class PaperPDFView: PDFView {
     /// Corner handles of the selected annotation in view coordinates.
     func handleRects(for annotation: PDFAnnotation) -> [NSRect] {
         guard let page = annotation.page else { return [] }
-        let rect = convert(annotation.bounds, from: page)
+        // On the selection outline's corners (it sits just outside the annotation).
+        let outset = PaperMetrics.selectionOutset
+        let rect = convert(annotation.bounds, from: page).insetBy(dx: -outset, dy: -outset)
         let size = Self.handleSize
         // Order matches AnnotationGeometry.dragging: bottom-left, bottom-right, top-left, top-right.
         return [NSPoint(x: rect.minX, y: rect.minY), NSPoint(x: rect.maxX, y: rect.minY),
@@ -496,6 +505,26 @@ final class CanvasOverlay: NSView {
     var fieldRects: [(PDFPage, CGRect)] = [] { didSet { needsDisplay = true } }
 
     override var isOpaque: Bool { false }
+    private var keyObservers: [NSObjectProtocol] = []
+
+    /// The selection goes gray when the window isn't key, like every other selection.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        keyObservers.forEach(NotificationCenter.default.removeObserver)
+        keyObservers = []
+        guard let window else { return }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            keyObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.needsDisplay = true }
+            })
+        }
+    }
+
+    /// Selection colour: accent in the key window. Otherwise system gray, not a label colour,
+    /// because it's drawn over the page, which stays white in dark mode too.
+    private var selectionColor: NSColor {
+        window?.isKeyWindow == true ? .controlAccentColor : .systemGray
+    }
 
     /// Never takes clicks itself: the window's event monitor sends tool clicks to the canvas
     /// (see PaperWindowController.handleMonitored), everything else reaches PDFKit.
@@ -511,7 +540,7 @@ final class CanvasOverlay: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let pdfView, let model else { return }
-        let accent = NSColor.controlAccentColor
+        let accent = selectionColor
         for (page, rect) in fieldRects {
             let local = convert(pdfView.convert(rect, from: page), from: pdfView)
             accent.withAlphaComponent(0.15).setFill()
@@ -521,7 +550,8 @@ final class CanvasOverlay: NSView {
         }
         if let annotation = model.selectedAnnotation, let page = annotation.page, page.document === model.pdf {
             let rect = convert(pdfView.convert(annotation.bounds, from: page), from: pdfView)
-            let outline = NSBezierPath(rect: rect.insetBy(dx: -2, dy: -2))
+            let outset = PaperMetrics.selectionOutset
+            let outline = NSBezierPath(rect: rect.insetBy(dx: -outset, dy: -outset))
             outline.lineWidth = 1.5
             accent.setStroke()
             outline.stroke()

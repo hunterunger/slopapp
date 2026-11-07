@@ -166,7 +166,7 @@ struct RedactionReportView: View {
                 Image(systemName: "checkmark.shield")
                     .font(.system(size: 32))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(.textGreen)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text(replaced ? "Redacted “\(url.lastPathComponent)”" : "Saved “\(url.lastPathComponent)”").font(.headline)
@@ -206,9 +206,9 @@ struct BusyView: View {
     var body: some View {
         HStack(spacing: Spacing.m) {
             ProgressView().controlSize(.small)
-            Text(text)
+            Text(text).fixedSize(horizontal: false, vertical: true)
         }
         .padding(Spacing.xl)
-        .frame(minWidth: 360)
+        .frame(width: 420, alignment: .leading)
     }
 }

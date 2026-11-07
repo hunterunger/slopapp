@@ -13,6 +13,9 @@ final class PaperDocument: NSDocument {
     private(set) var importedRedactions = 0
     /// The password the person typed to unlock, kept so saving keeps the file protected.
     private(set) var password: String?
+    /// The bytes the document was read from (memory-mapped), so Paper's annotation tags can
+    /// be restored after a password unlock too (see `AnnotationTags`).
+    private var rawData: Data?
     /// Pending widget values captured to spot form edits (see FormTracker).
     let formTracker = FormTracker()
 
@@ -62,11 +65,15 @@ final class PaperDocument: NSDocument {
     private func adopt(_ document: PDFDocument, raw: Data?) {
         pdf = document
         password = nil
+        if let raw { rawData = raw }
         guard !document.isLocked else {
             facts = DocumentFacts()
             facts.isEncrypted = true
             return
         }
+        // Pending redaction marks and signatures are found by their tags, which some PDFKit
+        // versions don't read back (research P20): restore them from the file's own bytes.
+        if let raw { AnnotationTags.restore(in: document, from: raw) }
         facts = DocumentFacts.inspect(document, raw: raw)
         // Research P4: PDFKit applies `Redact` annotations on every write. Convert them to
         // pending marks in memory so no save can apply them; the change isn't saved until the
@@ -79,16 +86,19 @@ final class PaperDocument: NSDocument {
     /// Unlocks a password-protected document. Returns false for a wrong password.
     func unlock(with password: String) -> Bool {
         guard pdf.unlock(withPassword: password) else { return false }
-        self.password = password
         let unlocked = pdf
+        if let rawData { AnnotationTags.restore(in: unlocked, from: rawData, password: password) }
         adopt(unlocked, raw: nil)
         self.password = password
         facts.isEncrypted = true
         return true
     }
 
+    func updateTextLayer(_ has: Bool) { facts.hasTextLayer = has }
+
     func replace(with document: PDFDocument) {
         undoManager?.removeAllActions()
+        rawData = nil
         adopt(document, raw: nil)
         windowController?.documentDidReload()
     }

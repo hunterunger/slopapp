@@ -39,7 +39,7 @@ public enum Fixtures {
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                 bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
         for x in 0..<width {
-            context.setFillColor(CGColor(red: CGFloat(x) / CGFloat(width), green: 0.5, blue: CGFloat(width - x) / CGFloat(width), alpha: 1))
+            context.setFillColor(CGColor(red: CGFloat(x) / CGFloat(width), green: 0.5, blue: CGFloat(width - x) / CGFloat(width), alpha: 1)) // lint:allow fixture page content
             context.fill(CGRect(x: x, y: 0, width: 1, height: height))
         }
         return context.makeImage()!
@@ -52,7 +52,7 @@ public enum Fixtures {
             text("Account number \(secret)-\(index + 1) belongs to nobody.", at: CGPoint(x: 72, y: 650))
             text("This public sentence should survive redaction.", at: CGPoint(x: 72, y: 600))
             text("Contact jane@example.com about the Example project.", at: CGPoint(x: 72, y: 560), size: 14)
-            context.setFillColor(CGColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1))
+            context.setFillColor(CGColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1)) // lint:allow fixture page content
             context.fill(CGRect(x: 72, y: 400, width: 200, height: 120))
             context.draw(gradientImage(), in: CGRect(x: 320, y: 400, width: 200, height: 100))
         }
@@ -165,7 +165,7 @@ public enum Fixtures {
             for line in 0..<30 {
                 text("Line \(line + 1) of page \(index + 1): the quick brown fox jumps over the lazy dog.", at: CGPoint(x: 72, y: 660 - CGFloat(line) * 18), size: 11)
             }
-            context.setFillColor(CGColor(red: 0.9, green: 0.6, blue: 0.1, alpha: 1))
+            context.setFillColor(CGColor(red: 0.9, green: 0.6, blue: 0.1, alpha: 1)) // lint:allow fixture page content
             context.fill(CGRect(x: 72, y: 72, width: 100, height: 20))
         }
     }

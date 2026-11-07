@@ -74,4 +74,27 @@ enum Exporting {
             }
         }
     }
+
+    /// Save Protected Copy…: a new file with the passwords and permissions from the
+    /// inspector's Security tab. The open document isn't changed.
+    static func saveProtected(document: PaperDocument, protection: Protection, window: NSWindow) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "\(baseName(document)) (protected).pdf"
+        if let directory = document.fileURL?.deletingLastPathComponent() { panel.directoryURL = directory }
+        panel.message = protection.openPassword.isEmpty ? "Anyone can open the copy; the restrictions need the permissions password to lift."
+            : "The copy asks for the password when it's opened."
+        panel.beginSheetModal(for: window) { response in
+            MainActor.assumeIsolated {
+                guard response == .OK, let url = panel.url else { return }
+                do {
+                    try protection.protect(document.pdf).write(to: url, options: .atomic)
+                    HUD.show("Saved protected copy", systemImage: "lock.doc")
+                } catch {
+                    NSAlert(error: error).beginSheetModal(for: window, completionHandler: nil)
+                }
+            }
+        }
+    }
 }
