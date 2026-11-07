@@ -5,7 +5,7 @@ import SwiftUI
 /// (see docs/design-system.md: the user's accent color wins).
 public enum Brand {
     public static let name = "Slopapp"
-    public static let tagline = "The name is a joke. The apps aren't."
+    public static let tagline = "Native Mac apps, made with care."
     public static let repoURL = URL(string: "https://github.com/hunterunger/slopapp")!
     public static let license = "MIT"
 

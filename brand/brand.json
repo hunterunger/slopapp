@@ -1,7 +1,7 @@
 {
   "name": "Slopapp",
-  "tagline": "The name is a joke. The apps aren't.",
-  "description": "Free, open-source Mac apps, built with an unreasonable amount of care. No subscription, no account, no tracking.",
+  "tagline": "Native Mac apps, made with care.",
+  "description": "A growing collection of small, native Mac apps for everyday work. Free and open source, with no subscription, no account and no tracking.",
   "bundleIdPrefix": "app.slopapp",
   "repoUrl": "https://github.com/hunterunger/slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
@@ -15,8 +15,23 @@
     "ember": "#E5603D",
     "ink": "#13201A"
   },
+  "nordic": {
+    "_note": "App icons and the website: matte Nordic colours on birch, botanical prints. Spec: brand/ICONS.md.",
+    "birch": "#F5F0E8",
+    "oat": "#E4D9C6",
+    "charcoal": "#2F2D2A",
+    "night": "#24231F",
+    "pine": "#3F5E4E",
+    "sage": "#8EA58B",
+    "clay": "#C4704F",
+    "ochre": "#D2A04C",
+    "fjord": "#5D7E9A",
+    "heather": "#8C7EA0",
+    "rosewood": "#A9665C",
+    "lingonberry": "#B9473B"
+  },
   "candy": {
-    "_note": "Launcher + website palette: translucent sugar-candy plastic over frosted ice, after the 1998\u20132000 iMac era. Apps keep the system look.",
+    "_note": "The launcher's own palette (its icon and frame). The website and app icons use nordic.",
     "strawberry": "#F0407A",
     "tangerine": "#F28A0C",
     "lime": "#6CCB2F",

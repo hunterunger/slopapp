@@ -1,144 +1,84 @@
 @import "tailwindcss";
 
 /*
- * Brand tokens from brand/brand.json.
- * The frame (header, hero, section accents) uses the candy palette: translucent sugar-candy
- * colour over frosted ice. The app collection stays calm: ice and white cards, system-quiet.
- * App icon tiles keep the forest/cream family look, matching the generated macOS icons.
+ * Nordic herbarium (brand/BRAND.md, brand/ICONS.md): matte natural colour on warm birch paper,
+ * charcoal type, an editorial serif. Botanical prints only appear inside a `.panel`, a crisp
+ * shape whose print is a mask tinted 30% darker than the panel. Everything else is flat.
  */
 @theme {
-  /* candy */
-  --color-strawberry: #f0407a;
-  --color-tangerine: #f28a0c;
-  --color-lime: #6ccb2f;
-  --color-lagoon: #0a9dbf;
-  --color-blueberry: #2f6fe4;
-  --color-grape: #8a4bd1;
-  --color-ice: #f3f6f9;
-  --color-graphite: #1c1f24;
-
-  /* app icon tiles */
-  --color-forest: #0f3d2e;
-  --color-cream: #faf6ec;
+  /* nordic (brand.json "nordic"); each is also an app's icon tile colour */
+  --color-birch: #f5f0e8;
+  --color-oat: #e4d9c6;
+  --color-charcoal: #2f2d2a;
+  --color-night: #24231f;
+  --color-pine: #3f5e4e;
+  --color-sage: #8ea58b;
+  --color-clay: #c4704f;
+  --color-ochre: #d2a04c;
+  --color-fjord: #5d7e9a;
+  --color-heather: #8c7ea0;
+  --color-rosewood: #a9665c;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
-
-  --animate-float: float 9s ease-in-out infinite;
-  @keyframes float {
-    0%,
-    100% {
-      transform: translateY(0);
-    }
-    50% {
-      transform: translateY(-10px);
-    }
-  }
+  --font-serif: var(--font-newsreader), ui-serif, Georgia, serif;
 }
 
-/* Surface tokens that flip in dark mode. Ratios in comments are WCAG contrast. */
+/* Surface tokens that flip in dark mode. Ratios are WCAG contrast. */
 :root {
   color-scheme: light dark;
 
-  --page: var(--color-ice);
-  --surface: #ffffff;
-  --surface-2: #e8edf3;
-  --text: var(--color-graphite); /* 15.6 on ice */
-  --heading: #121418;
-  --muted: #586170; /* 5.9 on white, 5.5 on ice */
-  --line: rgb(28 31 36 / 0.1);
-  --line-strong: rgb(28 31 36 / 0.16);
+  --paper: var(--color-birch);
+  --card: #fbf8f3;
+  --card-2: #efe8dc;
+  --slot: #e9e1d3;
+  --text: #2f2d2a; /* 12.1 on birch */
+  --heading: #23211f;
+  --muted: #6b655c; /* 5.1 on birch, 5.4 on card */
+  --line: rgb(47 45 42 / 0.12);
+  --line-strong: rgb(47 45 42 / 0.22);
 
-  /* Frosted ice glass */
-  --glass: rgb(255 255 255 / 0.55);
-  --glass-thick: rgb(255 255 255 / 0.92);
-  --glass-solid: #ffffff;
-  --glass-line: rgb(255 255 255 / 0.75);
-  --glass-edge: rgb(28 31 36 / 0.08);
-  --glass-shadow: 0 1px 2px rgb(28 31 36 / 0.05), 0 18px 40px -18px rgb(60 40 90 / 0.25);
-  --header-glass: rgb(243 246 249 / 0.7);
-
-  /* Flavour text/icon colours, each at least 4.7:1 on white and ice */
-  --strawberry-ink: #c53464;
-  --tangerine-ink: #a25c08;
-  --lime-ink: #417a1c;
-  --lagoon-ink: #087791;
-  --blueberry-ink: #2c68d6;
-  --grape-ink: #8a4bd1;
-
-  /* Candy wash behind glass */
-  --wash-a: 0.5;
-  --wash-b: 0.4;
-  --wash-c: 0.3;
-
-  /* Primary button: the icon gradient, deepened so white text clears 4.5:1 */
-  --candy-from: #c8265c; /* 5.3 with white */
-  --candy-to: #b9430a; /* 5.5 with white */
-  --candy-text-to: #c2410c; /* 4.8 on ice */
-
-  /* Grape → blueberry → lagoon shell, deepened so white headings clear 4.5:1 */
-  --shell-fill: linear-gradient(135deg, rgb(122 63 194 / 0.92), rgb(44 98 207 / 0.92) 55%, rgb(8 112 138 / 0.9));
-  --shell-solid: linear-gradient(135deg, #7a3fc2, #2c62cf 55%, #08708a);
-  --shell-gloss: 0.12;
-  --shell-rim: 0.45;
-  --shell-shadow: 0 30px 60px -30px rgb(47 60 160 / 0.55);
+  --action: var(--color-pine); /* 6.8 with on-action */
+  --action-hover: #34503f;
+  --on-action: #fbf8f3;
+  --link: #3f5e4e; /* 6.3 on birch */
+  --focus: #3f5e4e;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --page: var(--color-graphite);
-    --surface: #24282e;
-    --surface-2: #2e333a;
-    --text: #e6e9ee; /* 13.4 on graphite */
-    --heading: #f6f7f9;
-    --muted: #a3abb7; /* 7.4 on graphite, 6.6 on surface */
-    --line: rgb(255 255 255 / 0.08);
-    --line-strong: rgb(255 255 255 / 0.14);
+    --paper: #1e1d1a;
+    --card: #262420;
+    --card-2: #2e2b27;
+    --slot: #34312c;
+    --text: #e9e2d6; /* 13.1 on paper */
+    --heading: #f3ede3;
+    --muted: #a89f93; /* 6.5 on paper, 5.9 on card */
+    --line: rgb(233 226 214 / 0.1);
+    --line-strong: rgb(233 226 214 / 0.18);
 
-    /* Jewel-tone glass over graphite */
-    --glass: rgb(36 40 46 / 0.5);
-    --glass-thick: rgb(28 31 36 / 0.78);
-    --glass-solid: #262a31;
-    --glass-line: rgb(255 255 255 / 0.09);
-    --glass-edge: rgb(0 0 0 / 0.3);
-    --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 24px 48px -20px rgb(0 0 0 / 0.6);
-    --header-glass: rgb(28 31 36 / 0.65);
-
-    --strawberry-ink: #f36091;
-    --tangerine-ink: #f5a03c;
-    --lime-ink: #8fd85e;
-    --lagoon-ink: #3fc0de;
-    --blueberry-ink: #7aa3f0;
-    --grape-ink: #b48ce3;
-    --candy-text-to: #f5a03c;
-
-    --wash-a: 0.32;
-    --wash-b: 0.26;
-    --wash-c: 0.2;
-
-    --shell-fill: linear-gradient(135deg, rgb(98 48 158 / 0.72), rgb(30 72 160 / 0.72) 55%, rgb(6 98 122 / 0.7));
-    --shell-solid: linear-gradient(135deg, #4a2779, #1b3c80 55%, #0a4c5e);
-    --shell-gloss: 0.08;
-    --shell-rim: 0.16;
-    --shell-shadow: 0 30px 60px -30px rgb(0 0 0 / 0.7);
+    --action: #a9bfa5; /* 8.6 with on-action */
+    --action-hover: #bccfb8;
+    --on-action: #1e1d1a;
+    --link: #a9c0a5;
+    --focus: #a9c0a5;
   }
 }
 
 @theme inline {
-  --color-page: var(--page);
-  --color-surface: var(--surface);
-  --color-surface-2: var(--surface-2);
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-card-2: var(--card-2);
+  --color-slot: var(--slot);
   --color-text: var(--text);
   --color-heading: var(--heading);
   --color-muted: var(--muted);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
-  --color-strawberry-ink: var(--strawberry-ink);
-  --color-tangerine-ink: var(--tangerine-ink);
-  --color-lime-ink: var(--lime-ink);
-  --color-lagoon-ink: var(--lagoon-ink);
-  --color-blueberry-ink: var(--blueberry-ink);
-  --color-grape-ink: var(--grape-ink);
+  --color-action: var(--action);
+  --color-action-hover: var(--action-hover);
+  --color-on-action: var(--on-action);
+  --color-link: var(--link);
+  --color-focus: var(--focus);
 }
 
 html {
@@ -146,134 +86,52 @@ html {
 }
 
 body {
-  background: var(--page);
+  background: var(--paper);
   color: var(--text);
-}
-
-/* Frosted glass panel. Solid when the user asks for less transparency. */
-@utility glass {
-  background: var(--glass-bg, var(--glass));
-  -webkit-backdrop-filter: blur(24px) saturate(170%);
-  backdrop-filter: blur(24px) saturate(170%);
-  border: 1px solid var(--glass-line);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.35),
-    0 0 0 1px var(--glass-edge),
-    var(--glass-shadow);
-}
-
-/* Header bar: frosted, with a hairline under it. */
-@utility glass-bar {
-  background: var(--header-glass);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  backdrop-filter: blur(20px) saturate(180%);
-  border-bottom: 1px solid var(--line);
+  font-feature-settings: "ss01", "cv11";
 }
 
 /*
- * Soft candy-coloured light behind the glass. Radial gradients, not blurred elements,
- * so it costs nothing to paint. --wash sets the flavours for each placement.
+ * Print panel. Set --tile (a nordic colour) and give a child `.print` a mask-image of the plate.
+ * Dark mode follows the icons: the tile sinks 66% toward night, the print lifts 16% toward white.
  */
-@utility candy-wash {
+@utility panel {
+  --panel-bg: var(--tile);
+  --print-tone: color-mix(in srgb, var(--tile) 70%, #2f2d2a);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--panel-bg);
+  @media (prefers-color-scheme: dark) {
+    --panel-bg: color-mix(in srgb, var(--tile) 34%, #24231f);
+    --print-tone: color-mix(in srgb, var(--panel-bg) 84%, #ffffff);
+  }
+}
+
+@utility print {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--print-tone);
+  -webkit-mask-size: cover;
+  mask-size: cover;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
   pointer-events: none;
-  background:
-    radial-gradient(560px 460px at 4% 8%, rgb(240 64 122 / var(--wash-a)), transparent 70%),
-    radial-gradient(520px 440px at 74% 24%, rgb(242 138 12 / var(--wash-b)), transparent 70%),
-    radial-gradient(460px 520px at 100% 46%, rgb(138 75 209 / var(--wash-b)), transparent 70%),
-    radial-gradient(520px 380px at 90% 96%, rgb(47 111 228 / var(--wash-c)), transparent 70%),
-    radial-gradient(520px 440px at 0% 80%, rgb(10 157 191 / var(--wash-b)), transparent 70%),
-    radial-gradient(460px 320px at 46% 92%, rgb(108 203 47 / var(--wash-c)), transparent 70%);
-  mask-image: linear-gradient(to bottom, #000 80%, transparent);
 }
 
-@utility candy-wash-cool {
-  pointer-events: none;
-  background:
-    radial-gradient(560px 420px at 6% 34%, rgb(10 157 191 / var(--wash-b)), transparent 70%),
-    radial-gradient(560px 420px at 94% 68%, rgb(240 64 122 / var(--wash-b)), transparent 70%),
-    radial-gradient(480px 320px at 58% 6%, rgb(47 111 228 / var(--wash-c)), transparent 70%);
-  mask-image: linear-gradient(to bottom, transparent, #000 18%, #000 75%, transparent);
-}
-
-/* Primary button: icon gradient with a soft gloss on the top edge. */
-@utility btn-candy {
-  color: #ffffff;
-  background-image:
-    linear-gradient(to bottom, rgb(255 255 255 / 0.22), rgb(255 255 255 / 0) 34%),
-    linear-gradient(100deg, var(--candy-from), var(--candy-to));
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.4),
-    inset 0 -1px 0 rgb(0 0 0 / 0.12),
-    0 8px 20px -8px rgb(200 38 92 / 0.6);
-  transition:
-    box-shadow 160ms ease,
-    transform 160ms ease;
-
-  &:hover {
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.4),
-      inset 0 -1px 0 rgb(0 0 0 / 0.12),
-      0 12px 28px -8px rgb(200 38 92 / 0.7);
-    transform: translateY(-1px);
-  }
-}
-
-/* Candy glass shell: saturated translucent colour around a frosted inner panel. */
-@utility candy-shell {
-  background-image:
-    linear-gradient(to bottom, rgb(255 255 255 / var(--shell-gloss)), rgb(255 255 255 / 0) 30%),
-    var(--shell-fill);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
-  backdrop-filter: blur(20px) saturate(150%);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / var(--shell-rim)),
-    inset 0 0 0 1px rgb(255 255 255 / 0.12),
-    var(--shell-shadow);
-}
-
-/* Gradient text in the deepened candy inks (both ends clear 4.5:1). */
-@utility candy-text {
-  background-image: linear-gradient(95deg, var(--strawberry-ink), var(--candy-text-to));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-@media (forced-colors: active) {
-  .candy-text {
-    color: CanvasText;
-    background: none;
-  }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  :root {
-    --glass: var(--glass-solid);
-    --glass-thick: var(--glass-solid);
-    --header-glass: var(--page);
-  }
-  .glass,
-  .glass-bar,
-  .candy-shell {
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-  :root {
-    --shell-fill: var(--shell-solid);
-  }
+/* Small caps label, like a herbarium sheet's specimen tag. */
+@utility label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
 }
 
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
-  }
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
-  }
-  .btn-candy:hover {
-    transform: none;
   }
 }

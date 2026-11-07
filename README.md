@@ -2,11 +2,11 @@
 
 # Slopapp
 
-**The name is a joke. The apps aren't.**
+**Native Mac apps, made with care.**
 
-Slopapp is a free, open-source collection of native Mac apps, built with an unreasonable
-amount of care. Like Setapp, minus the subscription. No account, no tracking, MIT licensed.
-Every app is written in Swift.
+Slopapp is a growing collection of small, native Mac apps for everyday work: clipboard
+history, screenshots, opening links in the right browser, shrinking images. Free and open
+source (MIT), written in Swift, with no subscription, no account and no tracking.
 
 ## Build order
 
