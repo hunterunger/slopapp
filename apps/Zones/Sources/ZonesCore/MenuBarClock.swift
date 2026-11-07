@@ -35,8 +35,32 @@ public enum MenuBarClock {
         return String(name.prefix(3)).uppercased()
     }
 
-    /// "LON 5:20 PM"
+    /// "LON 5:20 PM", with a one-digit hour padded by a figure space (as wide as a digit in
+    /// the menu bar's monospaced-digit font), so the item doesn't grow at 10 o'clock.
     public static func title(for place: Place, at instant: Date, formatter: TimeFormatter) -> String {
-        "\(tag(for: place)) \(formatter.time(instant, in: place.timeZone))"
+        "\(tag(for: place)) \(padHour(formatter.time(instant, in: place.timeZone)))"
+    }
+
+    /// The same title at the widest time it can show: a two-digit hour, with each day period
+    /// in turn (their widths differ by a fraction of a point). The menu bar item is sized to
+    /// the widest of these, so it never changes width as the time ticks.
+    public static func widestTitles(for place: Place, formatter: TimeFormatter) -> [String] {
+        // 10:00 and 22:00 UTC: two-digit hours on either side of noon, in any hour cycle.
+        [36_000, 79_200].map { seconds in
+            "\(tag(for: place)) \(padHour(formatter.time(Date(timeIntervalSince1970: TimeInterval(seconds)), in: .gmt)))"
+        }
+    }
+
+    /// U+2007 FIGURE SPACE: the width of one digit.
+    public static let figureSpace = "\u{2007}"
+
+    /// "9:05 PM" → "\u{2007}9:05 PM", "午後3:00" → "午後\u{2007}3:00"; two-digit hours stay.
+    static func padHour(_ time: String) -> String {
+        guard let first = time.firstIndex(where: \.isNumber) else { return time }
+        let run = time[first...].prefix(while: \.isNumber)
+        guard run.count == 1 else { return time }
+        var padded = time
+        padded.insert(contentsOf: figureSpace, at: first)
+        return padded
     }
 }

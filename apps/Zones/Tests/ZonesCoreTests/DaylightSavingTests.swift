@@ -33,10 +33,10 @@ import Testing
                                   at: T.date("2026-03-15T15:00:00Z"), formatter: T.formatter())
         #expect(rows[0].time == "11:00 AM")
         #expect(rows[1].time == "3:00 PM")
-        #expect(rows[1].subtitle == "Today · +4 h")
+        #expect(rows[1].subtitle == "+4 h")
         let normal = ClockRows.make(places: [T.city("London", "Europe/London")], local: newYork, showLocal: true,
                                     at: T.date("2026-04-15T15:00:00Z"), formatter: T.formatter())
-        #expect(normal[1].subtitle == "Today · +5 h")
+        #expect(normal[1].subtitle == "+5 h")
     }
 
     @Test func scrubbingIntoTheMismatchChangesTheOffset() {
@@ -138,7 +138,7 @@ import Testing
                                   at: T.date("2026-11-03T11:00:00Z"), formatter: T.formatter())
         // Local (−12) is Mon Nov 2 23:00; Kiritimati is Wed Nov 4 01:00.
         #expect(rows[0].subtitle == "Wed · +26 h")
-        #expect(rows[1].subtitle == "Today · Same time")
+        #expect(rows[1].subtitle == "Same time")
         let fromUTC = ClockRows.make(places: places, local: T.zone("UTC"), showLocal: false,
                                      at: T.date("2026-11-03T11:00:00Z"), formatter: T.formatter())
         #expect(fromUTC[0].subtitle == "Tomorrow · +14 h")

@@ -36,39 +36,6 @@ struct ZonesApp: App {
 
         Settings {
             ZonesSettingsView(model: controller.model, panel: controller.panel, info: controller.info)
-                .onOpenSettingsAvailable()
         }
-    }
-}
-
-/// Opens the Settings window from code that isn't a SwiftUI view (the panel's ⌘,).
-@MainActor
-enum SettingsOpener {
-    /// Set by a view that has SwiftUI's `openSettings` action.
-    static var action: (() -> Void)?
-
-    static func open() {
-        AppActivation.activate()
-        if let action {
-            action()
-        } else {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        }
-        SettingsWindow.bringToFront()
-    }
-}
-
-private struct CaptureOpenSettings: ViewModifier {
-    @Environment(\.openSettings) private var openSettings
-
-    func body(content: Content) -> some View {
-        content.onAppear { SettingsOpener.action = { openSettings() } }
-    }
-}
-
-extension View {
-    /// Captures SwiftUI's `openSettings` action for `SettingsOpener`.
-    func onOpenSettingsAvailable() -> some View {
-        modifier(CaptureOpenSettings())
     }
 }

@@ -53,7 +53,7 @@ import Testing
     @Test func rowAccessibilitySentence() {
         let rows = ClockRows.make(places: [T.city("London", "Europe/London")], local: T.zone("America/Chicago"),
                                   showLocal: true, at: T.date("2026-11-03T23:20:00Z"), formatter: T.formatter())
-        #expect(rows[0].accessibilityLabel == "Chicago, 5:20 PM, local time, daytime")
+        #expect(rows[0].accessibilityLabel == "Chicago, 5:20 PM, local time, after hours")
         #expect(rows[1].accessibilityLabel == "London, 11:20 PM, today, 6 hours ahead, night")
     }
 
@@ -90,6 +90,29 @@ import Testing
         #expect(MenuBarClock.tag(for: .fixed(offset: 19_800)) == "UTC+5:30")
         #expect(MenuBarClock.title(for: T.city("London", "Europe/London"), at: T.date("2026-11-03T17:20:00Z"),
                                    formatter: T.formatter(.twentyFour)) == "LON 17:20")
+    }
+
+    /// The menu bar item keeps one width: a one-digit hour is padded to two digits' width,
+    /// and the item is sized for a two-digit hour with either day period.
+    @Test func menuBarTextKeepsItsWidth() {
+        let london = T.city("London", "Europe/London")
+        let space = MenuBarClock.figureSpace
+        #expect(MenuBarClock.title(for: london, at: T.date("2026-11-03T09:05:00Z"), formatter: T.formatter())
+                == "LON \(space)9:05 AM")
+        #expect(MenuBarClock.title(for: london, at: T.date("2026-11-03T22:05:00Z"), formatter: T.formatter())
+                == "LON 10:05 PM")
+        #expect(MenuBarClock.title(for: london, at: T.date("2026-11-03T09:05:00Z"), formatter: T.formatter(.twentyFour))
+                == "LON 09:05")
+        #expect(MenuBarClock.padHour("午後3:00") == "午後\(space)3:00")
+        #expect(MenuBarClock.padHour("12:00") == "12:00")
+        #expect(MenuBarClock.widestTitles(for: london, formatter: T.formatter()) == ["LON 10:00 AM", "LON 10:00 PM"])
+        #expect(MenuBarClock.widestTitles(for: london, formatter: T.formatter(.twentyFour)) == ["LON 10:00", "LON 22:00"])
+        // Every title has as many characters as the widest ones (digits and the figure
+        // space are equally wide).
+        for hour in 0..<24 {
+            let instant = T.date(String(format: "2026-11-03T%02d:30:00Z", hour))
+            #expect(MenuBarClock.title(for: london, at: instant, formatter: T.formatter()).count == "LON 10:00 AM".count)
+        }
     }
 
     @Test func folding() {

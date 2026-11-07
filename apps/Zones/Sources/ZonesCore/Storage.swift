@@ -6,10 +6,32 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var hourCycle: HourCycle = .system
     public var copyFormat: CopyFormat = .list
     public var menuBarDisplay: MenuBarDisplay = .iconOnly
-    /// The place whose time the menu bar shows; `ClockRow.localID` for local time.
-    public var menuBarPlaceID: UUID?
+    /// The places whose times the menu bar shows, in order; `ClockRow.localID` for local
+    /// time. Empty means local time.
+    public var menuBarPlaceIDs: [UUID] = []
+    /// Working hours for local time and every place without its own.
+    public var defaultWorkingHours: WorkingHours = .standard
+    /// How rows look in the panel.
+    public var rowStyle: RowStyle = .standard
 
     public init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case showLocalTime, hourCycle, copyFormat, menuBarDisplay, menuBarPlaceIDs, defaultWorkingHours, rowStyle
+        /// Before several menu bar clocks (0.2): one place.
+        case menuBarPlaceID
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(showLocalTime, forKey: .showLocalTime)
+        try container.encode(hourCycle, forKey: .hourCycle)
+        try container.encode(copyFormat, forKey: .copyFormat)
+        try container.encode(menuBarDisplay, forKey: .menuBarDisplay)
+        try container.encode(menuBarPlaceIDs, forKey: .menuBarPlaceIDs)
+        try container.encode(defaultWorkingHours, forKey: .defaultWorkingHours)
+        try container.encode(rowStyle, forKey: .rowStyle)
+    }
 
     public init(from decoder: Decoder) throws {
         // Tolerate missing keys so older saves keep working as settings are added.
@@ -19,7 +41,33 @@ public struct Preferences: Codable, Equatable, Sendable {
         hourCycle = (try? container.decodeIfPresent(HourCycle.self, forKey: .hourCycle)) ?? defaults.hourCycle
         copyFormat = (try? container.decodeIfPresent(CopyFormat.self, forKey: .copyFormat)) ?? defaults.copyFormat
         menuBarDisplay = (try? container.decodeIfPresent(MenuBarDisplay.self, forKey: .menuBarDisplay)) ?? defaults.menuBarDisplay
-        menuBarPlaceID = try container.decodeIfPresent(UUID.self, forKey: .menuBarPlaceID)
+        if let ids = try? container.decodeIfPresent([UUID].self, forKey: .menuBarPlaceIDs) {
+            menuBarPlaceIDs = ids
+        } else if let id = try? container.decodeIfPresent(UUID.self, forKey: .menuBarPlaceID) {
+            menuBarPlaceIDs = [id]
+        }
+        defaultWorkingHours = (try? container.decodeIfPresent(WorkingHours.self, forKey: .defaultWorkingHours)) ?? defaults.defaultWorkingHours
+        rowStyle = (try? container.decodeIfPresent(RowStyle.self, forKey: .rowStyle)) ?? defaults.rowStyle
+    }
+}
+
+/// How the panel draws each place.
+public enum RowStyle: String, Codable, Sendable, CaseIterable, Identifiable {
+    /// Name and offset on the left, a large time on the right.
+    case standard
+    /// One line per place, for long lists.
+    case compact
+    /// Standard plus a strip of each place's day (working hours, night) under the row.
+    case timeline
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .standard: "Standard"
+        case .compact: "Compact"
+        case .timeline: "Timeline"
+        }
     }
 }
 

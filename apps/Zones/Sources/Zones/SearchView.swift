@@ -25,9 +25,9 @@ struct SearchView: View {
                     .buttonStyle(.borderless)
                     .help("Back to the list (Esc)")
             }
-            .padding(.horizontal, Spacing.m)
+            .padding(.horizontal, PanelMetrics.margin)
             .padding(.vertical, Spacing.m)
-            Divider()
+            Hairline()
             resultsView
         }
         .onAppear { DispatchQueue.main.async { focused = true } }
@@ -59,7 +59,7 @@ struct SearchView: View {
                     Text("Suggestions")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, Spacing.m)
+                        .padding(.horizontal, PanelMetrics.margin)
                         .padding(.top, Spacing.s)
                         .accessibilityAddTraits(.isHeader)
                 }
@@ -83,7 +83,8 @@ struct SearchView: View {
                         }
                         .padding(.vertical, Spacing.xs)
                     }
-                    .frame(height: min(CGFloat(panel.results.count) * 44 + 8, 396))
+                    .frame(height: min(CGFloat(panel.results.count) * ResultRow.height + 2 * Spacing.xs,
+                                       ResultRow.height * 9 + Spacing.xs))
                     .onChange(of: panel.resultSelection) { _, index in
                         if panel.results.indices.contains(index) { proxy.scrollTo(panel.results[index].id) }
                     }
@@ -101,6 +102,8 @@ struct SearchView: View {
 }
 
 struct ResultRow: View {
+    static let height: CGFloat = 44
+    @Environment(\.controlActiveState) private var activeState
     let result: SearchResult
     let isSelected: Bool
     let isAdded: Bool
@@ -128,13 +131,14 @@ struct ResultRow: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, Spacing.m)
-        .frame(height: 44)
+        .padding(.horizontal, PanelMetrics.margin)
+        .frame(height: Self.height)
         .contentShape(Rectangle())
         .background {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? AnyShapeStyle(Color.accentColor.opacity(0.18)) : AnyShapeStyle(Color.clear))
-                .padding(.horizontal, Spacing.xs)
+            // Same inset and corners as a selected row in the list.
+            RoundedRectangle(cornerRadius: PanelMetrics.shapeRadius, style: .continuous)
+                .fill(isSelected ? Color.selectionTint(activeState, opacity: 0.18) : Color.clear)
+                .padding(.horizontal, PanelMetrics.shapeInset)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(result.title), \(result.subtitle), \(time)\(isAdded ? ", already added" : "")")

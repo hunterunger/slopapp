@@ -82,7 +82,18 @@ public final class ZonesModel {
 
     public var rows: [ClockRow] {
         ClockRows.make(places: places, local: localTimeZone, showLocal: preferences.showLocalTime,
-                       at: instant, formatter: formatter)
+                       at: instant, formatter: formatter, defaultHours: preferences.defaultWorkingHours)
+    }
+
+    /// The local row (for the panel's header), even when local time is hidden from the list.
+    public var localRow: ClockRow {
+        ClockRows.make(places: [], local: localTimeZone, showLocal: true, at: instant, formatter: formatter,
+                       defaultHours: preferences.defaultWorkingHours)[0]
+    }
+
+    /// Working hours of a row's place (local time uses the default).
+    public func workingHours(for id: UUID) -> WorkingHours {
+        places.first { $0.id == id }?.workingHours ?? preferences.defaultWorkingHours
     }
 
     /// "Now" or "+3 h 15 min".
@@ -111,15 +122,18 @@ public final class ZonesModel {
     /// Nothing at all to show (local time hidden and no places).
     public var isEmpty: Bool { rows.isEmpty }
 
-    /// The place the menu bar shows, when it shows a time.
-    public var menuBarPlace: Place? {
-        guard preferences.menuBarDisplay.showsTime else { return nil }
-        if let id = preferences.menuBarPlaceID, let place = places.first(where: { $0.id == id }) {
-            return place
+    /// The places the menu bar shows, when it shows times: the chosen ones still listed,
+    /// in the order chosen; local time when none is left.
+    public var menuBarPlaces: [Place] {
+        guard preferences.menuBarDisplay.showsTime else { return [] }
+        let chosen = preferences.menuBarPlaceIDs.compactMap { id -> Place? in
+            id == ClockRow.localID ? localPlace : places.first { $0.id == id }
         }
-        // Local time when chosen, or when the chosen place was removed.
-        return localPlace
+        return chosen.isEmpty ? [localPlace] : chosen
     }
+
+    /// The first place the menu bar shows.
+    public var menuBarPlace: Place? { menuBarPlaces.first }
 
     /// Local time as a place (for the menu bar and copying).
     public var localPlace: Place {
@@ -127,13 +141,28 @@ public final class ZonesModel {
               detail: "Local time", timeZoneID: localTimeZone.identifier)
     }
 
-    /// Menu bar text ("LON 5:20 PM"), always for the real current time.
+    /// Menu bar text ("LON 5:20 PM", "LON 5:20 PM  TYO 2:20 AM"), always for the real
+    /// current time.
     public var menuBarTitle: String? {
-        menuBarPlace.map { MenuBarClock.title(for: $0, at: now, formatter: formatter) }
+        let places = menuBarPlaces
+        guard !places.isEmpty else { return nil }
+        return places.map { MenuBarClock.title(for: $0, at: now, formatter: formatter) }.joined(separator: "   ")
+    }
+
+    /// The menu bar text at its widest (see `MenuBarClock.widestTitles`): size the item to
+    /// the widest of these so it keeps one width as the minutes and hours change.
+    public var menuBarWidestTitles: [String] {
+        let places = menuBarPlaces
+        guard !places.isEmpty else { return [] }
+        let variants = places.map { MenuBarClock.widestTitles(for: $0, formatter: formatter) }
+        return (0..<2).map { index in variants.map { $0[index] }.joined(separator: "   ") }
     }
 
     /// Text for Copy Times: every row at the shown instant.
-    public var timesText: String {
+    public var timesText: String { timesText(at: instant) }
+
+    /// Every row's time at `instant` (the planner's chosen hour, an event's start).
+    public func timesText(at instant: Date) -> String {
         TimesText.make(copyEntries, at: instant, format: preferences.copyFormat, formatter: formatter)
     }
 
@@ -200,6 +229,19 @@ public final class ZonesModel {
     public func drag(from start: Date, points: Double) {
         notice = nil
         setInstant(Scrubbing.drag(from: start, points: points, local: localTimeZone))
+    }
+
+    /// Shows the same local wall time on another day (the header's date picker). Only the
+    /// year, month and day of `day` in the local time zone are used.
+    public func goToDay(_ day: Date) {
+        notice = nil
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = localTimeZone
+        let target = calendar.dateComponents([.year, .month, .day], from: day)
+        let current = calendar.dateComponents([.year, .month, .day], from: instant)
+        guard let from = calendar.date(from: current), let to = calendar.date(from: target),
+              let days = calendar.dateComponents([.day], from: from, to: to).day else { return }
+        if days != 0 { setInstant(Scrubbing.step(from: instant, days: days, local: localTimeZone)) }
     }
 
     public func resetToNow() {
@@ -273,7 +315,6 @@ public final class ZonesModel {
             let ids = rows.map(\.id)
             selection = ids.isEmpty ? nil : ids[min(index + (preferences.showLocalTime ? 1 : 0), ids.count - 1)]
         }
-        if preferences.menuBarPlaceID == id { preferences.menuBarPlaceID = nil }
         save()
     }
 
@@ -328,21 +369,53 @@ public final class ZonesModel {
     /// Sorts places by their current offset from UTC (west to east).
     public func sortByTimeDifference() {
         let at = instant
+        sort { $0.timeZone.secondsFromGMT(for: at) < $1.timeZone.secondsFromGMT(for: at) }
+    }
+
+    /// Sorts places alphabetically by the name shown.
+    public func sortByName() {
+        sort { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+    }
+
+    private func sort(by areInIncreasingOrder: (Place, Place) -> Bool) {
         let previous = places
-        places.sort { $0.timeZone.secondsFromGMT(for: at) < $1.timeZone.secondsFromGMT(for: at) }
+        places.sort(by: areInIncreasingOrder)
         if places != previous { pendingUndo = .sort(previous: previous) }
         save()
     }
 
+    /// Sets a place's own working hours; nil goes back to the default.
+    public func setWorkingHours(_ hours: WorkingHours?, for id: UUID) {
+        guard let index = places.firstIndex(where: { $0.id == id }) else { return }
+        places[index].workingHours = hours == preferences.defaultWorkingHours ? nil : hours
+        save()
+    }
+
+    /// Adds a place's time to the menu bar (after any already there) and makes sure the
+    /// menu bar shows times.
     public func showInMenuBar(_ id: UUID) {
-        preferences.menuBarPlaceID = id
+        if !isInMenuBar(id) {
+            // Starting from the implicit local clock: keep showing it only if asked for.
+            var ids = preferences.menuBarDisplay.showsTime ? shownMenuBarIDs : []
+            ids.append(id)
+            preferences.menuBarPlaceIDs = ids
+        }
         if !preferences.menuBarDisplay.showsTime { preferences.menuBarDisplay = .iconAndTime }
     }
 
-    public func isInMenuBar(_ id: UUID) -> Bool {
-        guard preferences.menuBarDisplay.showsTime else { return false }
-        return menuBarPlace?.id == id
+    /// Takes a place's time out of the menu bar. The last one out goes back to icon only.
+    public func removeFromMenuBar(_ id: UUID) {
+        let ids = shownMenuBarIDs.filter { $0 != id }
+        preferences.menuBarPlaceIDs = ids
+        if ids.isEmpty { preferences.menuBarDisplay = .iconOnly }
     }
+
+    public func isInMenuBar(_ id: UUID) -> Bool {
+        menuBarPlaces.contains { $0.id == id }
+    }
+
+    /// Ids of the clocks the menu bar shows right now (dropping removed places).
+    private var shownMenuBarIDs: [UUID] { menuBarPlaces.map(\.id) }
 
     /// The listed place that is the same clock, if any.
     public func existingID(for place: Place) -> UUID? {

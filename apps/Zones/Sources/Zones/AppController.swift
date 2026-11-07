@@ -12,6 +12,8 @@ final class AppController: NSObject, NSPopoverDelegate {
     let model: ZonesModel
     let panel = PanelState()
     let pasteboard: Pasteboard = SystemPasteboard()
+    /// Where places and settings live: `.standard`, or the `ZONES_DEFAULTS_SUITE` test suite.
+    let defaults: UserDefaults
 
     private var statusItem: NSStatusItem?
     private let popover = NSPopover()
@@ -35,6 +37,7 @@ final class AppController: NSObject, NSPopoverDelegate {
             defaults.removeObject(forKey: "places")
             defaults.removeObject(forKey: "preferences")
         }
+        self.defaults = defaults
         model = ZonesModel(storage: UserDefaultsStorage(defaults: defaults), clock: LiveClock(environment: environment))
         super.init()
     }
@@ -55,6 +58,10 @@ final class AppController: NSObject, NSPopoverDelegate {
         installWindowKeyMonitor()
         KeyboardShortcuts.onKeyUp(for: .togglePanel) { [weak self] in
             self?.togglePanel()
+        }
+        Task { @MainActor [weak self] in
+            guard let self, await Snapshots.runIfAsked(controller: self) else { return }
+            NSApp.terminate(nil)
         }
     }
 
@@ -92,12 +99,12 @@ final class AppController: NSObject, NSPopoverDelegate {
     /// Redraws the status item whenever what it shows changes.
     private func updateStatusItem() {
         let title = withObservationTracking {
-            (model.menuBarTitle, model.preferences.menuBarDisplay)
+            (model.menuBarTitle, model.preferences.menuBarDisplay, model.menuBarWidestTitles)
         } onChange: { [weak self] in
             Task { @MainActor in self?.updateStatusItem() }
         }
-        guard let button = statusItem?.button else { return }
-        let (text, display) = title
+        guard let item = statusItem, let button = item.button else { return }
+        let (text, display, widest) = title
         if display == .timeOnly, text != nil {
             button.image = nil
         } else {
@@ -105,7 +112,19 @@ final class AppController: NSObject, NSPopoverDelegate {
             image?.isTemplate = true
             button.image = image
         }
-        button.title = text.map { display == .timeOnly ? $0 : " " + $0 } ?? ""
+        let shown: (String) -> String = { display == .timeOnly ? $0 : " " + $0 }
+        if text != nil, !widest.isEmpty {
+            // One width for every time it can show (two-digit hours, either day period), so
+            // the item and everything left of it in the menu bar never shift as it ticks.
+            let width = widest.map { variant -> CGFloat in
+                button.title = shown(variant)
+                return button.fittingSize.width
+            }.max() ?? NSStatusItem.variableLength
+            item.length = ceil(width)
+        } else {
+            item.length = NSStatusItem.variableLength
+        }
+        button.title = text.map(shown) ?? ""
         button.setAccessibilityLabel(text.map { "Zones, \($0)" } ?? "Zones")
         button.toolTip = "Zones"
         // macOS lays the item out a moment later; check where it ended up.
@@ -130,6 +149,7 @@ final class AppController: NSObject, NSPopoverDelegate {
                 guard event.keyCode == KeyCode.escape,
                       event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
                       let window = event.window, window.level == .normal, window.styleMask.contains(.titled),
+                      window.identifier != PlannerWindow.identifier,
                       !(window.firstResponder is NSText) else { return false }
                 window.performClose(nil)
                 return true
@@ -169,7 +189,6 @@ final class AppController: NSObject, NSPopoverDelegate {
 
     private func setUpPopover() {
         let root = PanelView(model: model, panel: panel, controller: self)
-            .onOpenSettingsAvailable()
         let hosting = NSHostingController(rootView: root)
         hosting.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hosting
@@ -303,7 +322,60 @@ final class AppController: NSObject, NSPopoverDelegate {
     func openSettings() {
         openingWindow = popover.isShown
         closePanel()
-        SettingsOpener.open()
+        SettingsWindow.open()
+    }
+
+    func beginEditingTime(_ id: UUID) {
+        model.selection = id
+        panel.beginEditingTime(id)
+    }
+
+    /// Settings → Places, with the place's hours open (local time: the default hours).
+    func editWorkingHours(_ id: UUID) {
+        panel.settingsTab = .places
+        panel.hoursEditingID = id == ClockRow.localID ? nil : id
+        openSettings()
+    }
+
+    func openPlanner() {
+        openingWindow = popover.isShown
+        let instant = model.isScrubbed ? model.instant : nil
+        closePanel()
+        PlannerWindow.show(model: model, controller: self, at: instant)
+    }
+
+    /// The share menu (Messages, Mail, Notes…) with the shown time in every place.
+    func showSharePicker() {
+        guard let host = popover.contentViewController?.view, !model.isEmpty else { return }
+        let frame = panel.shareButtonFrame
+        let rect = NSRect(x: frame.minX, y: host.isFlipped ? frame.minY : host.bounds.height - frame.maxY,
+                          width: frame.width, height: frame.height)
+        let picker = NSSharingServicePicker(items: [model.timesText as NSString])
+        picker.show(relativeTo: rect, of: host, preferredEdge: .minY)
+    }
+
+    /// Hands an hour-long event at `instant` to the calendar app as an .ics file, with the
+    /// time in every place in its notes. No calendar access needed: the calendar app asks
+    /// where to add it. `ZONES_EXPORT_DIR` writes the file there without opening it (tests).
+    func addToCalendar(at instant: Date? = nil) {
+        let start = instant ?? model.instant
+        let text = CalendarFile.ics(start: start, duration: 3600, title: "Meeting", notes: model.timesText(at: start))
+        let environment = ProcessInfo.processInfo.environment
+        let directory = environment["ZONES_EXPORT_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("Zones", isDirectory: true)
+        let url = directory.appendingPathComponent("Meeting.ics")
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            HUD.show("Couldn't create the event file", systemImage: "exclamationmark.triangle")
+            return
+        }
+        if environment["ZONES_EXPORT_DIR"] != nil {
+            HUD.show("Saved Meeting.ics", systemImage: "calendar.badge.plus")
+        } else {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     func showAbout() {
@@ -369,6 +441,10 @@ final class AppController: NSObject, NSPopoverDelegate {
         item("Next Day", arrowRight, [.option]) { [weak self] in self?.model.step(.day, by: 1) }
         item("Previous Day", arrowLeft, [.option]) { [weak self] in self?.model.step(.day, by: -1) }
         item("Back to Now", "\u{1b}", [], enabled: model.isScrubbed) { [weak self] in self?.model.resetToNow() }
+        item("Go to Date…", "d") { [weak self] in self?.panel.showsCalendar = true }
+        menu.addItem(.separator())
+        item("Open Planner", "0") { [weak self] in self?.openPlanner() }
+        item("Add to Calendar…", enabled: hasRows) { [weak self] in self?.addToCalendar() }
         menu.addItem(.separator())
         let selected = model.selection.flatMap { id in model.places.first { $0.id == id } }
         item(selected.map { "Remove \($0.label)" } ?? "Remove", "\u{8}", [], enabled: selected != nil) { [weak self] in
@@ -383,10 +459,22 @@ final class AppController: NSObject, NSPopoverDelegate {
             if let id = selected?.id { self?.model.move(id, by: 1) }
         }
         item("Sort by Time Difference", enabled: model.places.count > 1) { [weak self] in self?.model.sortByTimeDifference() }
+        item("Sort by Name", enabled: model.places.count > 1) { [weak self] in self?.model.sortByName() }
         item(model.pendingUndo?.menuTitle ?? "Undo", "z", enabled: model.canUndo) { [weak self] in
             self?.model.undo()
         }
         menu.addItem(.separator())
+        let styles = NSMenu(title: "Row Style")
+        for style in RowStyle.allCases {
+            let entry = ClosureMenuItem(title: style.title, keyEquivalent: "") { [weak self] in
+                self?.model.preferences.rowStyle = style
+            }
+            entry.state = model.preferences.rowStyle == style ? .on : .off
+            styles.addItem(entry)
+        }
+        let stylesItem = NSMenuItem(title: "Row Style", action: nil, keyEquivalent: "")
+        stylesItem.submenu = styles
+        menu.addItem(stylesItem)
         item("Settings…", ",") { [weak self] in self?.openSettings() }
         item("About Zones") { [weak self] in self?.showAbout() }
         menu.addItem(.separator())
@@ -434,6 +522,8 @@ final class AppController: NSObject, NSPopoverDelegate {
         if event.keyCode == KeyCode.escape {
             if panel.mode != .list {
                 panel.cancel()
+            } else if panel.showsCalendar {
+                panel.showsCalendar = false
             } else if !model.escape() {
                 closePanel()
             }
@@ -446,6 +536,8 @@ final class AppController: NSObject, NSPopoverDelegate {
             case "q": NSApp.terminate(nil); return true
             case ",": openSettings(); return true
             case "n": panel.beginSearch(); return true
+            case "d": panel.showsCalendar.toggle(); return true
+            case "0": openPlanner(); return true
             case "c" where !editing: copyTimes(); return true
             case "z" where !editing:
                 if model.canUndo { model.undo() }
@@ -539,6 +631,7 @@ final class AppController: NSObject, NSPopoverDelegate {
         guard panel.mode == .list, event.clickCount == 1, let window = event.window,
               let host = popover.contentViewController?.view else { return false }
         let start = host.convert(event.locationInWindow, from: nil)
+        if panel.datePillFrame.contains(start) { return false }
         guard let (id, _) = panel.rowFrames.first(where: { $0.value.contains(start) }) else { return false }
 
         var axis: Axis?
@@ -556,7 +649,14 @@ final class AppController: NSObject, NSPopoverDelegate {
             switch axis {
             case .horizontal:
                 model.drag(from: startInstant, points: Double(dx))
-                panel.markerX = point.x
+                // The line follows the pointer over strips that stay put; at the edge of
+                // the list the strips scroll instead.
+                let limit = TimeInterval(PanelMetrics.stripHalfWidth) * Scrubbing.secondsPerPoint
+                var anchor = panel.stripAnchor ?? startInstant
+                let ahead = model.instant.timeIntervalSince(anchor)
+                if ahead > limit { anchor = model.instant.addingTimeInterval(-limit) }
+                if ahead < -limit { anchor = model.instant.addingTimeInterval(limit) }
+                if panel.stripAnchor != anchor { panel.stripAnchor = anchor }
                 let hour = TimeMath.wallTime(of: model.instant, in: model.localTimeZone).hour
                 if hour != lastHour {
                     NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
@@ -577,11 +677,10 @@ final class AppController: NSObject, NSPopoverDelegate {
                 break
             }
         }
-        panel.markerX = nil
+        panel.stripAnchor = nil
         if axis == nil {
             if panel.timeFrames[id]?.insetBy(dx: -6, dy: -6).contains(start) == true {
-                model.selection = id
-                panel.beginEditingTime(id)
+                beginEditingTime(id)
             } else {
                 model.selection = id
             }

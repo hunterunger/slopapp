@@ -355,7 +355,7 @@ copy; 12/24 h override; global shortcut to open the panel (unset by default; als
 when the icon is hidden or behind the notch); fixed UTC±N; sort by time difference; haptic
 tick per hour while dragging.
 
-Not built (later): working-hours shading (#18), date picker (⌥←/→ covers day jumps).
+Not built (later): working-hours shading (#18), date picker (⌥←/→ covers day jumps). Both built later in the parity pass, with more than one menu bar clock (#15); see below.
 
 ## Open questions
 
@@ -441,6 +441,233 @@ Builder decisions:
   search matches explains what to type), 8 n/a (no permissions), 9 pass (Undo for remove),
   10 pass (no network code), 11 pass, 12 pass, 13 pass (popover animation off under Reduce
   Motion; reorder animation off), 14 pass (Settings window size remembered; places persist).
+
+## Parity pass (2026-11-03)
+
+Per [`docs/parity-pass.md`](../parity-pass.md): look and work much more like the original,
+without copying protected material. Studied: World Clock Pro's App Store and Setapp
+screenshots (menu bar panel in light and dark, the window app's clock strip and map;
+downloaded to `/tmp/zones-parity/`, not committed) and its bundle's strings, read-only
+(period names "Work period / Morning / Night period", a compact date picker, "Day
+difference + hours difference in the row", Copy Times, Share, Open App, Settings menu).
+The installed app was **not launched** this time: its city list is personal and the strings
+plus official screenshots answered every question. Correction to the first study: the
+original *does* colour times by working hours (its signature green); "not observed" in
+feature #18 was wrong.
+
+### What the original looks like (layout only)
+
+- **Menu bar panel.** A header card for the local place: city name with a location arrow,
+  a date pill with a chevron that opens a month calendar, and on the right a large time
+  with a small raised AM/PM and "Working hours" / "After hours" under it; the card is
+  filled by the local period. Below, a chip "drag this line…" sits on top of a thin
+  vertical line down the middle of the list with a ↔ handle. Rows: name on the left with
+  "Tomorrow, +14hrs" under it (the day only when it differs), a large light-weight time
+  with raised AM/PM on the right, coloured by period (working / awake / night), thin
+  separators. Footer: + on the left, Copy and Open app… in the middle, Share and a gear
+  (settings menu) on the right.
+- **Window app.** A strip of clock cards (analog, or digital 12/24 via a segmented
+  control): local card light, cards in working hours filled, night cards dark; name and
+  country under each clock. Below, a world map with day/night shading and city pins;
+  drag to convert.
+
+### Gap table
+
+| Feature / design item | Original | Zones now | Status |
+|---|---|---|---|
+| Local time header card (name + location arrow, date pill, big time, period label, tinted by period) | yes | `LocalHeader`: same structure; tint is your accent at low opacity while working, neutral otherwise | done |
+| Row: name + offset subline, day only when not today; large light time with raised AM/PM | yes | `ClockRowView` standard style; subline "+6 h" / "Tomorrow · +15 h"; `TimeText` raises the period | done |
+| Time coloured by period | green / white / grey | accent while working, primary when awake, secondary at night, plus a small symbol (briefcase / sun / moon) so it's never colour alone | done |
+| Drag line down the middle with ↔ handle and a hint chip | yes | always-visible line + handle; chip "Drag sideways to change the time"; while dragging the line follows the pointer over day strips that stay put, then springs back; once moved the chip shows "+3 h" with ✕ (Back to Now) | done |
+| Row separators | yes | yes | done |
+| Footer: + · Copy · Open app… · Share · gear menu | yes | + · Copy · Open Planner · Share · ⚙ (every action, with shortcuts) | done |
+| Date picker for the shown time | compact picker + month calendar | date pill → inline month calendar under the header, Today/Done, ⌘D; keeps the time of day | done |
+| Working-hours shading | fixed hours (no setting found) | default hours + workdays in Settings → Places; any place can have its own hours and workdays (overnight shifts supported); drives colours, strips, planner | done (better) |
+| Compact vs expanded rows | one style | Standard, Compact (one line), Timeline (day strip per row: working / evening / night bands, midnight ticks, centred on the line) | done |
+| Meeting planner across a day | map drag in window | **Planner window**: clock cards on top (analog or digital), a grid of the local day hour by hour per place, shaded by working hours, now line, hours when everyone works marked and listed ("Everyone is working 9:00 AM – 11:00 AM"); click/← → to pick an hour, ⌥← → days, ⌘C copy, Esc back to now | done |
+| Window clock strip (analog / digital, coloured cards) | yes | in the Planner window; our own plain face (ticks, two hands, accent hub while working); 12/24 follows Settings → Time format | done |
+| World map with day/night terminator and pins | centrepiece of the window | not built: the map is the original's signature visual and needs a bundled map asset and projection work (~1 day); the planner grid answers "when can we meet?" more directly | deferred |
+| Weather per city | live weather | needs network and an API key | skip |
+| Multiple menu bar clocks | icon only | several places in one status item ("LON 5:20 PM   TOK 2:20 AM"); Show/Remove from Menu Bar on any row, toggles in Settings → Places, local-time toggle in General | done |
+| Calendar integration (new event with alert) | EventKit, asks for Calendar access | **Add to Calendar…** writes an hour-long `.ics` with every place's time in the notes and opens it in the calendar app (no permission; the app asks which calendar) | done (hand-off) |
+| Event alert offsets ("10 minutes before") | General setting | the calendar app's own default alert applies | deferred: direct EventKit creation with alert choice needs Calendar permission and a settings row (~½ day); hand-off covers the job without a permission |
+| Share | share sheet, hosted link/QR | system share picker with the plain-text times | done (no link/QR: needs a server) |
+| Time converter (type a time) | not supported | existed (click a time, type "3pm") | done earlier |
+| Custom city names | not supported | existed (Rename…) | done earlier |
+| Sorting | "sort by" in window | Sort by Time Difference (existed) + Sort by Name, both undoable | done |
+| Alarms | none (only event alerts) | none | n/a |
+| Widgets | Notification Center widget | not built: WidgetKit needs an app extension target, which our SwiftPM + scripts pipeline can't build or sign yet (~1–2 days incl. pipeline work) | deferred |
+| Analog clock options (second hand, digits) | Settings → Clocks | no second hands (we redraw once a minute for battery) | skip |
+| Precise location, screensaver, Touch Bar, onboarding/what's new, rating prompts | yes | — | skip (unchanged reasons above) |
+
+### Deviations from the design system (and why)
+
+- **Panel width 360 pt** instead of SlopKit's 320: the original's two columns either side of
+  the drag line need it (names left, large times right).
+- **Colour carries state**: times and the header card use your accent while people are
+  working (the original's green, in your colour). Always paired with a symbol and spoken in
+  VoiceOver ("…, working hours").
+- **Custom-drawn pieces**: the header card, the chip, the line, day strips and planner cells
+  (`Canvas`/shapes in system colours) to match the original's layout. No hex colours; only
+  accent, primary/secondary and a system-red "now" line in the planner.
+- **Times use `.largeTitle`/`.title` with light weight** (the original's thin large digits).
+- **A second window** (Planner) for a menu bar app, opened from the footer or ⌘0; no Dock
+  icon. It mirrors the original's window app.
+- Footer settings button is a gear (like the original) rather than ⋯; it opens the same
+  full action menu.
+
+### Build notes (parity pass)
+
+- New core: `WorkingHours` (+ overnight shifts, workday text), `Activity`, `WallClock`,
+  `DayStrip`, `DayPlan` (hours of a local day incl. 23/25-hour days, overlap, runs),
+  `CalendarFile` (RFC 5545, escaping, folding), `TimeFormatter.timeParts/hourLabel`,
+  multiple menu bar clocks with migration from the single-clock setting, `goToDay`,
+  `sortByName`, per-place hours. All behind the existing fakes (`FixedClock`,
+  `MemoryStorage`).
+- **Tests:** 97 in 12 suites (23 new: working hours incl. overnight and Sun–Thu weeks,
+  activity bands, weekday math before 1970 and across the date line, rows using each
+  place's hours, split AM/PM incl. Japanese, several menu bar clocks and migration, old saves
+  without hours, planner hours on 23/24/25-hour days, overlap incl. half-hour zones, strip
+  bands and midnight ticks, go-to-day across DST, sort by name + undo, .ics escaping and
+  folding, planner labels).
+- **Offscreen renders** (`ZONES_SNAPSHOT_DIR`, used while the Mac was locked):
+  `/tmp/zones-test/parity/snap/` (panel standard / compact / timeline / dragging / scrubbed /
+  calendar, planner analog / digital, Settings General / Places; light and dark).
+- **check.sh Zones --perf:** all green. Launch 143 ms, first status item 253 ms, idle CPU
+  0.004 % (lowest window), footprint 21.9 MB (busy machine, load 4). With timeline rows and
+  two menu bar clocks: 30 ms CPU per minute (0.05 %), 23.7 MB.
+- **Scripted walkthrough (`scripts/drive`) and the `[unlabeled]` tree check: not run.** The
+  Mac's screen stayed locked for the whole session (macOS hides windows from Accessibility
+  while locked; `drive` refuses), so these two gates need an unlocked screen. Every new
+  control has an explicit accessibility label (footer +/Share/More, chip ✕ "Back to Now",
+  date pill "Shown Date", calendar "Go to Date", planner chevrons and cells, workday toggles,
+  menu bar and hours buttons in Places). Visual review was done on the offscreen renders above.
+  Clipboard writes (Copy) were not exercised on the real clipboard; the copied text is
+  unit-tested.
+
+## Polish pass (2026-11-05)
+
+Per [`docs/polish-pass.md`](../polish-pass.md). Test data only: the `zones-polish` defaults
+suite (a fixture of London, Tokyo, Kathmandu, San Francisco, Sydney and UTC; a "long" set
+with a 46-character renamed place; a "team" set with an overlap), `ZONES_NOW=2026-11-05T15:00:00Z`
+(and `2026-10-27T15:00:00Z` for daylight-saving notes), `ZONES_TIMEZONE=America/New_York`.
+Live shots with `scripts/drive` on `build/Zones.app` while the owner was away; offscreen renders
+(`ZONES_SNAPSHOT_DIR`) for every state, light and dark. Measured with `scripts/measure` and a
+pixel probe.
+
+### Defects found and fixed (before → after)
+
+| # | Surface | Defect | Before | After |
+|---|---|---|---|---|
+| 1 | Panel | Header text and rows on different edges | header text 20 pt in, rows 16 pt (ink 21.0 vs 17.0 leading, 338.5 vs 342.5 trailing) | one margin, 20 pt: header, rows, search, messages, footer glyphs (ink 21.0/20.5 leading, 338.5/339.0 trailing) |
+| 2 | Panel | Header card not concentric with the popover (radius 19 pt, measured) | radius 10 at 8 pt inset; gap 8.0 pt on the edges, 7.1 pt at the curve | `Radius.nested(in: 19, padding: 8)` = 11; 8.2 / 7.8 pt |
+| 3 | Panel | Off-grid spacing in the header | vertical padding 10 (`s + 2`), name→date 6 | 12 and 8 |
+| 4 | Panel, search | Selection pills didn't line up with the card | inset 4, radius 6 (card: inset 8, radius 10) | inset 8, radius 11, same edges and corners as the card |
+| 5 | Panel, search, planner | `Divider` separators | 1 pt (2 px) | 0.5 pt hairline (1 px), hidden beside a selected row |
+| 6 | Panel | Drag line blurred across two pixels | 1 pt centred at 179.5–180.5 | one device pixel, snapped (180.0–180.5) |
+| 7 | Panel | Chip border and padding | 1 pt stroke, 3 pt vertical padding | hairline border, 4 pt |
+| 8 | Panel footer | Copy / Open Planner off the panel's centre and the drag line | group centred at 164 pt | 180 pt (overlay centred on the panel) |
+| 9 | Panel footer | Mixed icon styles | filled grey circle at `.title3` beside outline glyphs at body | three plain glyphs at body, 4 pt hit padding, glyphs on the margin |
+| 10 | Panel, compact | Name, offset and time centre-aligned | offset baseline ~2 pt above the name's | first-baseline aligned; padding 5 → 4 |
+| 11 | Panel | Scroll area sized from wrong row heights | 56 / 30 / 70 pt assumed, real 48 / 30 / 60 | real heights (48 / 28 / 62) + half a row as a scroll cue |
+| 12 | Panel | Daylight-saving notes in plain orange | ~2.3:1 in light mode | `.textOrange` |
+| 13 | Panel | Empty list said the same thing twice | "No other places yet / Add the cities…" plus the same hint below | hint only under a list that has rows |
+| 14 | Panel | Drag chip with nothing to drag (no places) | shown | shown over a list, or while moved (to get back) |
+| 15 | Panel calendar | Today / Done spread to the panel's sides under a 137 pt calendar | 16 pt margins | span the calendar's width (±0.5 pt) |
+| 16 | Menu bar clock | Item width changed as the time ticked | 106 / 107 / 114 / 115 pt over a day (8 pt jumps at 10:00 and 1:00), moving every item to its left | one-digit hours padded with a figure space and the item sized for the widest time: fixed width all day (`MenuBarClock.widestTitles`, tested) |
+| 17 | Planner grid | Uneven cell gaps | 2 pt across, 4 pt down | 4 / 4 |
+| 18 | Planner grid | Chosen hour boxed cell by cell | 2 pt accent stroke on each cell | one outline around the column, radius 6 = cell 4 + half the gap (concentric) |
+| 19 | Planner grid | Overlap marks broken into dashes | one capsule per hour, 2 pt apart | one bar per run, ending at the cells' edges |
+| 20 | Planner grid | Now line | plain 2 pt line | line with a dot in the header row |
+| 21 | Planner cards | AM/PM collided with the hands | "PM" under the hand at 6:00 | placed under the hands wherever they aren't (6, 12, 9 or 3 o'clock) |
+| 22 | Planner cards | Fixed strip height clipped analog cards; cards nearly touching | 196 pt strip: 5 / 5.5 pt padding instead of 8; 1 pt between cards | sized to content: 8 pt all round, 8 pt between cards |
+| 23 | Planner cards | Local card invisible in dark mode (same fill as the strip) | no edge | hairline border |
+| 24 | Planner bar | "Back to Now" appeared and disappeared, moving the time and both buttons | layout shift | always there, disabled at now; Today disabled when already today, now |
+| 25 | Settings → Places | Working hours in a GroupBox with centred rows and a loose explanation; "Default hours" a borderless caption at ~1.6:1 | | grouped section like General, explanation as the Hours subtitle; "Places" heading and row names on the form's text column (31.0 pt); bordered small button |
+| 26 | Settings | Explanations as separate rows (Shortcuts, Menu bar clocks) | | subtitles under their control; the inline symbol reads as words in VoiceOver |
+| 27 | About | Window unlike every other Slopapp About | plain title bar | transparent title bar like SlopKit's `AboutWindow`; credits 24 pt from the bottom (was 20) |
+| 28 | Settings → About | Padding unlike `AboutSettingsTab` | 16 / 16 | 8 / 16 like SlopKit |
+| 29 | Test hooks | Planner face saved to the real defaults under `ZONES_DEFAULTS_SUITE` | `UserDefaults.standard` | the app's suite |
+| 30 | Test hooks | `ZONES_SNAPSHOT_DIR` never rendered search (waited on the main queue it was blocking) and could crash (windows released twice) | | async; renders search, selection, typing, errors, Undo and empty states too |
+
+Lint: 7 corner-radius literals → 0, 6 spacing warnings → 0 (two measured system insets in
+Settings carry `lint:allow`, as does the popover's measured radius).
+
+### Checked and fine
+
+AM and PM are within 0.5 pt of each other, so times right-align to the half point across
+rows; `.monospacedDigit()` everywhere a time changes; long names truncate with an ellipsis in
+their column; window buttons 16×16 (Planner, Settings, About); no `[unlabeled]` in the panel,
+search, Planner, Settings or About; secondary text ≥ 3:1 in both modes.
+
+### Gates
+
+98 tests (1 new: menu bar text keeps its width). `scripts/check.sh Zones --perf` green:
+launch 146 ms, first status item 277 ms, idle CPU 0.004 %, footprint 20.9 MB.
+
+### Screenshots
+
+`/tmp/slopapp-polish/zones/`: `before/` and `before-snap/` (old build), `after/` (live:
+panel light/dark, scrubbed + selected, calendar, typing a time, Undo, ⚙ menu, Copied HUD,
+search light/dark, Planner dark, Settings tabs dark, About window, long names with notes,
+timeline), `after-snap/` (offscreen, light and dark: every row style, dragging, scrubbed,
+calendar, selected, typing, error, search suggestions/results/none, Undo, empty, empty without
+local time, Planner analog/digital, Places tab, About).
+
+### Not done, and why
+
+- **The menu bar clock on the real menu bar**: with time shown, macOS hides the item on this
+  Mac's full menu bar (the known F2 case), so its width was verified by measuring the button
+  at every minute of a day (`/tmp/zones-tools/si.swift`) and with unit tests, not on screen.
+- **Hover** (search results, footer icons) and drag reordering: need the real pointer; the
+  owner was at the Mac for most of the session. Owed.
+- **Compact rows live**: the Row Style submenu didn't open through Accessibility; checked on
+  the offscreen renders.
+- The About tagline breaks "in the / menu bar." inside SlopKit's 320 pt `AboutView`.
+
+### Golden Gate + light/dark (2026-11-06)
+
+Against `docs/design-system.md` §4 "Fitting in on macOS 27 Golden Gate" and §10 items 25–26, on
+macOS 27.2. The owner's Zones defaults were backed up before the first launch and restored
+byte-for-byte at the end (`defaults export` diff empty); no clipboard writes this round.
+
+| Check | Before | After |
+|---|---|---|
+| Menus (⚙ menu, Row Style submenu, row context menu) | text only already | unchanged; the checkmark on the row style is a state mark |
+| Planner: chosen-hour outline in a background window | accent | grey (`selectionRing`) |
+| Planner: overlap bar, "everyone is working" icon, analog hub | accent in every window | `windowAccent`: grey when the Planner isn't key |
+| Panel: selected row, recently added row, search highlight, selected header ring | fixed accent tints | `selectionTint` / `selectionRing` (the popover is key while open, so they stay accent there; they go grey while a menu has focus) |
+| Settings → Places: menu bar toggle "on" | accent always | `windowAccent`: grey in a background Settings window (3.2:1) |
+| Opening Settings from code | own `SettingsOpener` that captured SwiftUI's `openSettings` | `SettingsWindow.open()` (helper and its view modifier removed) |
+| Reopening the running app (`open build/Zones.app`, no windows) | — | opens Settings (SlopKit default), one process; kept. Settings explains a hidden icon and has the shortcut. The panel is a popover (an `NSPanel`), so it doesn't stop Settings opening |
+| Scroll height under SlopKit's 1 pt `Hairline` | row + ½ pt | row + 1 pt |
+| Live appearance change | not tested | the same Planner and panel windows switched light → dark in-process: everything follows (`ZONES_SNAPSHOT_DIR` now writes `planner-live-*` and `panel-live-*`) |
+
+Kept as they are, with reasons:
+
+- **Working-hours colours stay accent in background windows.** Planner cells, card fills and
+  working times are data, not selection. Greying them would hide whether people are working
+  whenever the Planner sits beside a calendar. Only selections and accent marks grey out.
+- **Glass**: the panel is a system `NSPopover` with system label colours on it; no fake glass
+  anywhere. I couldn't check the clearest glass setting, because that means changing System
+  Settings.
+- **Light vs dark, measured on the same surfaces**:
+  - Day strips: evening/night/track read DCDCDC/F0F0F0/FFFEFF in light and 555/3C3C3C/282828 in dark.
+  - Working times: 3.2:1 in light, 4.6:1 in dark. They are title-sized text, so the 3:1 rule applies.
+  - Secondary text: 3.1:1 light, 6.4:1 dark.
+  - Hands and ticks are `primary`, not pure black or white. The only drawn red is the system-red now line.
+
+Screenshots in `/tmp/slopapp-polish/zones/gg/`:
+- live, light and dark: `panel-selected-*`, `planner-active-selected-*`, `planner-inactive-selected-*`
+- `settings-places-active-light`, `settings-after-reopen-light` (inactive)
+
+Offscreen renders, light and dark side by side, are in `/tmp/slopapp-polish/zones/gg-snap/`
+(46 files, including the live-switch pairs).
+
+Gates: 98 tests; `scripts/check.sh Zones --perf` green (launch 147 ms, first status item
+251 ms, idle CPU 0.000 %, 20.4 MB).
+
+Not done: the row context menu wasn't opened live, because that needs a real right-click and I didn't use the pointer. I checked it in code: `Button`s only, no images.
 
 ## Sources
 

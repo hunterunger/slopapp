@@ -21,9 +21,11 @@ public struct Place: Codable, Hashable, Identifiable, Sendable {
     public var timeZoneID: String
     /// Seconds east of UTC, only for `.fixedOffset`.
     public var fixedOffset: Int?
+    /// This place's working hours, when they differ from the default in Settings.
+    public var workingHours: WorkingHours?
 
     public init(id: UUID = UUID(), kind: Kind, name: String, customName: String? = nil,
-                detail: String, timeZoneID: String, fixedOffset: Int? = nil) {
+                detail: String, timeZoneID: String, fixedOffset: Int? = nil, workingHours: WorkingHours? = nil) {
         self.id = id
         self.kind = kind
         self.name = name
@@ -31,6 +33,7 @@ public struct Place: Codable, Hashable, Identifiable, Sendable {
         self.detail = detail
         self.timeZoneID = timeZoneID
         self.fixedOffset = fixedOffset
+        self.workingHours = workingHours
     }
 
     /// What the list shows: the user's name for it, or the name it was added with.

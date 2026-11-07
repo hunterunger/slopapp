@@ -173,7 +173,7 @@ import Testing
         model.showInMenuBar(london.id)
         #expect(model.preferences.menuBarDisplay == .iconAndTime)
         #expect(model.menuBarTitle == "LON 17:20")
-        #expect(storage.preferences?.menuBarPlaceID == london.id)
+        #expect(storage.preferences?.menuBarPlaceIDs == [london.id])
         // Scrubbing doesn't change the menu bar: it always shows now.
         model.step(.hour, by: 3)
         #expect(model.menuBarTitle == "LON 17:20")
