@@ -8,6 +8,9 @@ DerivedData/
 # Pipeline output (scripts/bundle.sh, check.sh)
 build/
 
+# Python (scripts/icons)
+__pycache__/
+
 # Web
 node_modules/
 web/.next/

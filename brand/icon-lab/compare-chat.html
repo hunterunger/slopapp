@@ -1,0 +1,39 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0}
+.top{border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+.today{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.today img{height:44px}
+.lbl{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground)}
+ol{margin:6px 0 0;padding-left:18px;font-size:13px;line-height:1.5} ol li{margin-bottom:3px}
+section{border:1px solid var(--border);border-radius:calc(var(--radius) + 4px);padding:16px;margin-bottom:14px}
+h2{font-size:16px;margin:0 0 4px}
+.pitch{margin:0 0 12px;font-size:13px;line-height:1.45;color:var(--muted-foreground)}
+.vis{width:100%;height:auto;display:block}
+dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:12px 0 0;font-size:12.5px;line-height:1.45}
+dt{font-weight:600} dd{margin:0;color:var(--muted-foreground)}
+</style></head><body>
+<div class="top">
+ <div class="today"><span class="lbl">Today</span><img src="/Users/hunterunger/.t3/projects/slopapp/brand/icon-lab/sheets/vis-Today.webp"></div>
+ <div class="lbl">What makes icons work on macOS 26–27</div>
+ <ol>
+  <li><b>Shape is no longer the signature.</b> The system masks every icon to the same rounded square, so colour and glyph do all the work of telling apps apart.</li>
+  <li><b>Mass beats line.</b> App icons need solid shapes. Thin 2 px UI glyphs (what we use today) read as toolbar buttons, which is most of why ours feel boring.</li>
+  <li><b>Flat layers in, glass out.</b> Give Icon Composer flat SVG layers and let it add the glass, highlights and shadows. Painted-on gloss fights the system. 27 renders sharper, so restraint wins: one or two glass groups.</li>
+  <li><b>Four looks from one file.</b> Dark, Clear and Tinted are derived from the layers. Clear and Tinted keep only brightness, so the glyph needs light/dark contrast against the tile, not only a hue change.</li>
+  <li><b>Families: one constant, one variable.</b> Keep a shared material or object constant, and give each app one variable that survives 16 px. At that size colour is the strongest cue, then silhouette.</li>
+ </ol>
+</div>
+<section><h2>A · Candy Glass</h2><p class="pitch">The launcher's sibling. Each app gets its own two-flavour candy gradient; the glyph is frosted white glass with a solid body.</p>
+<img class="vis" src="/Users/hunterunger/.t3/projects/slopapp/brand/icon-lab/sheets/vis-A-CandyGlass.webp">
+<dl><dt>Recipe</dt><dd>Tile: per-app gradient. Glyph: Lucide lines in white glass + a 40% white body under its closed shapes. One glass group.</dd><dt>Risk</dt><dd>Safest and most scriptable. Can look like a lot of other gradient icons; the glyph is the only per-app drawing.</dd></dl></section><section><h2>B · Ice Jelly</h2><p class="pitch">Inverted: a frosted ice tile, and the glyph is coloured candy glass, like translucent plastic over white. Dark turns the tile graphite and the glyph glows.</p>
+<img class="vis" src="/Users/hunterunger/.t3/projects/slopapp/brand/icon-lab/sheets/vis-B-IceJelly.webp">
+<dl><dt>Recipe</dt><dd>Tile: ice white (graphite in dark). Glyph: lines in the app flavour + a 30% tinted body, coloured shadow. One group.</dd><dt>Risk</dt><dd>Calm and very Apple-current. White tiles blend together in a Dock; Clear mode needs a white-glyph override.</dd></dl></section><section><h2>C · Two Flavour</h2><p class="pitch">Candy tile; the glyph splits in two: the body in white glass, the part that does the work (lens, clip, nodes, brush) in a second flavour, lifted on its own layer.</p>
+<img class="vis" src="/Users/hunterunger/.t3/projects/slopapp/brand/icon-lab/sheets/vis-C-TwoFlavour.webp">
+<dl><dt>Recipe</dt><dd>Tile: per-app gradient. Glyph: two glass groups. Per app: pick the accent parts (indices into the Lucide SVG) and a pop flavour.</dd><dt>Risk</dt><dd>Most character and real depth. Needs one small choice per app (which parts pop); some glyphs have no obvious accent.</dd></dl></section><section><h2>D · Face Plate</h2><p class="pitch">A nod to the reference: a translucent candy shell with a frosted white face plate on top, and a coloured chin peeking out below. Glyph in candy on the plate.</p>
+<img class="vis" src="/Users/hunterunger/.t3/projects/slopapp/brand/icon-lab/sheets/vis-E-Bezel.webp">
+<dl><dt>Recipe</dt><dd>Tile: per-app gradient. Group 1: white plate (graphite in dark). Group 2: candy glyph on the plate, offset up.</dd><dt>Risk</dt><dd>The strongest family signature. The plate costs glyph size, so 16 px is harder; the chin needs to stay generous.</dd></dl></section><section><h2>E · Gumdrop</h2><p class="pitch">A shared object: every icon is a glossy candy gumdrop sitting on ice, with a white glyph inside. The family is the gumdrop; the colour and glyph tell them apart.</p>
+<img class="vis" src="/Users/hunterunger/.t3/projects/slopapp/brand/icon-lab/sheets/vis-F-Gumdrop.webp">
+<dl><dt>Recipe</dt><dd>Tile: ice (graphite in dark). Group 1: white glyph. Group 2: candy disc with the app gradient and a coloured shadow.</dd><dt>Risk</dt><dd>Instantly a family, easy to generate. Circle-in-square reads a bit like a button or a badge; glyph is smaller.</dd></dl></section><section><h2>F · Poster</h2><p class="pitch">Oversized glyph, cropped by the tile edge, like a poster or a sticker sheet. Bold and playful; feels less like a template.</p>
+<img class="vis" src="/Users/hunterunger/.t3/projects/slopapp/brand/icon-lab/sheets/vis-G-Poster.webp">
+<dl><dt>Recipe</dt><dd>As Candy Glass, but the glyph is about 2x and offset so it bleeds off a corner. Per app: crop offset.</dd><dt>Risk</dt><dd>Loudest and most fun. Crops hurt recognition for some glyphs (Switchboard, Commit), and 16 px loses the shape.</dd></dl></section>
+</body></html>

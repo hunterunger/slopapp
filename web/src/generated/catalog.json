@@ -18,7 +18,7 @@
       "ink": "#13201A"
     },
     "nordic": {
-      "_note": "App icons and the website: matte Nordic colours on birch, botanical prints. Spec: brand/ICONS.md.",
+      "_note": "App icons, the website and the launcher's frame: matte Nordic colours on birch, botanical prints. Spec: brand/ICONS.md. `categories` maps each app category to its colour (the launcher's sidebar and category pages; SlopKit Brand.Nordic mirrors it).",
       "birch": "#F5F0E8",
       "oat": "#E4D9C6",
       "charcoal": "#2F2D2A",
@@ -30,10 +30,18 @@
       "fjord": "#5D7E9A",
       "heather": "#8C7EA0",
       "rosewood": "#A9665C",
-      "lingonberry": "#B9473B"
+      "lingonberry": "#B9473B",
+      "categories": {
+        "Hub": "pine",
+        "Utilities": "fjord",
+        "Productivity": "ochre",
+        "Media": "clay",
+        "Design": "heather",
+        "Developer": "sage"
+      }
     },
     "candy": {
-      "_note": "The launcher's own palette (its icon and frame). The website and app icons use nordic.",
+      "_note": "The launcher's icon mark only (apps/Slopapp/AppIcon.icon: strawberry → tangerine glass). Nothing else uses these; the launcher's frame, the website and app icons are nordic.",
       "strawberry": "#F0407A",
       "tangerine": "#F28A0C",
       "lime": "#6CCB2F",
@@ -53,9 +61,7 @@
       "slug": "slopapp",
       "name": "Slopapp",
       "tagline": "Every Slopapp app, installed and up to date.",
-      "replaces": [
-        "Setapp"
-      ],
+      "replaces": [],
       "category": "Hub",
       "icon": "layout-grid",
       "size": "M",

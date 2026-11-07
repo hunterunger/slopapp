@@ -1,0 +1,11 @@
+# The lab's renders, review sheets and downloads are large (~500 MB) and all regenerable, so they
+# stay out of git. Committed: the exploration scripts, README, construction overlays, glyph SVGs.
+__pycache__/
+bhl/raw/
+bhl/tex/
+bhl/grid/
+docs/
+renders/
+sheets/
+web/
+grain/

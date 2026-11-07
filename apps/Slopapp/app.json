@@ -2,9 +2,7 @@
   "slug": "slopapp",
   "name": "Slopapp",
   "tagline": "Every Slopapp app, installed and up to date.",
-  "replaces": [
-    "Setapp"
-  ],
+  "replaces": [],
   "category": "Hub",
   "icon": "layout-grid",
   "menuBarOnly": false,

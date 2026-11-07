@@ -9,10 +9,11 @@ Brand: `brand/` (name lives in `brand/brand.json`). Research: `docs/setapp-inven
 | Path | What |
 |---|---|
 | `apps/SlopKit/` | Shared Swift package: settings, panels, HUD, drop zone, permissions, shortcuts. Gallery: `swift run --package-path apps/SlopKit SlopKitGallery` |
-| `apps/<Name>/` | One Swift package per app. `app.json` is its manifest. `Awake` is the reference app. |
+| `apps/<Name>/` | One Swift package per app. `app.json` is its manifest, `Icon.py` its icon spec. `Awake` is the reference app. |
 | `catalog/roadmap.json` | Every planned app: name, tagline, Lucide icon, spec. `new-app.sh` reads it. |
 | `templates/app/` | What `new-app.sh` copies |
-| `scripts/` | The pipeline (see below) |
+| `scripts/` | The pipeline (see below). `scripts/icons/` generates and checks app icons |
+| `brand/` | Brand (`BRAND.md`), app icon spec (`ICONS.md`), botanical plates for the icons (`plates/`) |
 | `web/` | Next.js landing page. Reads `web/src/generated/catalog.json` |
 | `docs/pipeline.md` | Build pipeline docs and the definition of done for an app |
 | `docs/design-system.md` | The house style every app follows, with a review checklist |
@@ -35,11 +36,13 @@ scripts/lint.sh <Name>           # design-system detail rules grep can catch (ra
 scripts/measure corners <png>    # pixel checks on a window shot: corners, spacing (line), contrast
 scripts/perf.sh <Name>           # launch time, idle CPU, memory footprint vs budgets
 scripts/drive help               # drive a running app: tree/click/menubar/type/key/shot
+python3 scripts/icons/herbarium.py check|build|render [Name...]  # app icons (brand/ICONS.md)
+python3 scripts/icons/export_web.py [Name...]  # the website's app icons and prints
 node scripts/catalog.mjs         # regenerate the website catalog
 cd web && pnpm dev               # website
 ```
 
-Logs: `build/logs/<Name>-{build,test,sign,smoke}.log`.
+Logs: `build/logs/<Name>-{build,test,sign,smoke,herbarium,icon}.log`.
 
 ## Adding an app
 
@@ -47,8 +50,11 @@ Logs: `build/logs/<Name>-{build,test,sign,smoke}.log`.
 2. Build the logic in `Sources/<Name>Core` with tests in `Tests/<Name>CoreTests`. Put system
    calls behind protocols and fake them in tests, as Awake does (`PowerAssertion`, `Scheduler`).
 3. Build the UI in `Sources/<Name>`. Menu bar apps end their menu with `MenuFooter(info:)`.
-4. `scripts/run.sh <Name>` and use it. Verify the real system effect.
-5. `scripts/check.sh <Name>` must pass. Work through the definition of done in `docs/pipeline.md`.
+4. Draw the icon: `new-app.sh` starts `apps/<Name>/Icon.py` on a free tile colour; follow
+   `brand/ICONS.md` ("Drawing a new icon"), fetch its plate, then `herbarium.py check` and `render`.
+   Commit `Icon.py`, the generated `AppIcon.icon` and the print in `brand/plates/prints/`.
+5. `scripts/run.sh <Name>` and use it. Verify the real system effect.
+6. `scripts/check.sh <Name>` must pass. Work through the definition of done in `docs/pipeline.md`.
 
 ## Rules
 
@@ -71,7 +77,9 @@ Logs: `build/logs/<Name>-{build,test,sign,smoke}.log`.
 - Swift Testing (`import Testing`, `@Test`, `#expect`) for all tests, not XCTest.
 - No `.xcodeproj`, no project generators. Everything builds with SwiftPM + `scripts/`.
 - **Never use SF Symbols in app icons or on the website** (Apple's license forbids it). App
-  icons come from `Icon.svg`, a Lucide glyph. SF Symbols are fine inside app UI.
+  icons come from `apps/<Name>/Icon.py`, a Nordic herbarium spec (`brand/ICONS.md`) that
+  generates `AppIcon.icon`; `check.sh` fails an icon that breaks the style. SF Symbols are fine
+  inside app UI.
 - No network calls, analytics, telemetry or accounts in apps. Data stays local. If a feature
   truly needs the network (e.g. currency rates), make it opt-in and say so in the README.
 - Never call apps by Setapp app names or copy their designs. Mention what an app replaces

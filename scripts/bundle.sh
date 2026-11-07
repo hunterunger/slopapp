@@ -49,9 +49,16 @@ for bundle in "$BIN_PATH"/*.bundle "$BIN_PATH"/*.resources; do
 done
 shopt -u nullglob
 
-# 3. Icon: AppIcon.icon (an Icon Composer document: layered Liquid Glass icon on macOS 26+,
-#    with a flat .icns fallback for older systems) wins; then AppIcon.svg (finished full-art
-#    icon); otherwise Icon.svg (a Lucide glyph on the forest tile).
+# 3. Icon. apps/<Name>/Icon.py is the app's herbarium icon spec (brand/ICONS.md); it generates
+#    AppIcon.icon, which is committed. The generator only rewrites it when the spec changed, so
+#    this is a no-op in CI and needs neither ImageMagick nor the raw plates. A spec that fails the
+#    style check doesn't stop the build (scripts/check.sh fails on it): the committed icon is used.
+if [[ -f "$DIR/Icon.py" ]]; then
+  run_logged "$LOG_DIR/$NAME-herbarium.log" python3 "$ROOT/scripts/icons/herbarium.py" build "$NAME" \
+    || echo "warning: couldn't regenerate apps/$NAME/AppIcon.icon from Icon.py; using the committed one" >&2
+fi
+#    AppIcon.icon is an Icon Composer document: a layered icon with the Dark, Clear and Tinted
+#    looks on macOS 26+, and a flat .icns fallback for older systems.
 ICON_NAME=""
 if [[ -d "$DIR/AppIcon.icon" ]]; then
   ICON_TMP="$(mktemp -d)"
@@ -66,12 +73,8 @@ if [[ -d "$DIR/AppIcon.icon" ]]; then
     "$ICTOOL" "$DIR/AppIcon.icon" --export-image --output-file "$BUILD_DIR/$NAME-icon.png" \
       --platform macOS --rendition Default --width 512 --height 512 --scale 2 >/dev/null 2>&1 || true
   fi
-elif [[ -f "$DIR/AppIcon.svg" ]]; then
-  swift "$ROOT/scripts/icongen.swift" "$DIR/AppIcon.svg" "$APP/Contents/Resources/AppIcon.icns" \
-    --png "$BUILD_DIR/$NAME-icon.png" --full-art >/dev/null
-elif [[ -f "$DIR/Icon.svg" ]]; then
-  swift "$ROOT/scripts/icongen.swift" "$DIR/Icon.svg" "$APP/Contents/Resources/AppIcon.icns" \
-    --png "$BUILD_DIR/$NAME-icon.png" >/dev/null
+else
+  echo "warning: $NAME has no AppIcon.icon (add apps/$NAME/Icon.py: scripts/icons/herbarium.py new $NAME)" >&2
 fi
 
 # 4. Info.plist, generated from app.json.

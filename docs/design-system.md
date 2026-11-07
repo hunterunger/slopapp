@@ -16,7 +16,8 @@ pick-a-browser popup). Don't copy how they *look*: no names, icons, copy, or sig
    each macOS release's look for free (Liquid Glass on macOS 26+). No custom-drawn chrome,
    no web views, no brand colors in the UI.
 2. **The user's accent color, not ours.** Use `.tint`/`Color.accentColor`. The brand shows
-   up in exactly two places: the app icon and the About view.
+   up in exactly two places: the app icon (Nordic herbarium, `brand/ICONS.md`) and the About
+   view.
 3. **One job, instantly.** The main action is one shortcut or one drop away. Opening,
    acting and dismissing should take under a second and need no mouse.
 4. **Quiet by default.** No onboarding tours, no badges, no "what's new" sheets, no sounds
@@ -116,7 +117,7 @@ Pick one per app (an app can add a second, e.g. a menu bar app with a library wi
 - **Color**: semantic only: `.primary`, `.secondary`, `.tertiary`, accent, and system
   red/orange/green for status. Never hardcode hex in an app.
 - **Symbols**: SF Symbols inside apps, `.symbolRenderingMode(.hierarchical)` by default.
-  Never in the app icon (see brand/BRAND.md).
+  Never in the app icon: app icons come from `apps/<Name>/Icon.py` (see `brand/ICONS.md`).
 - **Motion**: under 250 ms, ease or `.snappy`. Honor Reduce Motion (`accessibilityReduceMotion`):
   replace movement and scale with a fade.
 - **Windows**: remember size and position (SwiftUI does for scenes). Don't center a window

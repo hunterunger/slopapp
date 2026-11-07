@@ -4,8 +4,7 @@ import Foundation
 /// Where things go on the icon canvas. All rects are in unit coordinates (0...1, origin at
 /// the bottom left, like Core Graphics), so the same layout renders at any pixel size.
 public enum IconGeometry {
-    /// Apple's macOS icon grid: an 824 pt tile with 100 pt margins on a 1024 pt canvas
-    /// (same numbers as scripts/icongen.swift).
+    /// Apple's macOS icon grid: an 824 pt tile with 100 pt margins on a 1024 pt canvas.
     public static let tileRect = CGRect(x: 100.0 / 1024, y: 100.0 / 1024, width: 824.0 / 1024, height: 824.0 / 1024)
     public static let canvas = CGRect(x: 0, y: 0, width: 1, height: 1)
 

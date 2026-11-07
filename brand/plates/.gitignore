@@ -1,0 +1,3 @@
+# Raw BHL downloads (re-fetch with scripts/icons/herbarium.py fetch) and processing scratch
+raw/
+.work/

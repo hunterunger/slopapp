@@ -16,15 +16,19 @@ catalog/roadmap.json ──new-app.sh──▶ apps/<Name>/ ──test.sh──�
 
 ## Requirements
 
-macOS 14+, Xcode 16+ (Swift 6), `python3` and `perl` (ship with the Xcode command line
-tools), `node` for the catalog. `jq` is used when present (macOS 15+ ships it).
+macOS 14+, Xcode 26+ (Swift 6, the macOS 26 SDK, and `actool`/`ictool` for the icons), `python3`
+and `perl` (ship with the Xcode command line tools), `node` for the catalog. `jq` is used when
+present (macOS 15+ ships it). ImageMagick only to re-process an icon's botanical print or export
+the website's icons.
 
 ## Layout of an app
 
 ```
 apps/Awake/
   app.json            manifest: name, tagline, icon, version, bundle id... (source of truth)
-  Icon.svg            Lucide glyph, vendored. Becomes the app icon.
+                      ("icon" is a Lucide name: the website's placeholder for apps without art)
+  Icon.py             the app icon spec (brand/ICONS.md)
+  AppIcon.icon        generated from Icon.py by bundle.sh; committed
   Package.swift       depends on ../SlopKit
   Sources/AwakeCore/  pure logic. No views. System calls behind protocols.
   Sources/Awake/      SwiftUI app: @main, MenuBarExtra or WindowGroup
@@ -40,14 +44,15 @@ the standard menu footer (Launch at Login / About / Quit), and the About window.
 
 | Command | What it does |
 |---|---|
-| `scripts/new-app.sh <slug>` | Scaffolds `apps/<Name>` from its roadmap entry, vendors the icon, runs its tests. |
+| `scripts/new-app.sh <slug>` | Scaffolds `apps/<Name>` from its roadmap entry, starts its icon spec (`Icon.py`), runs its tests. |
 | `scripts/test.sh [Name...]` | `swift test` for SlopKit and each app. Quiet on success; prints the log tail on failure. |
 | `scripts/bundle.sh <Name> [--debug]` | Builds and assembles `build/<Name>.app`, signs it, zips it. |
 | `scripts/smoke.sh <Name> [--no-bundle]` | Launches the bundled app; fails if it crashes or exits within 3s. |
 | `scripts/run.sh <Name>` | Debug bundle, quit any running copy, open it. |
-| `scripts/check.sh [Name...]` | The full gate: tests + release bundle + smoke for every app, then catalog. CI runs this. |
+| `scripts/check.sh [Name...]` | The full gate: lint + icon style check + tests + release bundle + smoke for every app, then catalog. CI runs this. |
 | `node scripts/catalog.mjs` | Merges roadmap + every `app.json` into the website catalog. |
-| `swift scripts/icongen.swift <svg> <icns> [--png <png>]` | Renders the app icon. `bundle.sh` calls it. |
+| `python3 scripts/icons/herbarium.py check\|build\|render [Name...]` | App icons: style check, `AppIcon.icon` from `Icon.py` (`bundle.sh` calls `build`), review renders in `build/icons/`. See `brand/ICONS.md`. |
+| `python3 scripts/icons/export_web.py [Name...]` | The website's app icons and prints, rendered from each `AppIcon.icon`. |
 
 Logs go to `build/logs/<Name>-{build,test,sign,smoke}.log`.
 
@@ -102,8 +107,10 @@ An app moves from `alpha` to `beta` in `app.json` when all of these hold:
 - [ ] Any permission it needs (Accessibility, Screen Recording...) has a first-run screen
       explaining why, and the app behaves sensibly if it's denied.
 - [ ] No network calls, analytics or telemetry. Data stays on the Mac.
-- [ ] `Icon.svg` is a Lucide icon (never an SF Symbol) and the generated icon looks right
-      (`build/<Name>-icon.png`).
+- [ ] `Icon.py` passes `herbarium.py check` and the icon passes `brand/ICONS.md`'s review
+      checklist (`herbarium.py render <Name>`, light and dark, 16/32 pt). `AppIcon.icon`, the
+      print in `brand/plates/prints/` and the website export (`export_web.py <Name>`) are
+      up to date.
 - [ ] `README.md` explains what it does, how to develop it, and the code layout.
 - [ ] `version` and `status` in `app.json` are current.
 
@@ -215,17 +222,15 @@ for testing; production is HTTPS-only):
 See `apps/Slopapp/README.md` for the scenarios (`bump`, `bad-sha`, `bad-sig`, `corrupt`,
 `offline`).
 
-### Full-art app icons
+### App icons
 
-An app can ship its own finished icon instead of the Lucide glyph `Icon.svg`, in one of two
-forms (`bundle.sh` checks them in this order):
+Every app's icon is a Nordic herbarium spec, `apps/<Name>/Icon.py` (`brand/ICONS.md`).
+`bundle.sh` turns it into `apps/<Name>/AppIcon.icon` (an Icon Composer document: layered, with
+the Dark, Clear and Tinted looks on macOS 26+) with `herbarium.py build`, which only rewrites the
+file when the spec changed. The `.icon` is committed, so CI needs neither ImageMagick nor the raw
+plates. `actool` compiles it into `Assets.car` + a flat `AppIcon.icns` fallback for older systems,
+`bundle.sh` sets `CFBundleIconName`, and `ictool` writes the preview `build/<Name>-icon.png` that
+releases attach and the feed's `iconUrl` points at.
 
-1. **`AppIcon.icon`**, an Icon Composer document (layered; Liquid Glass on macOS 26+, with
-   the Dark, Clear and Tinted looks). `bundle.sh` compiles it with `actool` into
-   `Assets.car` + a flat `AppIcon.icns` fallback for older systems, sets
-   `CFBundleIconName`, and writes a preview to `build/<Name>-icon.png` with `ictool`. The
-   launcher (`apps/Slopapp/AppIcon.icon`) uses this.
-2. **`AppIcon.svg`**, a finished square SVG (such as `brand/logo.svg`), rendered with
-   `icongen.swift --full-art` on Apple's icon grid with the standard shadow.
-
-Every other app keeps the glyph-on-forest family look.
+The launcher (`apps/Slopapp/AppIcon.icon`) has no `Icon.py`: its icon is the brand mark, edited
+by hand in Icon Composer.

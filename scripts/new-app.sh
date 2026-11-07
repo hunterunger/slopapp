@@ -3,14 +3,14 @@
 #
 #   scripts/new-app.sh <slug> [--no-verify]
 #
-# Creates apps/<Name>/ from templates/app, writes app.json from the roadmap entry,
-# vendors the Lucide icon, then runs the tests to prove the scaffold builds.
+# Creates apps/<Name>/ from templates/app, writes app.json from the roadmap entry, starts the
+# app icon spec (apps/<Name>/Icon.py, brand/ICONS.md) on the first free tile colour, then runs
+# the tests to prove the scaffold builds.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
 SLUG="${1:-}"; [[ -n "$SLUG" ]] || die "usage: scripts/new-app.sh <slug> [--no-verify]"
 VERIFY=1; [[ "${2:-}" == "--no-verify" ]] && VERIFY=0
-LUCIDE_VERSION="1.66.0"
 
 # Pull the roadmap entry out as shell-safe variables.
 ENTRY_SH="$(python3 - "$ROOT/catalog/roadmap.json" "$SLUG" <<'PY'
@@ -76,9 +76,10 @@ manifest = {
 open(out, "w").write(json.dumps(manifest, indent=2) + "\n")
 PY
 
-# Vendor the Lucide glyph (pinned) so builds work offline.
-curl -fsSL "https://unpkg.com/lucide-static@$LUCIDE_VERSION/icons/$ICON.svg" -o "$DIR/Icon.svg" \
-  || die "couldn't download Lucide icon '$ICON' (check the name at lucide.dev/icons)"
+# The app icon spec: brand/ICONS.md's template on the first unclaimed tile colour. It has no
+# plate yet, so the app builds without an icon until the spec is drawn and its plate fetched.
+python3 "$ROOT/scripts/icons/herbarium.py" new "$NAME" \
+  || echo "warning: no Icon.py for $NAME (see above); add one with scripts/icons/herbarium.py new $NAME" >&2
 
 ok "created apps/$NAME"
 if [[ $VERIFY -eq 1 ]]; then
@@ -86,3 +87,4 @@ if [[ $VERIFY -eq 1 ]]; then
 fi
 echo
 echo "Next: build the core in apps/$NAME/Sources/${NAME}Core, test it, then run scripts/check.sh $NAME."
+echo "Icon: draw apps/$NAME/Icon.py and fetch its plate (brand/ICONS.md, \"Drawing a new icon\")."
