@@ -11,17 +11,20 @@ import VideoToolbox
 let log = Logger(subsystem: "app.slopapp.convert", category: "convert")
 
 final class Transcoder: @unchecked Sendable {
-    private let asset: AVURLAsset
+    private let asset: AVAsset
     private let plan: TranscodePlan
     private let output: URL
     private let name: String
+    /// A ready-made composition (merging): read every video track through it.
+    private let videoComposition: AVVideoComposition?
     private let cancelled = OSAllocatedUnfairLock(initialState: false)
 
-    init(asset: AVURLAsset, plan: TranscodePlan, output: URL, name: String) {
+    init(asset: AVAsset, plan: TranscodePlan, output: URL, name: String, videoComposition: AVVideoComposition? = nil) {
         self.asset = asset
         self.plan = plan
         self.output = output
         self.name = name
+        self.videoComposition = videoComposition
     }
 
     /// Returns notes for the row (e.g. that an undecodable ending was left out).
@@ -29,13 +32,22 @@ final class Transcoder: @unchecked Sendable {
     func run(progress: @escaping @Sendable (Double) -> Void) async throws -> [String] {
         let tracks = try await asset.load(.tracks)
         let duration = try await asset.load(.duration)
-        let seconds = duration.isNumeric && duration.seconds > 0 ? duration.seconds : 0
+        let fullSeconds = duration.isNumeric && duration.seconds > 0 ? duration.seconds : 0
         let videoTrack = try await firstEnabled(tracks.filter { $0.mediaType == .video })
+        let allAudio = tracks.filter { $0.mediaType == .audio }
         var audioTracks: [AVAssetTrack] = []
-        for track in tracks where track.mediaType == .audio {
-            if (try? await track.load(.isEnabled)) ?? true { audioTracks.append(track) }
+        switch plan.sound {
+        case .all:
+            for track in allAudio where (try? await track.load(.isEnabled)) ?? true { audioTracks.append(track) }
+            if audioTracks.isEmpty, let first = allAudio.first { audioTracks = [first] }
+        case .track(let index):
+            if allAudio.indices.contains(index) { audioTracks = [allAudio[index]] }
+        case .none:
+            break
         }
-        if audioTracks.isEmpty, let first = tracks.first(where: { $0.mediaType == .audio }) { audioTracks = [first] }
+        // Progress and the "bad ending" check count from the trim's start.
+        let start = plan.trim?.start ?? 0
+        let seconds = plan.trim.map { min($0.end, fullSeconds > 0 ? fullSeconds : $0.end) - $0.start } ?? fullSeconds
 
         let reader: AVAssetReader
         let writer: AVAssetWriter
@@ -58,7 +70,13 @@ final class Transcoder: @unchecked Sendable {
             guard !audioTracks.isEmpty else { throw ConvertError.noSound(name: name) }
             pairs.append(try await audioPair(plan.audio, tracks: audioTracks, reader: reader, writer: writer))
         }
-        writer.metadata = await Self.metadata(of: asset, for: plan.fileType)
+        if let urlAsset = asset as? AVURLAsset {
+            writer.metadata = await Self.metadata(of: urlAsset, for: plan.fileType)
+        }
+        if let trim = plan.trim {
+            reader.timeRange = CMTimeRange(start: CMTime(seconds: trim.start, preferredTimescale: 600),
+                                           end: CMTime(seconds: trim.end, preferredTimescale: 600))
+        }
 
         guard reader.startReading() else {
             log.error("startReading failed: \(String(describing: reader.error))")
@@ -68,12 +86,14 @@ final class Transcoder: @unchecked Sendable {
             log.error("startWriting failed: \(String(describing: writer.error))")
             throw mapWriterError(writer.error)
         }
-        writer.startSession(atSourceTime: .zero)
+        // The new file starts where the trim does: earlier samples (a copied clip's lead-in
+        // from the previous key frame) are cut by the file's edit list.
+        writer.startSession(atSourceTime: CMTime(seconds: start, preferredTimescale: 600))
 
         let feeds = pairs
         activePairs.withLock { $0 = feeds }
         await withTaskCancellationHandler {
-            await feed(feeds, seconds: seconds, progress: progress)
+            await feed(feeds, start: start, seconds: seconds, writer: writer, progress: progress)
         } onCancel: {
             cancelled.withLock { $0 = true }
             abortAll()
@@ -91,7 +111,7 @@ final class Transcoder: @unchecked Sendable {
             log.error("reading failed: \(String(describing: reader.error))")
             // Files cut short by a recorder or a download often have a few bad frames at
             // the very end. Keep everything before them rather than failing the file.
-            let reached = pairs.first?.lastTime ?? 0
+            let reached = (pairs.first?.lastTime ?? 0) - start
             guard seconds > 0, reached >= seconds * 0.97, writer.status == .writing else {
                 writer.cancelWriting()
                 throw ConvertError.damaged(name: name)
@@ -159,8 +179,14 @@ final class Transcoder: @unchecked Sendable {
     }
 
     private func videoPair(_ plan: VideoPlan, track: AVAssetTrack, reader: AVAssetReader, writer: AVAssetWriter) async throws -> Pair {
-        let (formats, transform) = try await track.load(.formatDescriptions, .preferredTransform)
-        let readerOutput: AVAssetReaderTrackOutput
+        let (formats, sourceTransform, naturalSize, frameRate) = try await track.load(.formatDescriptions, .preferredTransform, .naturalSize, .nominalFrameRate)
+        // A turn travels as the track's matrix (lossless, like a phone's own rotation).
+        let shown = CGRect(origin: .zero, size: naturalSize).applying(sourceTransform)
+        let transform = self.plan.transform.isIdentity || self.plan.transform.mirrored
+            ? sourceTransform
+            : sourceTransform.concatenating(CGAffineTransform(translationX: -shown.minX, y: -shown.minY))
+                .concatenating(self.plan.transform.affine(width: abs(shown.width), height: abs(shown.height)))
+        let readerOutput: AVAssetReaderOutput
         let input: AVAssetWriterInput
         switch plan {
         case .copy:
@@ -173,7 +199,24 @@ final class Transcoder: @unchecked Sendable {
                     : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
             ]
             if e.toSDR { readSettings[AVVideoColorPropertiesKey] = Self.rec709 }
-            readerOutput = AVAssetReaderTrackOutput(track: track, outputSettings: readSettings)
+            var composition = videoComposition
+            if composition == nil, e.upright {
+                composition = Self.uprightComposition(
+                    track: track, naturalSize: naturalSize, sourceTransform: sourceTransform, turn: self.plan.transform,
+                    renderSize: CGSize(width: e.width, height: e.height), frameRate: Double(frameRate),
+                    duration: try await asset.load(.duration))
+            }
+            if let composition {
+                // Drawn through a composition: every video track, upright, at the render size.
+                let videoTracks = videoComposition == nil ? [track] : try await asset.loadTracks(withMediaType: .video)
+                let composed = AVAssetReaderVideoCompositionOutput(videoTracks: videoTracks, videoSettings: [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+                ])
+                composed.videoComposition = composition
+                readerOutput = composed
+            } else {
+                readerOutput = AVAssetReaderTrackOutput(track: track, outputSettings: readSettings)
+            }
 
             var compression: [String: Any] = [:]
             if let quality = e.quality { compression[AVVideoQualityKey] = quality }
@@ -193,7 +236,7 @@ final class Transcoder: @unchecked Sendable {
                 AVVideoScalingModeKey: AVVideoScalingModeResizeAspect,
             ]
             if !compression.isEmpty { settings[AVVideoCompressionPropertiesKey] = compression }
-            if e.toSDR {
+            if e.toSDR || e.upright {
                 settings[AVVideoColorPropertiesKey] = Self.rec709
             } else if let colors = formats.first.flatMap(Self.colorProperties) {
                 settings[AVVideoColorPropertiesKey] = colors
@@ -204,7 +247,11 @@ final class Transcoder: @unchecked Sendable {
             input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         }
         readerOutput.alwaysCopiesSampleData = false
-        input.transform = transform
+        if case .encode(let e) = plan, e.upright {
+            input.transform = .identity
+        } else {
+            input.transform = transform
+        }
         input.expectsMediaDataInRealTime = false
         guard reader.canAdd(readerOutput), writer.canAdd(input) else { throw ConvertError.encodeFailed(name: name) }
         reader.add(readerOutput)
@@ -314,17 +361,31 @@ final class Transcoder: @unchecked Sendable {
 
     /// Runs every track's feed side by side. The picture drives progress (it's most of the
     /// work); the sound does when there's no picture.
-    private func feed(_ pairs: [Pair], seconds: Double, progress: @escaping @Sendable (Double) -> Void) async {
+    private func feed(_ pairs: [Pair], start: Double, seconds: Double, writer: AVAssetWriter,
+                      progress: @escaping @Sendable (Double) -> Void) async {
+        nonisolated(unsafe) let writer = writer
         await withTaskGroup(of: Void.self) { group in
             for (index, pair) in pairs.enumerated() {
                 var report: (@Sendable (CMTime) -> Void)?
                 if index == 0, seconds > 0 {
                     report = { time in
-                        if time.isNumeric { progress(min(0.99, time.seconds / seconds)) }
+                        if time.isNumeric { progress(min(0.99, max(0, time.seconds - start) / seconds)) }
                     }
                 }
                 let reporter = report
                 group.addTask { await self.pump(pair, report: reporter) }
+            }
+            // A writer that fails (an encoder that gives up, a full disk) stops asking its
+            // inputs for more, so their feeds would wait forever. Watch for it and stop them.
+            group.addTask {
+                while !pairs.allSatisfy(\.isFinished) {
+                    if writer.status == .failed {
+                        for pair in pairs { pair.failed = true }
+                        self.abortAll()
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
             }
         }
     }
@@ -337,6 +398,31 @@ final class Transcoder: @unchecked Sendable {
     }
 
     // MARK: Helpers
+
+    /// Draws one video track upright (its own rotation, then `turn`), scaled to `renderSize`.
+    static func uprightComposition(track: AVAssetTrack, naturalSize: CGSize, sourceTransform: CGAffineTransform,
+                                   turn: PictureTransform, renderSize: CGSize, frameRate: Double,
+                                   duration: CMTime) -> AVVideoComposition {
+        let shown = CGRect(origin: .zero, size: naturalSize).applying(sourceTransform)
+        var (w, h) = (abs(shown.width), abs(shown.height))
+        var t = sourceTransform.concatenating(CGAffineTransform(translationX: -shown.minX, y: -shown.minY))
+        t = t.concatenating(turn.affine(width: w, height: h))
+        if turn.swapsSides { swap(&w, &h) }
+        t = t.concatenating(CGAffineTransform(scaleX: renderSize.width / max(1, w), y: renderSize.height / max(1, h)))
+        let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+        layer.setTransform(t, at: .zero)
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
+        instruction.layerInstructions = [layer]
+        let composition = AVMutableVideoComposition()
+        composition.renderSize = renderSize
+        composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(frameRate > 0 ? min(120, frameRate.rounded()) : 30))
+        composition.instructions = [instruction]
+        composition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+        composition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+        composition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
+        return composition
+    }
 
     static var rec709: [String: Any] { [
         AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,

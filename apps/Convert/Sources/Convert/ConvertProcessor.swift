@@ -16,6 +16,8 @@ struct ConvertProcessor: FileProcessor {
     let converter: Converter
     let events: ConvertEvents
     var restore: RestoreBook?
+    /// Each file's own format, trim, turn and sound choice, read when it starts.
+    var options: OptionsBook?
 
     func process(_ job: FileJob, progress: FileProgress) async throws -> FileOutcome {
         switch restore?.take(job.input) {
@@ -25,8 +27,9 @@ struct ConvertProcessor: FileProcessor {
         case nil: break
         }
         let (events, input, settings) = (events, job.input, converter.settings)
-        let result = try await converter.run(input, replacing: job.previousOutput, started: { kind in
-            events.started(input, kind, settings.targetTitle(for: kind), settings.signature(for: kind))
+        let own = options?.options(for: input) ?? FileOptions()
+        let result = try await converter.run(input, options: own, replacing: job.previousOutput, started: { kind in
+            events.started(input, kind, settings.applying(own).targetTitle(for: kind), settings.signature(for: kind, options: own))
         }, progress: { progress($0) })
         switch result {
         case .converted(let report):
@@ -67,6 +70,24 @@ final class RestoreBook: @unchecked Sendable {
 
     func forget(_ url: URL) {
         lock.withLock { _ = entries.removeValue(forKey: url.standardizedFileURL.path) }
+    }
+}
+
+/// Every file's own options, shared between the window (which edits them) and the
+/// processor (which reads them off the main actor when a file starts).
+final class OptionsBook: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [String: FileOptions] = [:]
+
+    func options(for url: URL) -> FileOptions {
+        lock.withLock { entries[url.standardizedFileURL.path] } ?? FileOptions()
+    }
+
+    func set(_ options: FileOptions, for url: URL) {
+        lock.withLock {
+            let key = url.standardizedFileURL.path
+            if options.isEmpty { entries.removeValue(forKey: key) } else { entries[key] = options }
+        }
     }
 }
 

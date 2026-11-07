@@ -95,7 +95,9 @@ public enum FixtureMaker {
         let audioChunks = Int(spec.seconds * sampleRate) / chunk
         var frame = 0
         var chunks = Array(repeating: 0, count: audios.count)
-        var stalls = 0
+        // Give up after 20 s without progress rather than spin forever (an encoder that
+        // never becomes ready, e.g. on a virtual Mac without one).
+        var lastProgress = Date()
         // Feed whichever track is behind; if it isn't ready, feed the others (the writer
         // may want more of them first to interleave).
         while frame < frames || chunks.contains(where: { $0 < audioChunks }) {
@@ -134,9 +136,11 @@ public enum FixtureMaker {
                     break
                 }
             }
-            if !progressed {
-                stalls += 1
-                if stalls > 200_000 { throw FixtureError.failed("writer stalled") }
+            if progressed {
+                lastProgress = Date()
+            } else {
+                if writer.status == .failed { throw FixtureError.failed("writer: \(String(describing: writer.error))") }
+                if Date().timeIntervalSince(lastProgress) > 20 { throw FixtureError.failed("writer stalled") }
                 usleep(500)
             }
         }
@@ -160,19 +164,19 @@ public enum FixtureMaker {
         guard let ctx = CGContext(data: CVPixelBufferGetBaseAddress(buffer), width: width, height: height,
                                   bitsPerComponent: hdr ? 16 : 8, bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
                                   space: space, bitmapInfo: info) else { return }
-        let colors = [CGColor(red: 0.1, green: 0.3, blue: 0.7, alpha: 1), CGColor(red: 0.9, green: 0.5, blue: 0.2, alpha: 1)]
+        let colors = [CGColor(red: 0.1, green: 0.3, blue: 0.7, alpha: 1), CGColor(red: 0.9, green: 0.5, blue: 0.2, alpha: 1)] // lint:allow synthetic test-pattern pixels (fixture data, not UI)
         if let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: colors as CFArray, locations: [0, 1]) {
             ctx.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: width, y: height), options: [])
         }
         let t = Double(frame) / Double(max(1, frames - 1))
-        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)) // lint:allow synthetic test-pattern pixels (fixture data, not UI)
         let barWidth = Double(width) / 8
         ctx.fill(CGRect(x: t * (Double(width) - barWidth), y: Double(height) * 0.25, width: barWidth, height: Double(height) * 0.5))
         // Frame counter: 10 bits as black/white squares along the bottom.
         let cell = Double(width) / 12
         for bit in 0..<10 {
             let on = (frame >> bit) & 1 == 1
-            ctx.setFillColor(on ? CGColor(red: 1, green: 1, blue: 1, alpha: 1) : CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+            ctx.setFillColor(on ? CGColor(red: 1, green: 1, blue: 1, alpha: 1) : CGColor(red: 0, green: 0, blue: 0, alpha: 1)) // lint:allow synthetic test-pattern pixels (fixture data, not UI)
             ctx.fill(CGRect(x: cell * Double(bit + 1), y: 4, width: cell * 0.8, height: cell * 0.5))
         }
     }
@@ -254,13 +258,13 @@ public enum FixtureMaker {
             let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                 bitmapInfo: (alpha ? CGImageAlphaInfo.premultipliedLast : .noneSkipLast).rawValue)!
-            let colors = [CGColor(red: 0.2, green: 0.6, blue: 0.3, alpha: 1), CGColor(red: 0.9, green: 0.8, blue: 0.3, alpha: 1)]
+            let colors = [CGColor(red: 0.2, green: 0.6, blue: 0.3, alpha: 1), CGColor(red: 0.9, green: 0.8, blue: 0.3, alpha: 1)] // lint:allow synthetic test-pattern pixels (fixture data, not UI)
             let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: colors as CFArray, locations: [0, 1])!
             if alpha { ctx.clear(CGRect(x: 0, y: 0, width: width, height: height)) }
             ctx.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: width, y: height), options: [])
             if alpha { ctx.clear(CGRect(x: 0, y: 0, width: width / 3, height: height)) }
             // An arrow-ish marker in the top-left so orientation is visible.
-            ctx.setFillColor(CGColor(red: 0.8, green: 0.1, blue: 0.1, alpha: 1))
+            ctx.setFillColor(CGColor(red: 0.8, green: 0.1, blue: 0.1, alpha: 1)) // lint:allow synthetic test-pattern pixels (fixture data, not UI)
             ctx.fill(CGRect(x: width / 20 + f * 10, y: height - height / 4, width: width / 5, height: height / 6))
             var options: [CFString: Any] = [kCGImagePropertyOrientation: orientation,
                                             kCGImageDestinationLossyCompressionQuality: 0.95]

@@ -689,3 +689,274 @@ Conversions excellent; one major. Triage by the coordinator.
 
 Gates: `scripts/test.sh SlopKit Squish Convert` 65 / 51 / 47 passing; `scripts/check.sh Convert --perf` green (launch 173 ms, first window 298 ms, idle CPU 0.023%, footprint 38.0 MB); `open-while-running.sh 10` 10/10.
 
+
+## Parity pass (2026-11-03)
+
+Per [`docs/parity-pass.md`](../parity-pass.md): look and work much more like the original,
+fill feature gaps. Sources: Permute 4.1's official screenshots (main window, trim, file
+actions, presets pane; downloaded to `/tmp/convert-parity/web/`, not committed) plus the
+earlier read-only walk of the installed app (menus, every Settings pane, preset options).
+Permute wasn't launched again: last time it never showed files added to it, and the official
+screenshots show the populated layout.
+
+### How the original is laid out (what we matched)
+
+- **Groups by kind.** Files sit in groups (Images, Video…), each under a full-width tinted
+  header: ▷ Start, the group's **preset popup** (its format), name and "N files", then +, an
+  options button, clear ⊗ and a fold chevron. Headers stay pinned while scrolling.
+- **Cards in two columns.** Each file is a wide card with its **thumbnail filling the
+  background** under a dark scrim: name in bold, a facts line ("1280×720 · H.264 · 7001 kbps
+  · 41.27 fps · AAC · 49 kbps · Mono · 33.9 MB"), ⊗ top right, and a **bar along the bottom**
+  with ▷/progress ("Converting 16% – 02:34", "Waiting…", "Finished.") and per-file tools
+  (crop, trim, audio tracks, subtitles, options).
+- **Status bar** along the window bottom: +, a centred count ("13 Conversions · 6 Running · 7
+  Finished"), a support button.
+- **Trim sheet**: big preview, a range bar with in/out handles, nudge buttons each side, the
+  range readout in the middle, an actions menu, Cancel / Done.
+- **Settings**: General, Destination, Subtitles & Audio, Presets (list with checkboxes → form),
+  Custom Groups, Drop Zones, Privacy, Binaries.
+
+### Gap table
+
+| Item (Permute) | Status | Notes |
+|---|---|---|
+| Groups by kind with header (Start, format popup, name + count, +, options, clear, fold), pinned | **done** | `GroupHeader`: ▷ when something is ready, the kind's format popup, "Video / 3 files", +, ⋯ (merge, select all, reset per-file settings, remove finished), ⊗, chevron. Accent tint at 10% instead of Permute's coral. |
+| Cards with thumbnail background, name, facts line, ⊗ | **done** | `CardView`: Quick Look frame/photo fills the card under a dark scrim; facts line from `MediaInfo.cardLine` (size · dims · codec · fps · audio codec · kbps · channels · length); a third line for the result, notes or the file's own edits. Sound files get the accent colour and a waveform symbol (Quick Look has no picture for them). |
+| Card bottom bar with state, progress and tools | **done** | ▷ Start / ■ Stop / 🔍 Show in Finder / ↻ Try Again; "Ready → MP4", "Converting 42% → MP4", "Done · 200 KB → 101 KB", "Settings changed"; progress fills the bar; tools: trim, rotate/flip, sound, the file's format. |
+| Two-column grid | **done** | Adaptive: as many 330 pt columns as fit (2 at the default width). |
+| Status bar (+, count, support) | **done (adapted)** | +, Start (when files are ready), "9 files · 5 ready · 3 converting · 1 failed", then Presets, Quality, Size, Save To (Permute keeps those in presets/group options; ours stay one click away). No support button (no accounts, no network). |
+| Manual Start (▷ per file/group/all, ⌘S) | **done (option)** | Settings › General › "Start converting as soon as files are added" (on, the owner's start-on-drop decision). Off: files wait as "Ready" cards; ▷ on a card, a header, the status bar, or File › Start ⌘↩ (not ⌘S, which is Save everywhere else). |
+| **Per-file format** | **done** | Each card's format popup: "Same as Group (MP4 (H.264))" or any format of its kind; works on the whole selection. `FileOptions` per file (`OptionsBook`, read by the processor when the file starts). |
+| **Presets incl. device presets** | **done** | Status bar Presets menu and Format › Presets: iPhone & iPad, Apple TV 4K, Older Devices & Windows, Web & Email, Chat GIF, Video Editing (each sets every format + quality + size), shown only if this Mac can write them. **Save Current Settings as Preset…**; Settings › Presets lists built-in and saved (use, rename, reorder, delete). Permute's per-preset codec forms (CRF, keyframes, profile…) are skipped on purpose: Quality stays intent-based. |
+| **Trim** | **done** | Sheet: AVKit player, range bar (drag handles, click to scrub, VoiceOver-adjustable), −1s / −0.1 s / Set (I, O) / +0.1 s / +1s on each side, readout, Keep Everything, Cancel / Done. Copies stay copies (an H.264 .mov trimmed to .mp4 isn't re-encoded; the edit list cuts at the exact time). GIFs trim too. Not done: ±5/±10 s, frame steps, audio waveform, "apply to whole group" (S each). |
+| **Merge files** | **done** | ⇧⌘M, the group ⋯ menu, or right-click: a sheet to order the files (drag or ↑/↓), then one file "First Merged.mp4". Videos of another shape are fitted with black bars; files without sound get silence; sound files merge to the Audio format; video → audio-only targets merge just the sound; GIF target merges to MP4 (H.264) with a note. Not done: chapters per file (S), images → PDF (M). |
+| **Extract audio** | done (before) | Video format "Audio Only (M4A/WAV)", now also per file. |
+| **Image resize** | done (before) | Size menu (fits a box either way round, never enlarges). |
+| **Audio track selection** | **done** | Card sound menu on videos: "All Tracks, Mixed" (default), each track by number/language/codec/channels, or "No Sound". |
+| Subtitle track selection / burn-in | **deferred (M, ~1 day)** | AVFoundation can pass tx3g/WebVTT tracks through to MP4/MOV, but we need a subtitle fixture writer, per-track UI and tests; burn-in needs Core Text drawing in the composition. |
+| **Rotate / flip** | **done** | Card menu, right-click, Edit File menu (⌥⌘R / ⌥⌘L, flips): turns of videos go in the track matrix (lossless, instant, still a copy when possible); mirrors redraw through an `AVVideoComposition`; photos are drawn upright (orientation 1). Math in `PictureTransform` (the 8 turn/mirror combinations, EXIF orientations, matrices), tested. |
+| Watch folders | **deferred (M, ~1 day)** | Permute itself does this with a Folder Action + Shortcuts recipe. Ours needs an FSEvents watcher, loop protection (outputs landing in the watched folder), a Settings list and a running app. |
+| **After-conversion actions** | **done** | Settings › General › When Done: play a sound (on), remove finished files from the list (Undo brings them back), move originals to the Trash (only when the new, non-empty file exists elsewhere; `Trasher` protocol, faked in tests), quit Convert. Dock bounce when in the background (before). "Put the Mac to sleep" skipped: it changes system state, and isn't something a converter should do. |
+| Crop | deferred (M, ~1 day) | The composition path exists, so encoding is easy; the work is a crop sheet with handles, presets and letterbox detection. |
+| File size restriction ("under 25 MB") | deferred (M) | Bit-rate targeting from duration, two passes for accuracy. |
+| Speed, volume | deferred (S–M) | `scaleTimeRange`, `AVAudioMix`. Editing more than converting. |
+| Drop Zones, Custom Groups | deferred (M) / covered | Drop Zones: floating tiles per preset. Custom Groups ≈ our saved presets. |
+| Video to images, split by chapters, edit metadata, Shortcuts action, Finder service, schedule start, pause | deferred / skip | Video to images needs several outputs per row (FileQueue change in SlopKit). Others as in the inventory above. |
+| Settings panes | **done (fewer)** | General, Destination, Presets, About (SlopKit `SettingsForm` / `AboutSettingsTab`). Subtitles & Audio waits for subtitles; Privacy and Binaries don't apply (no analytics, no FFmpeg). |
+| MP3 / WebP output, MKV/WebM read | can't | Unchanged: no encoder/reader in macOS (see "What Apple frameworks can't do"). |
+
+### Deviations from the design system (and why)
+
+- **Cards are always dark-styled** (dark scrim over the picture, dark appearance for their
+  text and controls) in light and dark mode: text has to stay readable over any photo or
+  frame, as in the original. The window around them follows the system appearance.
+- **Custom card grid instead of SlopKit's `FileQueueView` list** (still on `FileQueue` for the
+  queue itself): the shared view only has list rows. The grid reimplements selection (click,
+  ⌘-click, ⇧-click), arrows (by column), Space, Return, Delete, drop anywhere, scroll to new
+  files, and Quick Look.
+- **Group headers tinted with the accent colour** (10%) over the bar material, not the
+  original's coral.
+
+### Shared components built in-app (candidates for SlopKit)
+
+- `CardQueueView` / `CardView` / `CardThumbnails` (a card grid over `FileQueue`, grouped,
+  with pinned headers): could become `FileQueueCardsView`.
+- `RangeSlider` (two handles + playhead, VoiceOver-adjustable) and `PlayerView` (AVKit).
+- `BarMenuButton` gained icon-only, dark and highlighted styles.
+
+### CI fix
+
+GitHub's macOS 26 runners are virtual Macs with no media engine; Convert's test job ran past
+the 45-minute limit (the log stops after the build because `swift test` output is buffered
+to the log file, so the hanging test isn't named). Changes:
+
+- Tests that really encode video or HEIC carry `.needsMediaEngine`, which skips them when
+  `CI` is set (`TestEnvironment.isCI`); they all run locally. With `CI=true`, 38 of 65 tests
+  still run (planner, options, presets, after-actions, audio, PNG/JPEG/TIFF images, merge of
+  sound), and the suite finishes in about 1 s.
+- Every suite with real conversions has `.timeLimit(.minutes(5))`.
+- The transcoder now watches the writer while feeding: a writer that fails (an encoder that
+  gives up, a full disk) stops asking its inputs for more, which used to leave the feeds
+  waiting forever. Now they're stopped and the file fails with a message.
+- The fixture maker gives up after 20 s without progress (it used to spin up to 200,000
+  times) and fails at once when its writer fails.
+- `CI=true scripts/check.sh Convert`: 30 s here with a warm build (tests ~1 s).
+
+### Gates (parity pass)
+
+- `scripts/check.sh Convert --perf`: green. 65 tests in 9 suites (18 new). Launch 153 ms,
+  first window 291 ms, idle CPU 0.017%, footprint 40.7 MB (budget 120).
+- `CI=true scripts/check.sh Convert`: green in 30 s.
+- **Walkthrough: partial, the screen was locked the whole session.** With the Mac locked,
+  macOS hides windows from Accessibility and screen capture, so `scripts/drive tree / click /
+  shot` couldn't run (re-checked over about an hour). Instead the release build was driven
+  with `open -a` (files in), env-gated review hooks (`CONVERT_REVIEW=trim|merge|settings|edits`
+  open a view or apply per-file settings as the card tools would), and `CONVERT_SNAPSHOT`,
+  which saves PNGs of the app's own windows. Checked that way, light and dark: grouped cards with
+  facts and results; manual-start mode ("Ready" cards, ▷ on header and status bar, MKV
+  explained before Start); per-file HEVC + trim on a video (28 KB, "Trimmed to 0:00.5 –
+  0:02.0", tools highlighted); per-file rotate on a PNG → JPEG (marker moved top-left →
+  top-right, transparency on white); per-file WAV on a WAV ("Already WAV. Nothing to
+  change."); trim sheet; merge sheet; Settings › General; When Done → move original to the
+  Trash and remove finished (the folder kept only the new file; the list emptied).
+  Idle with 5 cards: 0.04% CPU, 67 MB footprint (stable).
+- **Not tested: owner away, screen locked** (needs an unlocked screen): `scripts/drive tree`
+  for `[unlabeled]` controls (every new control has an explicit label or a combined
+  accessibility element; the trim bar's track is hidden in favour of its two adjustable
+  handles), clicking card tools and menus, the trim sheet's player and keys (I/O/Return/Esc),
+  keyboard selection on the grid, Settings › Destination and Presets panes, and real
+  screenshots with `scripts/drive shot`. Blind testers should cover these first.
+- Snapshots (from the app's own windows, not the screen): `/tmp/convert-test/shots/parity/`
+  `01-light-cards-per-file-edits.png`, `02-dark-manual-start.png`, `03-trim-sheet.png`,
+  `04-merge-sheet.png`, `05-settings-general.png`, `06-dark-empty-after-remove-finished.png`.
+
+## Polish pass (2026-11-05)
+
+Per [`docs/polish-pass.md`](../polish-pass.md). Release build (`build/Convert.app`, real SDK
+stamp), driven with `scripts/drive` (AX only: the owner was active the whole session, so no
+real-pointer or global-key input), test files in `/tmp/convert-test/polish/`, screenshots in
+`/tmp/slopapp-polish/convert/` (`before-*` and `after-{light,dark}-*`). Convert's defaults
+domain was exported first and re-imported at the end (identical to the backup).
+
+### Defects found and fixed (before → after)
+
+| # | Surface | Defect | Before | After |
+|---|---|---|---|---|
+| 1 | lint | Corner literals | 11 (12, 8, 10, 7) | 0: `CardMetrics.radius` = `Radius.l`; bar `Radius.nested(in: l, padding: 6)` = 6; header pill `Radius.nested(in: l, padding: 6)` = 6; drop outline `Radius.m` |
+| 2 | lint | Hardcoded colours | 5 | 0: all in `FixtureMaker` (synthetic test-pattern pixels, not UI), marked `// lint:allow` |
+| 3 | lint | Spacing literals (warn) | 2 (`28`, `3`) | 0 (`Spacing.xxl + xs`, `Spacing.xs`) |
+| 4 | Card | Status bar radius vs card | 8 pt inside a 12 pt card at 6 pt inset (not concentric) | 6 pt (concentric); progress fill now a straight edge clipped to the bar's shape (was its own 8 pt pill, min 8 pt wide) |
+| 5 | Grid | Group header edges vs cards | header 12–848 pt, cards 16–844 pt (4 pt off each side) | both 16–844 pt |
+| 6 | Grid | ▷ column | header ▷ 34.5 pt, card ▷ 32.5 pt, name 28.5 pt | 33 / 33 / 33.5 pt |
+| 7 | Grid | Right column | header chevron 18 pt, format chevron 17 pt, ⊗ 15.5 pt from the edge | 15 / 15 / 15.5 pt |
+| 8 | Card/header | Hit targets and shared heights | pop-ups 20×15, 24×13, 92×15; ⊗ 15×15; header ▷ 9×11; status-bar + 10×10; trim 22×22 | every tool, ⊗ and header control 22×22, gaps 4 pt (card) / 8 pt (header); symbols share one size and weight (12 pt semibold) across SwiftUI buttons and AppKit pop-ups |
+| 9 | Card | Caption contrast on bright pictures | `.secondary` 3.27:1 on a light photo | `.primary` 80% + stronger top scrim: 6.9:1 |
+| 10 | Card | Transparent PNG showed the window through | caption 1.95:1 on grey | black base under every thumbnail: 6.9:1 |
+| 11 | Card | ⊗ remove button | cross 2.07–2.56:1 on its disc | white cross on a 40% black disc: 14.5:1 |
+| 12 | Card | Unreadable files (damaged, MKV) offered ▷ Start and a format pop-up | ▷ + pop-up | ⚠︎ symbol, no tools (also for failed files that can't be retried) |
+| 13 | Card | Kind watermark sat under two-line error text | overlapped | hidden when the card has a third line |
+| 14 | Card | Status repeated the format beside the format pop-up ("Ready → MP4 (H.264)" next to "MP4 (H.264)") | doubled | "Ready", "Converting 42%" (the started-with target shows only if the pop-up changed since) |
+| 15 | Header | ▷ disappeared when nothing was startable; the format pill jumped | 30 pt jump | slot kept (hidden, disabled, hidden from VoiceOver) |
+| 16 | Header | Hairline / pill | 1 pt `.separator` stroke; pill radius 7 at 2 pt vertical padding | `hairlineBorder` (1 device pixel); pill fills the row, inset 6/5.5 pt top/bottom, radius 6 |
+| 17 | Window | Divider above the status bar | 1 pt (2 px) | `Hairline()` (1 px) |
+| 18 | Window | Scrolled: cards showed through the 8 pt gap above a pinned header | visible sliver | headers have no top gap (spacing moved into the stack and each group's last row), so pinned they sit flush under the toolbar; only the system scroll-edge effect shows content there. (An opaque band can't work: macOS 26 tints the window background with the wallpaper, so no semantic colour matches it: `#282828`/`#313536` vs `#2B2E2E`.) |
+| 19 | Window | "Scroll to new files" did nothing for files below the fold; arrow keys never scrolled | `scrollTo` couldn't reach cards inside a nested `LazyVGrid` | rows are direct children of the `LazyVStack` (`CardRow`, id = first card); new files and arrow-key moves scroll into view |
+| 20 | Window | Subtitle and status bar disagreed | "9 converted · 2 failed" vs "11 finished · 2 failed" | subtitle removed (the status bar has the count; no title jump when it would come and go). Status bar also counts "N stopped" |
+| 21 | Status bar | Start appeared/disappeared in manual-start mode, moving the count | 76 pt shift | always present when "start as soon as added" is off, dimmed when nothing is ready |
+| 22 | Menus | Select All, Quick Look, Show in Finder disabled while every file was still "Ready" | disabled | enabled; Show in Finder reveals the originals of waiting files |
+| 23 | Merge | Offered unreadable files (Broken.mp4, Movie.mkv): "Merge 7 Files" | 7 incl. 2 unreadable | 5 (only files that were read, play over time, aren't animated images) |
+| 24 | Trim | Nudge buttons in one row | chevrons 17 pt tall, text 20 pt | all 20 pt (symbols inside `Text`), 24 pt min width |
+| 25 | Trim | Range handles' AX role | `unknown` | `slider` with value description "0:00.0" (`accessibilityRepresentation`) |
+| 26 | Trim | Sheet padding | 16 pt (merge sheet 20) | 20 pt |
+| 27 | Settings | Width | 520 pt (+40 over the standard) | `Metrics.settingsWidth` (480); two subtitles shortened so nothing orphans |
+| 28 | Settings › Destination | Explanation as its own row; "clip / 2.mp4" broke across lines; borderless pull-down 5 pt inside the form's edge | separate row | subtitle under "Save new files", no-break space; standard bordered pop-up (3.5 pt, the system's own margin) |
+| 29 | Settings › Presets | "Yours" below the fold; no double-click | list 300 pt | 360 pt (built-ins + Yours visible); double-click or Return uses a preset; right-click Use/Rename/Delete |
+| 30 | Merge | Failure text | plain `.orange` | `.textOrange` |
+
+Card text contrast after (light window, dark cards): name ~15:1, facts 6.9:1, errors
+(`.textOrange` on the scrim) 7.7:1, bar status 8.0:1. Group-header count `.secondary` on the
+accent tint 3.85:1 (the system's secondary floor; accepted). Status-bar count 3.95:1 (same).
+
+### Checked and fine
+
+Empty drop window (20 pt margins, DropZone token radius), toolbar (Clear List / Stop All +
+Add Files in one glass group), progress / done / settings-changed / stopped / failed cards,
+the outdated notice, card and group pop-up menus (native `NSMenu`, subtitles), merge sheet,
+Settings › General / About, selection ring (3 pt accent, inside the card edge), window
+buttons 16×16, `[unlabeled]`: 0 in the window, trim and merge sheets and every Settings tab.
+
+### Not done / owed
+
+- **Hover, focus ring and real keyboard on the grid:** the owner was active all session
+  (HID idle 0–17 s), so no window activation, real pointer or global keys. Arrow-key scrolling
+  is in code (see #19) but was only exercised indirectly; hover states are the system's
+  borderless-button ones.
+- **Alerts** (clear list while converting, quit while converting, rename preset) are stock
+  `NSAlert`s; not re-shot.
+- **Show in Finder / reveal** wasn't clicked (it activates Finder); code path unchanged
+  except #22.
+- Once, with the owner active, the main window was gone after an AX menu pick; it didn't
+  reproduce in two more tries. Around the same time a dead launchd job entry from one of my
+  launches blocked new launches ("Operation already in progress"); I removed that one
+  stale entry (`launchctl remove application.app.slopapp.convert.…`) and confirmed normal
+  launches work.
+
+### Gates
+
+- `scripts/lint.sh Convert`: pass (was 11 corner + 5 colour failures, 2 warnings).
+- `scripts/check.sh Convert --perf`: green. 65 tests in 9 suites. Launch 179 ms, first
+  window 383 ms, idle CPU 0.027%, footprint 43.3 MB (busy machine, load 5).
+- `scripts/drive tree`: no `[unlabeled]`; close/minimise/zoom 16×16.
+- Screenshots (`/tmp/slopapp-polish/convert/`): `after-{light,dark}-01-empty`, `-02-ready`,
+  `-03-groups`, `-05-trim-1`, `-07-merge-1`, `-10-settings-{General,Destination,Presets,About}`,
+  `after-light-06-selected`, `after-dark-19-scrolled`, `after-13-converting-light`,
+  `after-14-converting-dark`, `after-15-outdated-dark`, `after-16-stopped-dark`,
+  `after-17-formatmenu-dark-1`; `before-*` for comparison.
+
+### Golden Gate + light/dark (2026-11-06)
+
+Against `docs/design-system.md` §4 "Fitting in on macOS 27 Golden Gate" and §10 items 25–26,
+on macOS 27.2. Screenshots in `/tmp/slopapp-polish/convert/gg/` (`sbs-*` are side by side).
+
+**Checked, already fine**
+- **Menus are text.** Main menu, card right-click menu and every pull-down's contents
+  (formats, quality, size, Save To, presets, group actions, per-file format/sound/turn) are
+  plain text (with subtitles and checkmarks). The symbols on the status-bar pop-ups are on the
+  button faces, not on menu items.
+- **Toolbar is standard.** It's the system `.toolbar`: Clear List/Stop All plus Add Files, in
+  the system glass group. The bottom bar is a status bar, not a fake toolbar: no drawn
+  background, a hairline above. Toolbar items stay legible over scrolled cards (system
+  scroll-edge effect).
+- **Glass is the system's.** There's no fake glass. The card bar is `.ultraThinMaterial`
+  over a scrim, and its text measures 7.6:1. Group headers use `.bar`.
+- **No sidebar** (drop-in window archetype).
+- **Hairline (now 1 pt of layout).** Status bar re-measured: hairline at 521–522 pt, Start
+  531–551 pt, 9 pt above and below; the + and Start share a centre at 541 pt. Convert uses
+  `FileQueue` (the model) but not `FileQueueView`, so the FileQueue view changes don't touch it.
+
+**Changed**
+
+| Item | Before | After |
+|---|---|---|
+| Card selection ring | accent, always | `selectionRing(activeState)`: accent when the window is key, system grey when not |
+| Per-file tool highlight (trim button, sound/turn/format pop-ups) | accent, always (AppKit `contentTintColor`) | `windowAccent`; `BarMenuButton(active:)` tints `secondaryLabelColor` in a background window |
+| Progress fill | accent 45% | `windowAccent(activeState)` 45% |
+| Group header tint | accent 10% | `windowAccent(activeState)` 10% (neutral when inactive) |
+| New-file flash | accent 18% | `selectionTint(activeState, opacity: 0.18)` |
+| Presets "in use" ✓ | accent; would vanish on a selected (accent) row | `windowAccent`, and the selected-row text colour on a selected row (`backgroundProminence`) |
+| Trim range bar and handle ring | accent | `windowAccent` |
+| Card chrome drawn pure black/white: base under thumbnails, scrim, ⊗ disc and cross, hairline, watermark, reduce-transparency bar | `Color.black` / `.white` | `OverlayPalette.ink` / `.paper` (cards sit on arbitrary pictures, so they keep the dark palette in both modes) |
+| Card caption contrast after the palette change | 4.48:1 on the brightest photo | 90% label colour: 5.17:1 (other captions 7.5–9.0:1, errors 6.0:1, bar status 7.6:1; identical in light and dark) |
+| Trim handle | pure white fill, black shadow | `controlBackgroundColor` (white in light, a dark ring handle in dark), `shadowColor` 35%, tight |
+| Trim sheet for sound files | explicit black band behind the player (black in light mode) | removed: AVKit draws its own letterbox for video and its own audio panel |
+| Merge list icon column | waveform narrower than film: sound-file names 1.5 pt left of the others | fixed 18 pt column, names on one edge |
+
+**Kept, with reasons**
+- **Drop-target outline stays the accent** when the window isn't key. You drag from
+  another app, so the window is never key during a drop. Finder's drop targets do the same.
+- **The accent gradient behind sound files** isn't greyed. It stands in for the file's
+  picture (artwork, like a thumbnail), not a selection or control.
+
+**Live appearance change.** Added `CONVERT_REVIEW=flip`, which switches the app light ↔ dark
+4 s after launch. I compared a dark launch flipped to light against a fresh light launch, and
+the reverse. Light → dark: 0 px differ. Dark → light: about 5 px (fuzz 3%), only in the title
+text. There are no CALayer/CGColor values in Convert. `BarMenuButton`'s colours are dynamic
+`NSColor`s and its forced-dark appearance applies only on cards.
+
+**Active and inactive, both modes**
+- `sbs-dark-active-inactive.png`: dark, active left, inactive right.
+- `light-active-selected-edits.png` (active) and `light-B-selected-behind-settings.png`
+  (inactive, Settings in front).
+- `sbs-inactive-edits.png`: per-file highlights, light active and dark inactive.
+- `sbs-presets.png`: inactive Settings › Presets with a preset in use, light and dark.
+- `sbs-trim-sound.png`: sound-file trim sheet, light and dark.
+- `sbs-merge.png`: merge sheet, light and dark.
+
+Active shots were taken only after 60 s of no HID input. `scripts/drive launch` itself resets
+the HID idle timer, so the gate waits after launching.
+
+**Not done**
+- Hover, and real keyboard focus on the grid. As before, this needs the real pointer and keys.
+
+**Gates:** `scripts/check.sh Convert --perf` green: 65 tests, launch 159 ms, first window
+351 ms, idle CPU 0.037%, footprint 44.7 MB. `[unlabeled]`: 0. Defaults restored from backup.

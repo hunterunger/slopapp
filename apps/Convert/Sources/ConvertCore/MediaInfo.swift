@@ -30,6 +30,8 @@ public struct MediaInfo: Equatable, Sendable {
     /// Images: the format name ("HEIC") and frame count.
     public var imageFormat: String?
     public var frameCount = 1
+    /// Every audio track, in file order (for choosing one).
+    public var audioTracks: [AudioTrackInfo] = []
 
     public init(kind: MediaKind) {
         self.kind = kind
@@ -63,6 +65,143 @@ public struct MediaInfo: Equatable, Sendable {
             if frameCount > 1 { parts.append("\(frameCount) frames") }
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+extension MediaInfo {
+    /// The fuller line a file's card shows: "1920×1080 · HEVC · HDR · 30 fps · AAC · 160 kbps ·
+    /// Stereo · 2:14" for videos, "AAC · 256 kbps · 44.1 kHz · Stereo · 3:20" for sound,
+    /// "HEIC · 4032×3024" for images.
+    public var cardLine: String {
+        var parts: [String] = []
+        func sound() {
+            guard let audioCodec else { return }
+            parts.append(Codecs.audioName(audioCodec))
+            if audioBitRate > 0, !["PCM"].contains(Codecs.audioName(audioCodec)) {
+                parts.append("\(Int((audioBitRate / 1000).rounded())) kbps")
+            }
+            if kind == .audio, sampleRate > 0 {
+                let khz = sampleRate / 1000
+                parts.append(khz == khz.rounded() ? "\(Int(khz)) kHz" : String(format: "%.1f kHz", khz))
+            }
+            if kind == .audio, bitsPerSample > 0, Codecs.audioName(audioCodec) != "AAC" { parts.append("\(bitsPerSample)-bit") }
+            switch channels {
+            case 0: break
+            case 1: parts.append("Mono")
+            case 2: parts.append("Stereo")
+            default: parts.append("\(channels) ch")
+            }
+            if audioTrackCount > 1 { parts.append("\(audioTrackCount) sound tracks") }
+        }
+        switch kind {
+        case .video:
+            if width > 0 { parts.append("\(displayWidth)×\(displayHeight)") }
+            if let imageFormat { parts.append("Animated \(imageFormat)") }
+            if let videoCodec { parts.append(Codecs.videoName(videoCodec)) }
+            if isHDR { parts.append("HDR") }
+            if frameRate > 0 {
+                parts.append(frameRate == frameRate.rounded() ? "\(Int(frameRate)) fps" : String(format: "%.2f fps", frameRate))
+            }
+            sound()
+            if duration > 0 { parts.append(Durations.string(duration)) }
+        case .audio:
+            sound()
+            if duration > 0 { parts.append(Durations.string(duration)) }
+        case .image:
+            if let imageFormat { parts.append(imageFormat) }
+            if width > 0 { parts.append("\(displayWidth)×\(displayHeight)") }
+            if frameCount > 1 { parts.append("\(frameCount) frames") }
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// One audio track: enough to name it in a menu and to plan copying it.
+public struct AudioTrackInfo: Equatable, Sendable {
+    public var index: Int
+    public var codec: String?
+    public var channels = 0
+    public var sampleRate: Double = 0
+    public var bitsPerSample = 0
+    public var bitRate: Double = 0
+    /// "English", from the track's language tag, when it has one.
+    public var language: String?
+    public var isEnabled = true
+
+    public init(index: Int, codec: String? = nil, channels: Int = 0, language: String? = nil) {
+        self.index = index
+        self.codec = codec
+        self.channels = channels
+        self.language = language
+    }
+
+    /// "Track 2 · English · AAC · Stereo".
+    public var title: String {
+        var parts = ["Track \(index + 1)"]
+        if let language { parts.append(language) }
+        if let codec { parts.append(Codecs.audioName(codec)) }
+        switch channels {
+        case 0: break
+        case 1: parts.append("Mono")
+        case 2: parts.append("Stereo")
+        default: parts.append("\(channels) channels")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    static func read(_ track: AVAssetTrack, index: Int) async -> AudioTrackInfo {
+        var info = AudioTrackInfo(index: index)
+        if let (formats, rate, enabled, language) = try? await track.load(.formatDescriptions, .estimatedDataRate, .isEnabled, .languageCode) {
+            info.bitRate = Double(rate)
+            info.isEnabled = enabled
+            if let language, language != "und" {
+                info.language = Locale.current.localizedString(forLanguageCode: language) ?? language
+            }
+            if let format = formats.first {
+                info.codec = Codecs.fourCC(CMFormatDescriptionGetMediaSubType(format))
+                if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee {
+                    info.channels = Int(asbd.mChannelsPerFrame)
+                    info.sampleRate = asbd.mSampleRate
+                    info.bitsPerSample = Int(asbd.mBitsPerChannel)
+                    if info.codec == "alac" {
+                        info.bitsPerSample = [1: 16, 2: 20, 3: 24, 4: 32][Int(asbd.mFormatFlags)] ?? 16
+                    }
+                }
+            }
+        }
+        return info
+    }
+}
+
+extension MediaInfo {
+    /// The file as the planner should see it once a sound choice is made: one chosen track,
+    /// or none.
+    public func choosingSound(_ choice: SoundChoice) -> MediaInfo {
+        var info = self
+        switch choice {
+        case .all:
+            break
+        case .none:
+            info.audioCodec = nil
+            info.audioTrackCount = 0
+        case .track(let index):
+            guard let track = audioTracks.first(where: { $0.index == index }) else { break }
+            info.audioCodec = track.codec
+            info.audioTrackCount = 1
+            info.channels = track.channels
+            info.sampleRate = track.sampleRate
+            info.bitsPerSample = track.bitsPerSample
+            info.audioBitRate = track.bitRate
+        }
+        return info
+    }
+
+    /// The file as the planner should see it after a trim: shorter.
+    public func trimmed(_ trim: TrimRange?) -> MediaInfo {
+        guard let trim, !trim.isWhole(of: duration) else { return self }
+        var info = self
+        info.duration = min(duration, trim.end) - trim.start
+        return info
     }
 }
 
@@ -201,6 +340,9 @@ public enum MediaProbe {
             info.kind = .audio
         }
         info.audioTrackCount = audios.count
+        for (index, track) in audios.enumerated() {
+            info.audioTracks.append(await AudioTrackInfo.read(track, index: index))
+        }
         if let audio = try await firstEnabled(audios) {
             let (formats, rate) = try await audio.load(.formatDescriptions, .estimatedDataRate)
             info.audioBitRate = Double(rate)

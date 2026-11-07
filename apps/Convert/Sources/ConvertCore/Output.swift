@@ -18,6 +18,8 @@ public enum ConvertError: LocalizedError, Equatable {
     case noFolder(folder: String)
     case tooManyNames(name: String)
     case cantWriteFormat(format: String, kind: MediaKind)
+    /// Files that can't be merged, with the reason.
+    case cantMerge(reason: String)
 
     /// Trying the same file again can't work (only another file or another app can help).
     public var isFinal: Bool {
@@ -41,6 +43,7 @@ public enum ConvertError: LocalizedError, Equatable {
         case .noFolder(let folder): "The folder “\(folder)” isn't there anymore."
         case .tooManyNames(let name): "Couldn't find a free name for \(name)."
         case .cantWriteFormat(let format, _): "This Mac can't save \(format) files."
+        case .cantMerge(let reason): "Couldn't merge these files. \(reason)"
         }
     }
 
@@ -58,6 +61,7 @@ public enum ConvertError: LocalizedError, Equatable {
         case .noFolder: "Choose another folder under Save To."
         case .tooManyNames: "Rename or move some files, then try again."
         case .cantWriteFormat(_, let kind): "Choose another format under \(kind.title)."
+        case .cantMerge: nil
         }
     }
 }
@@ -131,7 +135,10 @@ public struct SystemFileStore: FileStore {
     public init() {}
 
     public func size(of url: URL) -> Int64? {
-        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+        // Fresh every time: URLs cache resource values, and files change under us.
+        var url = url
+        url.removeAllCachedResourceValues()
+        return (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
     }
 
     public func fileExists(_ url: URL) -> Bool {

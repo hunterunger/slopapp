@@ -41,7 +41,11 @@ public struct Converter: Sendable {
     /// `replacing` is this row's own output from an earlier run: if the new file has the same
     /// name and folder, it takes that file's place instead of becoming "name 2.ext". Nothing
     /// else is ever overwritten.
-    public func run(_ input: URL, replacing previous: URL? = nil, started: @Sendable (MediaKind) -> Void = { _ in },
+    ///
+    /// `options` are the file's own choices: its format (instead of the default for its
+    /// kind), a trim, a turn or mirror, and which sound to keep.
+    public func run(_ input: URL, options: FileOptions = FileOptions(), replacing previous: URL? = nil,
+                    started: @Sendable (MediaKind) -> Void = { _ in },
                     progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> Conversion {
         let info = try await MediaProbe.probe(input)
         try Task.checkCancellation()
@@ -49,11 +53,15 @@ public struct Converter: Sendable {
         progress(0.01)
         var me = self
         me.previous = previous.flatMap { $0.standardizedFileURL == input.standardizedFileURL ? nil : $0 }
+        me.options = options
+        me.settings = settings.applying(options)
         return try await me.convert(input, info: info, progress: progress)
     }
 
     /// This row's earlier output (see `run`).
-    private var previous: URL?
+    var previous: URL?
+    /// The file's own options (its format is already folded into `settings`).
+    private var options = FileOptions()
 
     private func convert(_ input: URL, info: MediaInfo, progress: @escaping @Sendable (Double) -> Void) async throws -> Conversion {
 
@@ -80,13 +88,15 @@ public struct Converter: Sendable {
     private func convertImage(_ input: URL, info: MediaInfo, folder: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> Conversion {
         let target = settings.image
         guard capabilities.canWrite(target) else { throw ConvertError.cantWriteFormat(format: target.title, kind: .image) }
-        if ImageConverter.isNoOp(info, inputType: MediaTypes.contentType(of: input), target: target, size: settings.size) {
+        let turn = options.transform
+        if turn.isIdentity,
+           ImageConverter.isNoOp(info, inputType: MediaTypes.contentType(of: input), target: target, size: settings.size) {
             return .unchanged("Already \(target.title). Nothing to change.")
         }
         let (quality, size) = (settings.quality, settings.size)
         return try write(input, ext: target.fileExtension) { scratch in
             let result = try ImageConverter.convert(input, to: scratch, target: target, quality: quality, size: size,
-                                                    progress: progress)
+                                                    turn: turn, progress: progress)
             return (["\(target.title)", "\(result.width)×\(result.height)"], false, result.notes)
         }
     }
@@ -94,14 +104,16 @@ public struct Converter: Sendable {
     private func makeGIF(_ input: URL, info: MediaInfo, progress: @escaping @Sendable (Double) -> Void) async throws -> Conversion {
         guard capabilities.canWrite(.gif) else { throw ConvertError.cantWriteFormat(format: "GIF", kind: .video) }
         let asset = AVURLAsset(url: input)
-        let (quality, size, name) = (settings.quality, settings.size, input.lastPathComponent)
+        let (quality, size, name, trim, turn) = (settings.quality, settings.size, input.lastPathComponent,
+                                                 options.trim, options.transform)
+        let shown = info.trimmed(trim)
         return try await writeAsync(input, ext: "gif") { scratch in
-            let result = try await GIFMaker.make(asset, info: info, quality: quality, size: size, to: scratch,
-                                                 name: name, progress: progress)
+            let result = try await GIFMaker.make(asset, info: info, quality: quality, size: size, trim: trim, turn: turn,
+                                                 to: scratch, name: name, progress: progress)
             var notes: [String] = []
-            if info.duration > QualityTable.longGIFSeconds { notes.append(GIFText.longClip) }
+            if shown.duration > QualityTable.longGIFSeconds { notes.append(GIFText.longClip) }
             if let cap = GIFText.capNote(info, quality: quality, size: size) { notes.append(cap) }
-            return (["GIF", "\(result.width)×\(result.height)", Durations.string(info.duration)], false, notes)
+            return (["GIF", "\(result.width)×\(result.height)", Durations.string(shown.duration)], false, notes)
         }
     }
 
@@ -134,7 +146,7 @@ public struct Converter: Sendable {
         if info.kind == .video, !capabilities.canWrite(settings.video) {
             throw ConvertError.cantWriteFormat(format: settings.video.title, kind: .video)
         }
-        let plan = try Planner.plan(info, settings: settings, name: name)
+        let plan = try Planner.plan(info, settings: settings, name: name, options: options)
         if Planner.isNoOp(plan, info: info, inputExtension: input.pathExtension) {
             let hint = plan.video != nil || plan.audio == .copy ? " To make it smaller, choose Smaller under Quality." : ""
             return .unchanged("Already \(plan.targetTitle). Nothing to change.\(hint)")
@@ -143,11 +155,14 @@ public struct Converter: Sendable {
         return try await writeAsync(input, ext: plan.fileExtension) { scratch in
             let extra = try await Transcoder(asset: asset, plan: plan, output: scratch, name: name).run(progress: progress)
             var parts = [plan.targetTitle]
+            let turned = plan.transform.swapsSides
             switch plan.video {
+            case .encode(let e)? where e.upright:
+                parts.append("\(e.width)×\(e.height)")
             case .encode(let e)?:
-                parts.append(info.isRotated ? "\(e.height)×\(e.width)" : "\(e.width)×\(e.height)")
+                parts.append(info.isRotated != turned ? "\(e.height)×\(e.width)" : "\(e.width)×\(e.height)")
             case .copy?:
-                parts.append("\(info.displayWidth)×\(info.displayHeight)")
+                parts.append(turned ? "\(info.displayHeight)×\(info.displayWidth)" : "\(info.displayWidth)×\(info.displayHeight)")
             case nil:
                 break
             }
@@ -157,14 +172,18 @@ public struct Converter: Sendable {
                       info.audioCodec.map(Codecs.aac.contains) == true {
                 parts.append("\(Int((info.audioBitRate / 1000).rounded())) kbps")
             }
-            if info.duration > 0 { parts.append(Durations.string(info.duration)) }
-            return (parts, plan.isRepackage, plan.notes + extra)
+            let length = plan.trim?.duration ?? info.duration
+            if length > 0 { parts.append(Durations.string(length)) }
+            var notes = plan.notes
+            if let trim = plan.trim { notes.append("Trimmed to \(trim.title).") }
+            if !plan.transform.isIdentity { notes.append(plan.transform.title + ".") }
+            return (parts, plan.isRepackage, notes + extra)
         }
     }
 
     // MARK: Writing
 
-    private typealias Made = (summary: [String], repackaged: Bool, notes: [String])
+    typealias Made = (summary: [String], repackaged: Bool, notes: [String])
 
     private func write(_ input: URL, ext: String, make: (URL) throws -> Made) throws -> Conversion {
         let (preferred, scratch, cleanup) = try prepare(input, ext: ext)
@@ -174,7 +193,7 @@ public struct Converter: Sendable {
         return try finish(input, scratch: scratch, preferred: preferred, made: made)
     }
 
-    private func writeAsync(_ input: URL, ext: String, make: (URL) async throws -> Made) async throws -> Conversion {
+    func writeAsync(_ input: URL, ext: String, make: (URL) async throws -> Made) async throws -> Conversion {
         let (preferred, scratch, cleanup) = try prepare(input, ext: ext)
         defer { cleanup() }
         let made = try await make(scratch)

@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 @testable import ConvertCore
 
 /// Real conversions of synthetic media, read back with AVFoundation / ImageIO.
-@Suite(.serialized) struct VideoConversionTests {
+@Suite(.serialized, .needsMediaEngine, .timeLimit(.minutes(5))) struct VideoConversionTests {
     @Test func movToMP4IsARepackageThatPlays() async throws {
         let input = try videoFixture("Screen Recording.mov")
         let before = try sha(input)
@@ -260,7 +260,7 @@ final class ProgressFlag: @unchecked Sendable {
     func set() { lock.withLock { _value = true } }
 }
 
-@Suite struct AudioConversionTests {
+@Suite(.timeLimit(.minutes(5))) struct AudioConversionTests {
     @Test func wavToM4A() async throws {
         let input = try fixture("Interview.wav") { try FixtureMaker.audio($0, seconds: 3) }
         var sizes: [Quality: Int64] = [:]
@@ -305,8 +305,8 @@ final class ProgressFlag: @unchecked Sendable {
     }
 }
 
-@Suite struct ImageConversionTests {
-    @Test func heicToJPEGKeepsMetadata() async throws {
+@Suite(.timeLimit(.minutes(5))) struct ImageConversionTests {
+    @Test(.needsMediaEngine) func heicToJPEGKeepsMetadata() async throws {
         let input = try fixture("Photo.heic") { try FixtureMaker.image($0, type: .heic, width: 1600, height: 1200) }
         let result = try report(try await converter().run(input))
         #expect(result.output.lastPathComponent == "Photo.jpg")
@@ -326,7 +326,7 @@ final class ProgressFlag: @unchecked Sendable {
         #expect(c.r > 0.95 && c.g > 0.95 && c.b > 0.95)
     }
 
-    @Test func orientationIsKeptOrBakedIn() async throws {
+    @Test(.needsMediaEngine) func orientationIsKeptOrBakedIn() async throws {
         let input = try fixture("Sideways.jpg") { try FixtureMaker.image($0, type: .jpeg, width: 1200, height: 900, orientation: 6) }
         let png = try report(try await converter { $0.image = .png }.run(input))
         #expect(imageProperties(png.output)[kCGImagePropertyOrientation] as? Int == 6)
@@ -346,7 +346,7 @@ final class ProgressFlag: @unchecked Sendable {
         #expect(smaller.output.lastPathComponent == "a.jpg")
     }
 
-    @Test func animatedGIFBecomesAVideo() async throws {
+    @Test(.needsMediaEngine) func animatedGIFBecomesAVideo() async throws {
         let input = try fixture("Animated.gif") { try FixtureMaker.image($0, type: .gif, width: 201, height: 150, frames: 4) }
         let info = try await MediaProbe.probe(input)
         #expect(info.kind == .video && info.isAnimatedImage && abs(info.duration - 0.8) < 0.01)
@@ -360,7 +360,7 @@ final class ProgressFlag: @unchecked Sendable {
         let gifFrame = averageColor(firstImage(input)!)
         #expect(colorDistance(frame, gifFrame) < 0.05, "\(frame) vs \(gifFrame)")
         // Already a GIF; no sound to extract.
-        guard case .unchanged = try await converter { $0.video = .gif }.run(input) else { Issue.record("expected unchanged"); return }
+        guard case .unchanged = try await converter({ $0.video = .gif }).run(input) else { Issue.record("expected unchanged"); return }
         await #expect(throws: ConvertError.noSound(name: "Animated.gif")) { try await converter { $0.video = .audioM4A }.run(input) }
     }
 

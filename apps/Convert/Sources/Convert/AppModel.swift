@@ -8,12 +8,76 @@ import SlopKit
 @Observable
 final class RowFacts {
     var info: MediaInfo?
+    /// Why it can't be read (shown on cards still waiting for Start).
+    var readError: String?
     /// The target it's being converted to, set when its conversion starts.
     var runningTarget: String?
     /// What it is (once read) and the settings its last run used.
     var kind: MediaKind?
     var signature: String?
     var report: ConversionReport?
+    /// The file's own format, trim, turn and sound (mirrors the processor's book).
+    var options = FileOptions()
+    /// Its original went to the Trash after converting (Settings ▸ When Done).
+    var trashedOriginal = false
+}
+
+/// A file added while "Start converting as soon as files are added" is off: it waits as a
+/// card until Start, so its format, trim or turn can be set first.
+@MainActor
+@Observable
+final class StagedFile: Identifiable {
+    nonisolated let id = UUID()
+    let input: URL
+    let bytes: Int64?
+
+    init(input: URL, bytes: Int64?) {
+        self.input = input
+        self.bytes = bytes
+    }
+}
+
+/// One card: a file waiting for Start, or one in the queue.
+@MainActor
+enum CardEntry: Identifiable {
+    case staged(StagedFile)
+    case item(FileQueueItem)
+
+    nonisolated var id: UUID {
+        switch self {
+        case .staged(let file): file.id
+        case .item(let item): item.id
+        }
+    }
+
+    var input: URL {
+        switch self {
+        case .staged(let file): file.input
+        case .item(let item): item.input
+        }
+    }
+
+    var item: FileQueueItem? {
+        if case .item(let item) = self { return item }
+        return nil
+    }
+}
+
+/// The cards of one kind under their header (Video, Audio, Images; files Convert can't
+/// take are under "Other").
+struct CardGroup: Identifiable {
+    var kind: MediaKind?
+    var entries: [CardEntry]
+    var id: String { kind?.rawValue ?? "other" }
+
+    var title: String {
+        switch kind {
+        case .video: "Video"
+        case .audio: "Audio"
+        case .image: "Images"
+        case nil: "Other"
+        }
+    }
 }
 
 /// App state: the settings (persisted), the queue that uses them, and per-file facts.
@@ -24,6 +88,8 @@ final class AppModel {
 
     let queue: FileQueue
     var selection: Set<FileQueueItem.ID> = []
+    /// The card the arrow keys last moved to (kept in view).
+    var selectionLead: FileQueueItem.ID?
     /// Space bar Quick Look.
     var previewURL: URL?
     let capabilities = Capabilities.system
@@ -39,6 +105,27 @@ final class AppModel {
 
     @ObservationIgnored private var facts: [String: RowFacts] = [:]
     @ObservationIgnored private let restoreBook = RestoreBook()
+    @ObservationIgnored let optionsBook = OptionsBook()
+    /// Files waiting for Start (only when "Start converting as soon as files are added" is off).
+    var staged: [StagedFile] = []
+    /// Groups the user folded away.
+    var collapsedGroups: Set<String> = []
+    /// Saved presets.
+    var presets: PresetLibrary {
+        didSet {
+            if let data = try? JSONEncoder().encode(presets) { UserDefaults.standard.set(data, forKey: Self.presetsKey) }
+        }
+    }
+    /// A merge is running (it keeps the Mac awake like a batch does).
+    var mergeRunning = false {
+        didSet { keepAwake.update(busy: queue.isBusy || mergeRunning) }
+    }
+    /// Sheets.
+    var trimming: CardEntry?
+    var merging: [URL]?
+    /// Bumped when files are added, with the cards to scroll to.
+    private(set) var addedBatch = 0
+    private(set) var lastAddedIDs: [UUID] = []
     /// The window's undo manager, set by the main view.
     @ObservationIgnored weak var undoManager: UndoManager?
     @ObservationIgnored private let keepAwake = KeepAwake(reason: "Convert is converting files")
@@ -47,10 +134,19 @@ final class AppModel {
     private static let settingsKey = "settings"
     private static let recentFoldersKey = "recentFolders"
     static let playSoundKey = "playSoundWhenDone"
+    static let autoStartKey = "startWhenAdded"
+    static let removeFinishedKey = "removeFinishedWhenDone"
+    static let trashOriginalsKey = "trashOriginalsWhenDone"
+    static let quitWhenDoneKey = "quitWhenDone"
+    private static let presetsKey = "presets"
+
+    var autoStart: Bool { UserDefaults.standard.bool(forKey: Self.autoStartKey) }
 
     private init() {
         let defaults = UserDefaults.standard
-        defaults.register(defaults: [Self.playSoundKey: true])
+        defaults.register(defaults: [Self.playSoundKey: true, Self.autoStartKey: true])
+        presets = defaults.data(forKey: Self.presetsKey).flatMap { try? JSONDecoder().decode(PresetLibrary.self, from: $0) }
+            ?? PresetLibrary()
         var loaded = defaults.data(forKey: Self.settingsKey)
             .flatMap { try? JSONDecoder().decode(ConvertSettings.self, from: $0) } ?? ConvertSettings()
         // A format this Mac can't write (settings copied from a newer Mac) falls back.
@@ -83,7 +179,7 @@ final class AppModel {
             finished: { url, report in Task { @MainActor in AppModel.shared.finished(url, report: report) } }
         )
         return ConvertProcessor(converter: Converter(settings: settings, capabilities: capabilities), events: events,
-                                restore: restoreBook)
+                                restore: restoreBook, options: optionsBook)
     }
 
     private func save() {
@@ -97,7 +193,11 @@ final class AppModel {
     private static func key(_ url: URL) -> String { url.standardizedFileURL.path }
 
     func facts(for item: FileQueueItem) -> RowFacts {
-        let key = Self.key(item.input)
+        facts(for: item.input)
+    }
+
+    func facts(for url: URL) -> RowFacts {
+        let key = Self.key(url)
         if let existing = facts[key] { return existing }
         let new = RowFacts()
         facts[key] = new
@@ -115,25 +215,44 @@ final class AppModel {
     /// Finished rows made with settings that have changed since (another format, quality,
     /// size or destination for their kind).
     var outdatedItems: [FileQueueItem] {
-        queue.items.filter { item in
-            guard case .finished = item.state, let row = facts[Self.key(item.input)],
-                  let kind = row.kind, let used = row.signature else { return false }
-            return used != settings.signature(for: kind)
-        }
+        queue.items.filter(isOutdated)
+    }
+
+    /// Finished, but made with settings that have changed since. Reads only this item.
+    func isOutdated(_ item: FileQueueItem) -> Bool {
+        guard case .finished = item.state, let row = facts[Self.key(item.input)],
+              let kind = row.kind, let used = row.signature else { return false }
+        return used != settings.signature(for: kind, options: row.options)
     }
 
     private func finished(_ url: URL, report: ConversionReport?) {
-        facts[Self.key(url)]?.report = report
+        let row = facts[Self.key(url)]
+        row?.report = report
+        // When Done: move the original to the Trash, once the new file is safely there.
+        if let report, UserDefaults.standard.bool(forKey: Self.trashOriginalsKey),
+           AfterConversion.trashOriginal(url, output: report.output) {
+            row?.trashedOriginal = true
+        }
     }
 
     /// Reads media facts for new rows in the background, one at a time.
     private func probe(_ items: [FileQueueItem]) {
-        let jobs = items.filter { !$0.state.isFailure }.map { (facts(for: $0), $0.input) }
+        probe(urls: items.filter { !$0.state.isFailure }.map(\.input))
+    }
+
+    private func probe(urls: [URL]) {
+        let jobs = urls.map { (facts(for: $0), $0) }
         guard !jobs.isEmpty else { return }
         Task.detached(priority: .utility) {
             for (row, url) in jobs {
-                let info = try? await MediaProbe.probe(url)
-                await MainActor.run { row.info = info }
+                do {
+                    let info = try await MediaProbe.probe(url)
+                    await MainActor.run { row.info = info }
+                } catch {
+                    let e = error as? ConvertError
+                    let message = [e?.errorDescription, e?.recoverySuggestion].compactMap { $0 }.joined(separator: " ")
+                    await MainActor.run { row.readError = message.isEmpty ? nil : message }
+                }
             }
         }
     }
@@ -208,15 +327,89 @@ final class AppModel {
 
     func add(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
+        if !autoStart {
+            stage(urls)
+            return
+        }
         Task {
             let added = await queue.add(urls)
             if added.isEmpty {
                 HUD.show("Already in the list", systemImage: "doc.on.doc")
             } else {
                 probe(added)
+                announce(added.map(\.id))
             }
         }
     }
+
+    private func announce(_ ids: [UUID]) {
+        lastAddedIDs = ids
+        addedBatch += 1
+    }
+
+    /// Adds files as cards that wait for Start. Files Convert can't take still go straight
+    /// to the list, where they say why.
+    private func stage(_ urls: [URL]) {
+        let types = MediaTypes.accepted
+        Task {
+            let (found, rejected) = await Task.detached(priority: .userInitiated) {
+                (FileIntake.expand(urls, types: types),
+                 FileIntake.unaccepted(urls, types: types) { _ in "" }.map(\.url))
+            }.value
+            var known = Set(staged.map { Self.key($0.input) })
+            var refreshed: [FileQueueItem] = []
+            for item in queue.items { known.insert(Self.key(item.input)) }
+            var added: [StagedFile] = []
+            for file in found {
+                let key = Self.key(file.url)
+                if let item = queue.items.first(where: { Self.key($0.input) == key }) {
+                    // Already converted: dropping it again makes it ready to convert again.
+                    if item.canRetry, !refreshed.contains(where: { $0 === item }) { refreshed.append(item) }
+                    continue
+                }
+                guard known.insert(key).inserted else { continue }
+                added.append(StagedFile(input: file.url, bytes: file.bytes))
+            }
+            staged.append(contentsOf: added)
+            if !rejected.isEmpty { await queue.add(rejected) }
+            if added.isEmpty && rejected.isEmpty && refreshed.isEmpty {
+                HUD.show("Already in the list", systemImage: "doc.on.doc")
+                return
+            }
+            probe(urls: added.map(\.input))
+            refreshed.forEach(queue.retry)
+            announce(added.map(\.id) + refreshed.map(\.id))
+        }
+    }
+
+    /// Starts files waiting for Start (all of them, or these).
+    func start(_ entries: [CardEntry]? = nil) {
+        let chosen: [StagedFile]
+        if let entries {
+            let ids = Set(entries.map(\.id))
+            chosen = staged.filter { ids.contains($0.id) }
+        } else {
+            chosen = staged
+        }
+        // Finished files whose settings changed since are started again too.
+        let again = (entries?.compactMap(\.item) ?? queue.items).filter(isOutdated)
+        guard !chosen.isEmpty || !again.isEmpty else { return }
+        let ids = Set(chosen.map(\.id))
+        staged.removeAll { ids.contains($0.id) }
+        again.forEach(queue.retry)
+        guard !chosen.isEmpty else { return }
+        Task {
+            let added = await queue.add(chosen.map(\.input))
+            // Selection follows the files into the queue.
+            if !selection.isDisjoint(with: ids) {
+                selection.subtract(ids)
+                selection.formUnion(added.map(\.id))
+            }
+        }
+    }
+
+    /// Something to start: files waiting for Start, or files converted with other settings.
+    var canStart: Bool { !staged.isEmpty || (!queue.isBusy && !outdatedItems.isEmpty) }
 
     func chooseFiles() {
         FileQueueActions.chooseFiles(types: MediaTypes.accepted + [.folder]) { [weak self] in self?.add($0) }
@@ -260,6 +453,12 @@ final class AppModel {
     }
 
     func revealTargets() {
+        // Only waiting cards selected (or nothing converted yet): show their originals.
+        let chosen = selectedEntries.isEmpty ? entries : selectedEntries
+        if chosen.allSatisfy({ $0.item == nil }) {
+            NSWorkspace.shared.activateFileViewerSelecting(chosen.map(\.input))
+            return
+        }
         let items = targetItems.filter { $0.output != nil }
         FileQueueActions.reveal(items.isEmpty ? targetItems : items)
     }
@@ -284,7 +483,7 @@ final class AppModel {
     }
 
     func selectAll() {
-        selection = Set(queue.items.map(\.id))
+        selection = Set(queue.items.map(\.id) + staged.map(\.id))
     }
 
     /// Asks first while files are still converting (clearing stops them).
@@ -298,6 +497,7 @@ final class AppModel {
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
+        removeStagedForClear()
         removeFromList(queue.items, actionName: "Clear List")
     }
 
@@ -367,9 +567,14 @@ final class AppModel {
     func toggleQuickLook() {
         if previewURL != nil {
             previewURL = nil
-        } else if let item = selectedItems.first ?? queue.items.first {
-            previewURL = item.revealURL
+        } else if let entry = selectedEntries.first ?? entries.first {
+            previewURL = entry.item?.revealURL ?? entry.input
         }
+    }
+
+    /// The files Quick Look pages through.
+    var previewURLs: [URL] {
+        entries.map { $0.item?.revealURL ?? $0.input }
     }
 
     // MARK: Batches
@@ -380,7 +585,7 @@ final class AppModel {
     }
 
     private func batchFinished() {
-        keepAwake.update(busy: false)
+        keepAwake.update(busy: mergeRunning)
         // Hand big decode buffers back to the system now rather than whenever.
         malloc_zone_pressure_relief(nil, 0)
         let took = batchStart.map { Date().timeIntervalSince($0) } ?? 0
@@ -392,6 +597,19 @@ final class AppModel {
             NSSound(named: "Glass")?.play()
         }
         if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
+        guard anyDone else { return }
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: Self.removeFinishedKey) {
+            let done = queue.items.filter { if case .finished = $0.state { return true } else { return false } }
+            if !done.isEmpty { removeFromList(done, actionName: "Remove Finished") }
+        }
+        if defaults.bool(forKey: Self.quitWhenDoneKey), staged.isEmpty {
+            // A moment to hear the sound; anything added meanwhile cancels it.
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                if !queue.isBusy, staged.isEmpty { NSApp.terminate(nil) }
+            }
+        }
     }
 
     var isKeepingAwake: Bool { keepAwake.isHolding }
@@ -418,20 +636,6 @@ final class AppModel {
         recentFolders.insert(url, at: 0)
         recentFolders = Array(recentFolders.prefix(4))
         UserDefaults.standard.set(recentFolders.map(\.path), forKey: Self.recentFoldersKey)
-    }
-
-    // MARK: Labels
-
-    var summaryText: String {
-        let s = queue.summary
-        guard s.total > 0 else { return "" }
-        if s.remaining > 0 {
-            return "Converting… \(s.done) of \(s.total) done"
-        }
-        var parts = [s.total == 1 ? "1 file" : "\(s.total) files"]
-        if s.produced > 0, s.produced < s.total { parts.append("\(s.produced) converted") }
-        if s.failed > 0 { parts.append("\(s.failed) failed") }
-        return parts.joined(separator: " · ")
     }
 }
 

@@ -33,6 +33,10 @@ public struct VideoEncoding: Equatable, Sendable {
     /// The source is HDR and the target can't carry it: tone-map to Rec. 709.
     public var toSDR: Bool
     public var frameRate: Double
+    /// `width`×`height` is the picture as shown, drawn upright through a video composition
+    /// (for mirroring, and for merging clips of different sizes). Otherwise it's the stored
+    /// size and the turn travels as the track's matrix.
+    public var upright = false
 }
 
 public enum VideoPlan: Equatable, Sendable {
@@ -70,6 +74,13 @@ public struct TranscodePlan: Equatable, Sendable {
     public var notes: [String] = []
     /// "MP4 (H.264)", for rows and messages.
     public var targetTitle: String
+    /// The part to keep, if not all of it.
+    public var trim: TrimRange?
+    /// A turn (and mirror) to apply. Turns alone go in the track's matrix, so copying still
+    /// works; a mirror is drawn into the picture (`VideoEncoding.upright`).
+    public var transform: PictureTransform = .identity
+    /// Which sound tracks to read.
+    public var sound: SoundChoice = .all
 
     /// Nothing is re-encoded: only the container changes.
     public var isRepackage: Bool {
@@ -82,26 +93,37 @@ public enum Planner {
     /// The biggest frame H.264 encoders take (level 5.2).
     static let h264Box = (long: 4096, short: 2304)
 
-    public static func plan(_ info: MediaInfo, settings: ConvertSettings, name: String) throws -> TranscodePlan {
+    public static func plan(_ original: MediaInfo, settings defaults: ConvertSettings, name: String,
+                            options: FileOptions = FileOptions()) throws -> TranscodePlan {
+        let settings = defaults.applying(options)
+        let info = original.choosingSound(options.sound)
+        var plan: TranscodePlan
         switch info.kind {
         case .video:
             if let audioTarget = settings.video.audioTarget {
-                return try audioPlan(info, target: audioTarget, quality: settings.quality, name: name,
+                plan = try audioPlan(info, target: audioTarget, quality: settings.quality, name: name,
                                      title: settings.video.title)
+            } else {
+                plan = videoPlan(info, target: settings.video, settings: settings, transform: options.transform)
             }
-            return videoPlan(info, target: settings.video, settings: settings)
         case .audio:
-            return try audioPlan(info, target: settings.audio, quality: settings.quality, name: name,
+            plan = try audioPlan(info, target: settings.audio, quality: settings.quality, name: name,
                                  title: settings.audio.title)
         case .image:
             preconditionFailure("Images don't use AVFoundation plans")
         }
+        if let trim = options.trim, !trim.isWhole(of: original.duration) {
+            plan.trim = TrimRange(start: trim.start, end: min(trim.end, original.duration))
+        }
+        plan.sound = options.sound
+        return plan
     }
 
     /// Whether this plan would just make a copy of the input under a new name: same
     /// container, nothing re-encoded. Then we write nothing and say so.
     public static func isNoOp(_ plan: TranscodePlan, info: MediaInfo, inputExtension: String) -> Bool {
-        guard plan.notes.isEmpty, sameExtension(inputExtension, plan.fileExtension) else { return false }
+        guard plan.notes.isEmpty, plan.trim == nil, plan.transform.isIdentity, plan.sound == .all,
+              sameExtension(inputExtension, plan.fileExtension) else { return false }
         if plan.isRepackage { return true }
         // WAV → WAV / AIFF → AIFF of plain PCM: decoding and re-writing changes nothing.
         if plan.video == nil, case .encode(let e) = plan.audio, case .pcm(let bits, _) = e.format,
@@ -120,7 +142,8 @@ public enum Planner {
 
     // MARK: Video
 
-    static func videoPlan(_ info: MediaInfo, target: VideoTarget, settings: ConvertSettings) -> TranscodePlan {
+    static func videoPlan(_ info: MediaInfo, target: VideoTarget, settings: ConvertSettings,
+                          transform: PictureTransform = .identity) -> TranscodePlan {
         let codec: VideoCodecChoice
         let fileType: AVFileType
         let ext: String
@@ -144,7 +167,25 @@ public enum Planner {
         let quality = settings.quality
         let video: VideoPlan
         let copyable = info.videoCodec.map(codec.copyable.contains) ?? false
-        if copyable && !resized && (quality != .smaller || codec == .proRes422) {
+        if transform.mirrored {
+            // Mirrored pictures are drawn upright into the new file: size is as shown.
+            var (w, h) = (info.displayWidth, info.displayHeight)
+            if transform.swapsSides { swap(&w, &h) }
+            (w, h) = fit(w, h, in: settings.size.box, even: true)
+            if codec == .h264 {
+                let fitted = fit(w, h, in: h264Box, even: true)
+                if fitted.0 < w || fitted.1 < h {
+                    (w, h) = fitted
+                    notes.append("Scaled to \(even(w))×\(even(h)), the most H.264 allows. Choose HEVC to keep the full size.")
+                }
+            }
+            video = .encode(VideoEncoding(
+                codec: codec, width: even(w), height: even(h),
+                quality: codec == .proRes422 ? nil : QualityTable.videoQuality(quality),
+                keepHDR: false, toSDR: info.isHDR, frameRate: info.frameRate, upright: true
+            ))
+            if info.isHDR { notes.append("HDR was converted to standard range.") }
+        } else if copyable && !resized && (quality != .smaller || codec == .proRes422) {
             video = .copy
         } else {
             let toSDR = info.isHDR && codec == .h264
@@ -172,7 +213,7 @@ public enum Planner {
             notes.append("Its \(info.audioTrackCount) sound tracks were mixed into one.")
         }
         return TranscodePlan(fileType: fileType, fileExtension: ext, video: video, audio: audio, notes: notes,
-                             targetTitle: target.title)
+                             targetTitle: target.title, transform: transform)
     }
 
     // MARK: Audio

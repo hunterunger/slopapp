@@ -67,7 +67,7 @@ enum ImageConverter {
     }
 
     static func convert(_ url: URL, to output: URL, target: ImageTarget, quality: Quality, size: SizeLimit,
-                        progress: (Double) -> Void) throws -> Result {
+                        turn: PictureTransform = .identity, progress: (Double) -> Void) throws -> Result {
         let name = url.lastPathComponent
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
               CGImageSourceGetCount(source) > 0
@@ -80,7 +80,8 @@ enum ImageConverter {
         if CGImageSourceGetCount(source) > 1 { notes.append("Only the first frame was kept.") }
 
         let (fitW, fitH) = Planner.fit(width, height, in: size.box)
-        let resizing = fitW < width || fitH < height
+        // Turned or mirrored pictures are decoded upright and redrawn, like resized ones.
+        let resizing = fitW < width || fitH < height || !turn.isIdentity
         let decoded: CGImage?
         if resizing {
             // Decode straight to the smaller size, upright.
@@ -94,6 +95,10 @@ enum ImageConverter {
             decoded = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
         }
         guard var image = decoded else { throw ConvertError.damaged(name: name) }
+        if !turn.isIdentity {
+            guard let turned = turned(image, by: turn) else { throw ConvertError.encodeFailed(name: name) }
+            image = turned
+        }
         progress(0.4)
         try Task.checkCancellation()
 
@@ -147,6 +152,25 @@ enum ImageConverter {
         return Result(width: rotated ? image.height : image.width, height: rotated ? image.width : image.height, notes: notes)
     }
 
+    /// The picture turned and/or mirrored, drawn into a new bitmap.
+    static func turned(_ image: CGImage, by turn: PictureTransform) -> CGImage? {
+        let (w, h) = turn.swapsSides ? (image.height, image.width) : (image.width, image.height)
+        let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        let alpha: CGImageAlphaInfo = hasAlpha(image) ? .premultipliedLast : .noneSkipLast
+        let bits = image.bitsPerComponent > 8 ? 16 : 8
+        let info = alpha.rawValue
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: bits, bytesPerRow: 0,
+                                  space: space, bitmapInfo: info) else { return nil }
+        // CoreGraphics has y up; the turn is defined with y down, so flip around it.
+        let flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(h))
+        let down = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(image.height))
+        ctx.concatenate(down.concatenating(turn.affine(width: Double(image.width), height: Double(image.height)))
+            .concatenating(flip))
+        ctx.interpolationQuality = .none
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return ctx.makeImage()
+    }
+
     static func hasAlpha(_ image: CGImage) -> Bool {
         switch image.alphaInfo {
         case .none, .noneSkipFirst, .noneSkipLast: false
@@ -178,10 +202,12 @@ enum GIFMaker {
 
     /// Long edge and frame rate for this clip: the Quality's values, the Size limit if
     /// smaller, never bigger than the source.
-    static func shape(_ info: MediaInfo, quality: Quality, size: SizeLimit) -> (width: Int, height: Int, fps: Double) {
+    static func shape(_ info: MediaInfo, quality: Quality, size: SizeLimit,
+                      turn: PictureTransform = .identity) -> (width: Int, height: Int, fps: Double) {
         let q = QualityTable.gif(quality)
         let long = min(q.longEdge, size.box?.long ?? Int.max)
-        let (w, h) = Planner.fit(info.displayWidth, info.displayHeight, in: (long, long))
+        let (dw, dh) = turn.swapsSides ? (info.displayHeight, info.displayWidth) : (info.displayWidth, info.displayHeight)
+        let (w, h) = Planner.fit(dw, dh, in: (long, long))
         let fps = info.frameRate > 0 ? min(Double(q.fps), info.frameRate) : Double(q.fps)
         return (w, h, fps)
     }
@@ -201,15 +227,28 @@ enum GIFMaker {
         return result
     }
 
-    static func make(_ asset: AVURLAsset, info: MediaInfo, quality: Quality, size: SizeLimit, to output: URL,
+    static func make(_ asset: AVURLAsset, info: MediaInfo, quality: Quality, size: SizeLimit,
+                     trim: TrimRange? = nil, turn: PictureTransform = .identity, to output: URL,
                      name: String, progress: @escaping @Sendable (Double) -> Void) async throws -> Result {
-        let shape = shape(info, quality: quality, size: size)
+        let shape = shape(info, quality: quality, size: size, turn: turn)
         let step = 1 / shape.fps
-        let count = max(1, Int((info.duration / step).rounded(.down)))
-        let times = (0..<count).map { CMTime(seconds: Double($0) * step, preferredTimescale: 600) }
+        let start = trim.map { $0.isWhole(of: info.duration) ? 0 : $0.start } ?? 0
+        let end = trim.map { $0.isWhole(of: info.duration) ? info.duration : min($0.end, info.duration) } ?? info.duration
+        let count = max(1, Int(((end - start) / step).rounded(.down)))
+        let times = (0..<count).map { CMTime(seconds: start + Double($0) * step, preferredTimescale: 600) }
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
+        if !turn.isIdentity, let track = try await asset.loadTracks(withMediaType: .video).first {
+            // Turned or mirrored: draw the frames upright through a composition.
+            let (natural, transform, rate) = try await track.load(.naturalSize, .preferredTransform, .nominalFrameRate)
+            let shown = CGRect(origin: .zero, size: natural).applying(transform)
+            var render = CGSize(width: abs(shown.width), height: abs(shown.height))
+            if turn.swapsSides { render = CGSize(width: render.height, height: render.width) }
+            generator.videoComposition = Transcoder.uprightComposition(
+                track: track, naturalSize: natural, sourceTransform: transform, turn: turn, renderSize: render,
+                frameRate: Double(rate), duration: try await asset.load(.duration))
+        }
         generator.maximumSize = CGSize(width: shape.width, height: shape.height)
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = CMTime(seconds: step / 2, preferredTimescale: 600)

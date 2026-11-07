@@ -7,6 +7,26 @@ import ImageIO
 import UniformTypeIdentifiers
 @testable import ConvertCore
 
+import Testing
+
+/// GitHub's macOS runners are virtual Macs with no media engine: video (and HEIC) encodes
+/// fall back to software or aren't there at all, and the suite crawled past CI's 45-minute
+/// limit. With `CI` set, tests that really encode video or HEIC are skipped; everything
+/// else (planning, options, presets, audio, PNG/JPEG images) still runs. Locally they all run.
+enum TestEnvironment {
+    static var isCI: Bool {
+        guard let value = ProcessInfo.processInfo.environment["CI"]?.lowercased() else { return false }
+        return !["", "0", "false", "no"].contains(value)
+    }
+}
+
+extension Trait where Self == ConditionTrait {
+    /// For tests that encode video or HEIC for real (see `TestEnvironment`).
+    static var needsMediaEngine: Self {
+        .enabled(if: !TestEnvironment.isCI, "Encodes video/HEIC: skipped on CI runners, which have no hardware encoder")
+    }
+}
+
 /// A fresh folder under /tmp/convert-test/unit for one test.
 func makeTempFolder() throws -> URL {
     let url = URL(fileURLWithPath: "/tmp/convert-test/unit/\(UUID().uuidString)")
@@ -155,4 +175,31 @@ struct FailingFileStore: FileStore {
     }
     func replace(_ target: URL, with source: URL) throws { try real.replace(target, with: source) }
     func copyDates(from source: URL, to target: URL) { real.copyDates(from: source, to: target) }
+}
+
+/// The average color of part of an image, given in top-down fractions of its size.
+func averageColor(_ image: CGImage, x: Double, y: Double, width: Double, height: Double) -> (r: Double, g: Double, b: Double) {
+    let rect = CGRect(x: Double(image.width) * x, y: Double(image.height) * y,
+                      width: Double(image.width) * width, height: Double(image.height) * height).integral
+    return averageColor(image.cropping(to: rect)!)
+}
+
+/// A video frame, upright.
+func videoFrame(_ url: URL, at time: Double) async throws -> CGImage {
+    let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+    generator.appliesPreferredTrackTransform = true
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = .zero
+    return try await generator.image(at: CMTime(seconds: time, preferredTimescale: 600)).image
+}
+
+/// Moves nothing: records what it was asked to trash.
+final class FakeTrasher: Trasher, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _trashed: [URL] = []
+    var trashed: [URL] { lock.withLock { _trashed } }
+    func trash(_ url: URL) throws -> URL? {
+        lock.withLock { _trashed.append(url) }
+        return nil
+    }
 }

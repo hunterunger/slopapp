@@ -16,7 +16,7 @@ struct ConvertApp: App {
         Window("Convert", id: "main") {
             MainView(model: model)
         }
-        .defaultSize(width: 760, height: 460)
+        .defaultSize(width: 860, height: 560)
         .commands { ConvertCommands(model: model, info: info) }
 
         Settings {
@@ -43,15 +43,21 @@ struct ConvertCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("Choose Files…") { model.chooseFiles() }
                 .keyboardShortcut("o")
+            Button(model.selectedEntries.isEmpty ? "Start" : "Start Selected") {
+                model.start(model.selectedEntries.isEmpty ? nil : model.selectedEntries)
+            }
+            .keyboardShortcut(.return)
+            .disabled(!model.canStart)
         }
         CommandGroup(after: .newItem) {
             Divider()
+            // Waiting cards count too (Start off): they show the original.
             Button("Show in Finder") { model.revealTargets() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(model.queue.items.isEmpty)
+                .disabled(model.isEmpty)
             Button("Quick Look") { model.toggleQuickLook() }
                 .keyboardShortcut("y")
-                .disabled(model.queue.items.isEmpty)
+                .disabled(model.isEmpty)
             Divider()
             Button(model.convertAgainTitle) { model.convertAgain() }
                 .keyboardShortcut("r")
@@ -59,12 +65,36 @@ struct ConvertCommands: Commands {
             Button("Stop All") { model.queue.cancelAll() }
                 .keyboardShortcut(".")
                 .disabled(!model.queue.isBusy)
-            Button("Remove from List") { model.removeFromList(model.selectedItems) }
+            Button("Remove from List") { model.remove(model.selectedEntries) }
                 .keyboardShortcut(.delete, modifiers: [])
-                .disabled(model.selectedItems.isEmpty)
+                .disabled(model.selectedEntries.isEmpty)
             Button("Clear List") { model.clearList() }
                 .keyboardShortcut(.delete, modifiers: [.command, .shift])
-                .disabled(model.queue.items.isEmpty)
+                .disabled(model.isEmpty)
+        }
+        CommandMenu("Edit File") {
+            let selected = model.selectedEntries
+            Button("Trim…") { model.trimming = selected.first }
+                .keyboardShortcut("t")
+                .disabled(selected.count != 1 || !selected.allSatisfy(model.canTrim))
+            let turnable = !selected.isEmpty && selected.allSatisfy(model.canTurn)
+            Button("Rotate Right") { model.updateOptions(for: selected) { $0.transform = $0.transform.rotatedRight() } }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+                .disabled(!turnable)
+            Button("Rotate Left") { model.updateOptions(for: selected) { $0.transform = $0.transform.rotatedLeft() } }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+                .disabled(!turnable)
+            Button("Flip Horizontal") { model.updateOptions(for: selected) { $0.transform = $0.transform.flippedHorizontally() } }
+                .disabled(!turnable)
+            Button("Flip Vertical") { model.updateOptions(for: selected) { $0.transform = $0.transform.flippedVertically() } }
+                .disabled(!turnable)
+            Divider()
+            Button("Merge Selected Files…") { model.merge(selected) }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .disabled(model.mergeable(selected).isEmpty)
+            Divider()
+            Button("Reset File Settings") { model.resetOptions(for: selected) }
+                .disabled(!selected.contains { !model.options(for: $0.input).isEmpty })
         }
         CommandGroup(replacing: .saveItem) {
             Button("Close") { WindowCloser.closeFrontmost() }
@@ -79,7 +109,7 @@ struct ConvertCommands: Commands {
                 .keyboardShortcut("v")
             Button("Select All") { model.selectAll() }
                 .keyboardShortcut("a")
-                .disabled(model.queue.items.isEmpty)
+                .disabled(model.isEmpty)
         }
         CommandMenu("Format") {
             Menu("Video") { VideoMenuItems(model: model) }
@@ -90,6 +120,8 @@ struct ConvertCommands: Commands {
             Divider()
             Menu("Size") { SizeMenuItems(model: model) }
             Menu("Save To") { DestinationMenuItems(model: model) }
+            Divider()
+            Menu("Presets") { PresetMenuItems(model: model) }
         }
         CommandGroup(replacing: .help) {
             Button("Convert Help") {
@@ -131,6 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var escapeMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Snapshot.startIfAsked()
         // Esc closes the About window, like other small panels.
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
@@ -172,5 +205,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // originals, so stopping here leaves nothing behind for the user to clean up.
         queue.cancelAll()
         return .terminateNow
+    }
+}
+
+/// Presets for the Format menu: built-in, then the user's, then Save Current.
+struct PresetMenuItems: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        ForEach(Preset.available(model.capabilities)) { preset in
+            ChoiceItem(title: preset.name, detail: nil, isOn: preset.matches(model.settings)) { model.apply(preset) }
+        }
+        if !model.presets.saved.isEmpty {
+            Divider()
+            ForEach(model.presets.saved) { preset in
+                ChoiceItem(title: preset.name, detail: nil, isOn: preset.matches(model.settings)) { model.apply(preset) }
+            }
+        }
+        Divider()
+        Button("Save Current Settings as Preset…") { model.saveCurrentAsPreset() }
     }
 }

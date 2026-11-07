@@ -21,7 +21,39 @@ struct BarMenuButton: NSViewRepresentable {
     let value: String
     let symbol: String
     let help: String
+    /// On a dark card: always use dark appearance.
+    var dark = false
+    /// Tinted with the accent colour (the file has its own setting here).
+    var highlighted = false
+    /// The window is key: the highlight is the accent, else grey (Golden Gate greys accents
+    /// in windows you aren't using).
+    var active = true
+    /// A fixed size, so it lines up with SwiftUI buttons next to it (a width of 0 keeps
+    /// its natural width). Nil: its natural size.
+    var size: CGSize?
+    /// A standard bordered pop-up (for forms, where it lines up with the other controls).
+    var bordered = false
     let entries: () -> [BarMenuEntry]
+
+    init(name: String, value: String, symbol: String, help: String, dark: Bool = false, highlighted: Bool = false,
+         active: Bool = true, size: CGSize? = nil, bordered: Bool = false, entries: @escaping () -> [BarMenuEntry]) {
+        self.name = name
+        self.value = value
+        self.symbol = symbol
+        self.help = help
+        self.dark = dark
+        self.highlighted = highlighted
+        self.active = active
+        self.size = size
+        self.bordered = bordered
+        self.entries = entries
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: Button, context: Context) -> CGSize? {
+        guard let size else { return nil }
+        let natural = nsView.intrinsicContentSize
+        return CGSize(width: size.width > 0 ? size.width : natural.width, height: size.height)
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -34,7 +66,7 @@ struct BarMenuButton: NSViewRepresentable {
 
     func makeNSView(context: Context) -> Button {
         let button = Button(frame: .zero, pullsDown: true)
-        button.isBordered = false
+        button.isBordered = bordered
         button.imagePosition = .imageLeading
         button.menu?.delegate = context.coordinator
         button.menu?.addItem(NSMenuItem()) // the title item a pull-down shows
@@ -52,11 +84,20 @@ struct BarMenuButton: NSViewRepresentable {
         context.coordinator.entries = entries
         let titleItem = button.menu?.items.first
         titleItem?.title = value
-        titleItem?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        let image = symbol.isEmpty ? nil : NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        // On cards the symbols match the SwiftUI tool buttons beside them.
+        titleItem?.image = dark ? image?.withSymbolConfiguration(CardTools.symbolConfiguration) : image
+        button.imagePosition = value.isEmpty ? .imageOnly : .imageLeading
+        (button.cell as? NSPopUpButtonCell)?.arrowPosition = value.isEmpty ? .noArrow : .arrowAtBottom
+        // Icon-only: centred in its box.
+        button.alignment = value.isEmpty ? .center : .natural
+        button.appearance = dark ? NSAppearance(named: .darkAqua) : nil
+        button.contentTintColor = highlighted ? (active ? .controlAccentColor : .secondaryLabelColor) : nil
+        if dark { button.font = .systemFont(ofSize: NSFont.smallSystemFontSize + 1, weight: highlighted ? .semibold : .regular) }
         button.synchronizeTitleAndSelectedItem()
         button.toolTip = help
         button.setAccessibilityLabel(name)
-        button.setAccessibilityValue(value)
+        button.setAccessibilityValue(value.isEmpty ? help : value)
         button.invalidateIntrinsicContentSize()
     }
 

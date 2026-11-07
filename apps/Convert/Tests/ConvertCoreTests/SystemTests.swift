@@ -60,8 +60,8 @@ final class RecordingFileStore: FileStore, @unchecked Sendable {
     func copyDates(from source: URL, to target: URL) { real.copyDates(from: source, to: target) }
 }
 
-@Suite struct ScratchTests {
-    @Test func scratchIsCleanedUpOnSuccessFailureAndCancel() async throws {
+@Suite(.timeLimit(.minutes(5))) struct ScratchTests {
+    @Test(.needsMediaEngine) func scratchIsCleanedUpOnSuccessFailureAndCancel() async throws {
         let store = RecordingFileStore()
         let input = try videoFixture { $0.width = 1280; $0.height = 720; $0.seconds = 4; $0.codec = .hevc }
         var c = Converter(settings: ConvertSettings())
@@ -109,7 +109,7 @@ final class RecordingFileStore: FileStore, @unchecked Sendable {
         #expect(GIFStreamWriter.changedRegion(a, b, width: w, height: h) == CGRect(x: 2, y: 3, width: 5, height: 3))
     }
 
-    @Test func mostlyStillClipsMakeSmallGIFs() async throws {
+    @Test(.needsMediaEngine, .timeLimit(.minutes(5))) func mostlyStillClipsMakeSmallGIFs() async throws {
         // The fixture's bar moves across a still background: only the bar's area is stored.
         let input = try videoFixture { $0.width = 640; $0.height = 360; $0.seconds = 2 }
         let result = try report(try await converter { $0.video = .gif }.run(input))
