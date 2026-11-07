@@ -13,9 +13,8 @@ cycle in [`dev-cycle.md`](dev-cycle.md). Status as of 2026-11-03.
 - [x] Design system + SlopKit shared components ([`design-system.md`](design-system.md))
 - [x] Dev-cycle tooling: SlopDrive, researcher and blind-tester agents, `build-app` skill
 - [x] Repo on GitHub (public), website + update feed on GitHub Pages, 8 apps released (2026-11-03)
-- [ ] CI green on GitHub's runners (macOS 26 / Xcode 26.6). Open: Paper's pending redaction marks
-      don't survive save/reopen on macOS 26 (real bug); Convert's tests exceed 45 min on CI
-      (no hardware encoder on the VMs).
+- [x] CI green on GitHub's runners (macOS 26 / Xcode 26.6), all apps, 2026-11-07. The SDK is
+      now stamped with vtool after linking; Paper's and Convert's earlier failures are gone.
 - [ ] Owner decisions (below)
 
 ## Phase 1: Ship Switchboard (OpenIn)
