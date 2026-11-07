@@ -384,6 +384,12 @@ final class PanelController {
         if let clip = state.selected { model.togglePin(clip) }
     }
 
+    /// Copies the selected clip as Return does with direct paste off (the paste sound plays;
+    /// nothing is typed into another app).
+    func testCopySelected() {
+        if let clip = state.selected { copy(clip) }
+    }
+
     func testDeleteSelected() {
         if let clip = state.selected { delete(clip) }
     }

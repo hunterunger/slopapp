@@ -1,7 +1,8 @@
 import Foundation
 
-/// Clips' own two sounds, synthesized in code (nothing recorded, bundled or borrowed). The
-/// same samples come out every time: the noise is seeded.
+/// The Classic pair (Clips' first two sounds), synthesized in code (nothing recorded, bundled
+/// or borrowed), plus the AIFF writer and measuring helpers every pair uses. The same samples
+/// come out every time: the noise is seeded. The other pairs are in `SoundPairs`.
 ///
 /// - **Snap** (copy, 0.20 s, peak −18 dBFS): a crisp tick (damped 5.3 kHz sine with a softer
 ///   1.85 kHz partial and a 1 ms burst of high noise, ~3 ms time constant), near-silence, then

@@ -63,10 +63,12 @@ final class AppModel {
         }
     }
 
-    var copySound: CopySound {
+    /// Which sound pair plays (Paper unless someone picked another).
+    var soundChoice: SoundChoice {
         didSet {
-            defaults.set(copySound.rawValue, forKey: Keys.copySound)
-            chime.sound = copySound
+            defaults.set(soundChoice.rawValue, forKey: Keys.soundChoice)
+            chime.sound = soundChoice
+            soundPlayer.prepare(soundChoice)
         }
     }
 
@@ -93,7 +95,7 @@ final class AppModel {
     let pasteboard: SystemPasteboard
     let watcher: ClipboardWatcher
     @ObservationIgnored private var database: ClipDatabase?
-    @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored private let defaults = Diagnostics.defaults
     @ObservationIgnored let chime: CopyChime
     @ObservationIgnored let soundPlayer = SystemSoundPlayer()
     @ObservationIgnored private var pauseTimer: Timer?
@@ -114,9 +116,9 @@ final class AppModel {
         static let ignoredApps = "ignoredApps"
         static let hideFromScreenSharing = "hideFromScreenSharing"
         static let pausedUntil = "pausedUntil"
-        static let playsCopySound = "playsCopySound"
-        static let copySound = "copySound"
-        static let playsPasteSound = "playsPasteSound"
+        static let playsCopySound = SoundSettings.Keys.playsCopySound
+        static let soundChoice = SoundSettings.Keys.soundChoice
+        static let playsPasteSound = SoundSettings.Keys.playsPasteSound
     }
 
     private init() {
@@ -125,13 +127,13 @@ final class AppModel {
         alwaysPlainText = defaults.bool(forKey: Keys.alwaysPlainText)
         hideFromScreenSharing = defaults.object(forKey: Keys.hideFromScreenSharing) as? Bool ?? true
         ignoredApps = IgnoredApp.decode(defaults.data(forKey: Keys.ignoredApps))
-        let playsSound = defaults.object(forKey: Keys.playsCopySound) as? Bool ?? true
-        // No saved choice gets Clips' own Snap; a saved "Pop" (or another) is kept.
-        let sound = CopySound.saved(defaults.string(forKey: Keys.copySound))
-        let playsPaste = defaults.object(forKey: Keys.playsPasteSound) as? Bool ?? true
+        // Nobody who never picked a sound has a saved choice: they get Paper. Off stays off.
+        let store = Diagnostics.defaults
+        let sounds = SoundSettings.load { store.object(forKey: $0) }
+        let playsSound = sounds.playsCopySound, sound = sounds.choice, playsPaste = sounds.playsPasteSound
         // Assigning in init doesn't run didSet, so nothing is written back.
         playsCopySound = playsSound
-        copySound = sound
+        soundChoice = sound
         playsPasteSound = playsPaste
         chime = CopyChime(player: soundPlayer, isEnabled: playsSound, playsPasteSound: playsPaste, sound: sound,
                           systemSoundsEnabled: { SystemSoundPlayer.userInterfaceSoundsEnabled })
@@ -251,7 +253,7 @@ final class AppModel {
         }
         // Only copies that were really recorded get here: skipped, ignored and concealed
         // content returns earlier, and Clips' own pastes never count as a change.
-        if chime.copyRecorded() { Diagnostics.record("copy sound played sound=\(copySound.rawValue)") }
+        if chime.copyRecorded() { Diagnostics.record("copy sound played sound=\(soundChoice.rawValue)") }
         prune()
         changed()
     }
@@ -357,7 +359,7 @@ final class AppModel {
     /// Clips pasted or copied a clip for you (or you dragged a card into an app): the paste
     /// sound. Clips' own pasteboard write doesn't count as a copy, so no copy sound follows.
     func clipDelivered() {
-        if chime.clipUsed() { Diagnostics.record("paste sound played") }
+        if chime.clipUsed() { Diagnostics.record("paste sound played sound=\(soundChoice.rawValue)") }
     }
 
     func togglePin(_ clip: Clip) {

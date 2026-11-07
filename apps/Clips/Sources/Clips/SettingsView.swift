@@ -70,20 +70,6 @@ private struct GeneralRows: View {
         }
         Toggle("Always paste as plain text", isOn: $model.alwaysPlainText)
         Toggle("Play sound when copying", isOn: $model.playsCopySound)
-        if model.playsCopySound {
-            Picker("Copy sound", selection: Binding(
-                get: { model.copySound },
-                set: { newValue in
-                    model.copySound = newValue
-                    model.chime.preview()
-                }
-            )) {
-                // Clips' own sound first, then the macOS ones.
-                Text(CopySound.snap.title).tag(CopySound.snap)
-                Divider()
-                ForEach(CopySound.allCases.filter(\.isSystemSound)) { Text($0.title).tag($0) }
-            }
-        }
         Toggle("Play sound when pasting", isOn: Binding(
             get: { model.playsPasteSound },
             set: { newValue in
@@ -91,6 +77,19 @@ private struct GeneralRows: View {
                 if newValue { model.chime.previewPaste() }
             }
         ))
+        if model.playsCopySound || model.playsPasteSound {
+            Picker("Sound", selection: Binding(
+                get: { model.soundChoice },
+                set: { newValue in
+                    model.soundChoice = newValue
+                    model.chime.preview()
+                }
+            )) {
+                ForEach(SoundChoice.allCases.filter { $0 != .classic }) { Text($0.title).tag($0) }
+                Divider()
+                Text(SoundChoice.classic.title).tag(SoundChoice.classic)
+            }
+        }
         if (model.playsCopySound || model.playsPasteSound), !SystemSoundPlayer.userInterfaceSoundsEnabled {
             Text("Sound effects are off in System Settings › Sound, so Clips stays quiet too.")
                 .font(.callout)

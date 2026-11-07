@@ -12,9 +12,10 @@ An open alternative to Paste.
 Clips remembers what you copy: text (with its formatting), links, colors, images and
 files. Press **⇧⌥V** in any app and a strip of cards slides up along the bottom of the
 screen, newest on the left. Type a few letters, press **Return**, and the clip is pasted
-into the app you were using. A soft "snap" tells you each copy was saved, and a quiet "tock" when Clips pastes one for
-you. Both are Clips' own sounds, made in code. Settings › General turns either off or picks
-a macOS sound for copies instead. Both stay quiet when macOS sound effects are off.
+into the app you were using. A soft paper flick tells you each copy was saved, and a quiet tap when Clips pastes one
+for you. Settings › General turns either off or picks another pair: Paper, Glass, Wood,
+Bubble, Snap, Pluck or Classic. They're all Clips' own sounds, made in code, and they stay
+quiet when macOS sound effects are off.
 
 - **Cards** show what kind of clip it is, which app it came from and when, over a big
   preview: the text itself, the image, a link with its page title (when the app you copied
@@ -103,7 +104,7 @@ scripts/drive launch build/Clips.app \
 
 | Variable | Effect |
 |---|---|
-| `CLIPS_DATA_DIR` | Keep the history in this folder |
+| `CLIPS_DATA_DIR` | Keep the history and rendered sounds in this folder, and the settings in the `app.slopapp.clips.test` defaults domain (so a test run never changes your settings) |
 | `CLIPS_PASTEBOARD` | Watch and write a private named pasteboard instead of the clipboard |
 | `CLIPS_SEED=5000` | Fill an empty test history with synthetic clips (needs `CLIPS_DATA_DIR`) |
 | `CLIPS_ALLOW_CAPTURE=1` | Let screenshots see the panel |

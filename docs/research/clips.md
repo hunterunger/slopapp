@@ -991,6 +991,9 @@ today than during the parity pass (13 ms medians then), for both builds.
 
 ## Sound round (2026-11-07)
 
+> Playback, Settings and Migration below are **superseded by "Sound pairs round"** (same
+> day): six new pairs, Paper the default, the old Snap/Tock kept as Classic, macOS sounds gone.
+
 Owner: "Clips needs the sound effect similar to Paste. This is a feature I use all the time."
 Paste's two sounds were measured read-only by the coordinator (duration, level, envelope,
 spectrum); nothing of them is copied, bundled, resampled or derived. Clips' sounds are
@@ -1055,3 +1058,83 @@ Gate and install (2026-11-07):
   on it, `lsregister -u build/Clips.app` (and the two old test copies); downtime 53 s
   (the gate ran inside it). Clips' defaults were restored from the backup: no sound keys,
   so Snap and both sounds are on.
+
+## Sound pairs round (2026-11-07)
+
+Owner listened to six alternative pairs the coordinator synthesized (reference generator
+`synth.swift`, renders `alt/{1-paper … 6-pluck}-{copy,paste}.wav`, in the coordinator's
+scratchpad) and picked **#1 Paper**. All six are ported into ClipsCore; the first pair stays
+as Classic.
+
+### Decisions
+
+| Question | Decision | Why |
+|---|---|---|
+| Choices | Settings › General › **Sound**: Paper (default), Glass, Wood, Bubble, Snap, Pluck, then a separator and Classic | The owner's list. Short names of our own. Classic sits apart: it's the old pair, not one of the new family. |
+| What a choice is | A pair: one copy sound and one paste sound | The six were designed as pairs; one picker reads tidier than two. |
+| Picker visibility | Shown while either "Play sound when copying" or "…when pasting" is on; picking one previews its copy sound | The choice affects both sounds; previews as the brief asks. On/off switches and their previews unchanged. Volume unchanged: system-sound playback at the alert volume, as before (there was never a slider). |
+| macOS sounds (Pop, Tink …) | Removed | Not in the owner's list; the new pairs are all loudness-matched and short. |
+| Migration | New key `soundChoice` (never written until someone picks). No key → Paper. Old `copySound` "Snap" (only written when someone picked it) → Classic. Old "Pop" … → Paper. `playsCopySound` / `playsPasteSound` unchanged, so off stays off. Nothing is written back at launch | "Never changed it" → Paper; someone who picked the old Snap keeps that sound; the macOS sounds have no equivalent. The owner had no sound keys → Paper. |
+| Synthesis | `ClipsCore/SoundPairs.swift`: the reference's building blocks (`partial`, `noise`, `pluck`, `mix`, `lowpass`, `room`, `finish`) with the same arithmetic order; copy −30 dB RMS of the active part (samples > 5 % of peak), paste −27 dB, peak guard −6 dBFS, 44.1 kHz | "Match the reference closely." |
+| Determinism | Each sound has its own fixed xorshift64 seed: the reference generator's state where it started that sound | Deterministic, and the output equals the reference renders (below) instead of merely resembling them. |
+| Cache | `<choice>-<copy|paste>-v2.aiff` (`SoundPairs.version = 2`); on first prepare, any `.aiff` in the folder without the current `-vN` suffix is deleted (the old `snap-v1` / `tock-v1`) | Stale files can never be played; bump the version when any synthesis changes. |
+| Threading | `SystemSoundPlayer.prepare(choice)` renders the pair and creates its sound IDs on a serial utility queue, at launch and when the choice changes. `play` is a lock-protected dictionary lookup + `AudioServicesPlaySystemSound`. If an ID isn't ready (a preview of a pair just picked) `play` waits on the same queue: one render, never two | Before this round `prepare()` ran on the main thread; now it's really off it. Copy/paste hot path unchanged. Each render is 0.3–0.7 ms (release). |
+| Test isolation | With `CLIPS_DATA_DIR`, settings live in the `app.slopapp.clips.test` defaults domain | A walkthrough that picks sounds must never write the owner's settings (the last rounds had to restore them from a backup). |
+| Test hook | `do copy`: copies the selected card as Return does with direct paste off | Lets a script trigger the paste sound without keyboard focus or ⌘V. |
+
+### Fidelity (vs the reference renders)
+
+Sample-by-sample against the 24-bit reference WAVs: max difference **5.96e-8** for all 12
+sounds (half a 24-bit step: identical before quantisation); same lengths. The `analyze`
+tool shows identical 5 ms RMS envelopes and spectra for the app's 16-bit AIFFs (only the
+last tail window, at −92 vs −93 dB, differs from quantisation). Levels: every copy sound
+−30.00 dB active RMS, every paste −27.00; peaks −13.4 to −20.2 dBFS (guard never engaged).
+
+### Gates (Sound pairs round)
+
+- **Unit tests: 110 pass** (was 97). New `SoundTests.swift`: determinism (all 14), loudness
+  ±1 dB (all six pairs), peak guard (each sound ≤ −6.02 dBFS, and a synthetic spike clamped
+  to exactly 0.5), clean (no DC, silent ends, short), lengths, every sound distinct
+  (pairwise unequal, normalized correlation < 0.9), characters (Paper has no tonal peak;
+  Glass/Wood/Pluck ring at 2093/1320/784 Hz; Bubble rises for copy and falls for paste),
+  default Paper, migration (none → Paper, old Snap → Classic, old Pop … → Paper, new key
+  wins, unknown falls back), sound off stays off, versioned unique file names; the chime
+  policy tests moved here and use pairs.
+- **`scripts/check.sh Clips`: pass** (lint, tests, release bundle, smoke, catalog).
+  **Perf** (`scripts/perf.sh Clips --no-bundle`, installed copy quit; busy machine, load
+  4.5): launch 167 ms, first status item 432 ms, idle CPU 0.033 %, footprint 34.5 MB. A first
+  `check.sh --perf` run with the installed copy still running "failed" at 63.6 MB: it
+  measured the owner's copy again (same bundle ID hand-over, see the last round), and opened
+  its Settings, closed again with an AX press on its close button.
+- **Walkthrough** (release build, `--direct`, `CLIPS_DATA_DIR=/tmp/clips-test/sounds/data`,
+  private pasteboard, `CLIPS_NO_HOTKEY`, test hooks, passive windows only: the owner was
+  typing the whole time, so nothing took keyboard focus and no mouse was used):
+  - Fresh domain: Settings shows Sound = Paper; only `paper-{copy,paste}-v2.aiff` written
+    (byte-identical to the verified render); planted `snap-v1.aiff` / `tock-v1.aiff` deleted.
+  - A copy on the private pasteboard logs `copy sound played sound=paper`; `do copy` on a
+    card logs `paste sound played sound=paper` with no copy sound after.
+  - Picking each of the seven in the popup saves `soundChoice` and renders that pair once
+    (14 files, no duplicate writes after the queue fix).
+  - Old `copySound=Snap` only → Sound = Classic, sounds `classic`; the domain is not
+    written. Both switches off + `copySound=Pop` → both off, picker hidden, a copy is
+    recorded silently; turning pasting on shows the picker at Paper.
+  - `drive tree`: no `[unlabeled]` controls. Screenshots looked at, light and dark (§10:
+    system controls, grouped form, separator before Classic, no hardcoded colours).
+- **Not verified**: actually hearing the sounds (no audio check is possible here; the
+  sample comparison and the play log are the evidence) and the panel's real Return/⌘2
+  keystrokes this round (owner active; same code path as `do copy`, verified last round).
+
+Screenshots (`/tmp/clips-test/sounds/shots/`, not committed): `settings-light.png`,
+`settings-dark.png`, `sound-menu-dark-1.png`, `settings-sounds-off-dark.png`,
+`settings-paste-on-dark.png`.
+
+### Install (2026-11-07)
+
+Backed up `defaults export app.slopapp.clips` first. Quit the installed copy, ran perf,
+moved the old bundle aside (rollback copy kept in the coordinator's scratchpad), `ditto
+build/Clips.app /Applications/Slopapp/Clips.app`, `lsregister -f` on it, `lsregister -u`
+on `build/Clips.app`, relaunched from /Applications: **downtime 22 s**. After: only the
+/Applications path is registered; Clips' defaults identical to the backup (no sound keys,
+so Paper with both sounds on); history files untouched; `~/Library/Caches/app.slopapp.clips/Sounds`
+holds `paper-{copy,paste}-v2.aiff`. The test defaults domain was deleted afterwards.
+

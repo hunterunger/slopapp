@@ -1,61 +1,74 @@
 import AudioToolbox
 import ClipsCore
 import Foundation
+import os
 
 /// Plays Clips' sounds the way UI sounds play: as system sounds, through the "Play sound
 /// effects through" device at the alert volume.
 ///
-/// Clips' own sounds (Snap, Tock) are synthesized (`SoundSynthesis`) and written once to
-/// Clips' caches folder as AIFF; their sound IDs are created at launch so the first copy
-/// plays at once. The other copy sounds are macOS system sounds, loaded on first use.
-final class SystemSoundPlayer: SoundPlaying {
-    private var ids: [SoundEffect: SystemSoundID] = [:]
-
-    /// Bump when the synthesis changes, so old files are replaced.
-    static let version = 1
+/// Every sound is synthesized (`SoundPairs`, `SoundSynthesis`) and written once to Clips'
+/// caches folder as AIFF, named with `SoundPairs.version` so a file from an older synthesis
+/// is never played. `prepare(_:)` renders the chosen pair and creates its sound IDs off the
+/// main thread (at launch and when the choice changes), so a copy only ever plays an ID
+/// that's ready. If one isn't yet (a copy in the first few milliseconds after launch, or a
+/// Settings preview of a pair just picked), `play` waits for it on the same serial queue (or
+/// renders it there): under a millisecond, once. One queue means a file is never rendered twice.
+final class SystemSoundPlayer: SoundPlaying, Sendable {
+    private let ids = OSAllocatedUnfairLock<[SoundEffect: SystemSoundID]>(initialState: [:])
+    private let queue = DispatchQueue(label: "app.slopapp.clips.sounds", qos: .utility)
 
     func play(_ effect: SoundEffect) {
-        guard let id = ids[effect] ?? load(effect) else { return }
+        guard let id = ids.withLock({ $0[effect] }) ?? queue.sync(execute: { loaded(effect) }) else { return }
         AudioServicesPlaySystemSound(id)
     }
 
-    /// Writes Clips' own sounds if needed and creates their IDs (call at launch).
-    func prepare() {
-        for effect in [SoundEffect.copy(.snap), .paste] where ids[effect] == nil { _ = load(effect) }
-    }
-
-    private func load(_ effect: SoundEffect) -> SystemSoundID? {
-        guard let url = Self.url(for: effect) else { return nil }
-        var id: SystemSoundID = 0
-        guard AudioServicesCreateSystemSoundID(url as CFURL, &id) == noErr else { return nil }
-        ids[effect] = id
-        return id
-    }
-
-    private static func url(for effect: SoundEffect) -> URL? {
-        switch effect {
-        case .copy(let sound) where sound.isSystemSound:
-            return URL(fileURLWithPath: "/System/Library/Sounds/\(sound.rawValue).aiff")
-        case .copy:
-            return rendered("snap") { SoundSynthesis.snap() }
-        case .paste:
-            return rendered("tock") { SoundSynthesis.tock() }
+    /// Renders the pair's files if needed and creates their IDs, in the background. The first
+    /// call also removes files left by older versions.
+    func prepare(_ choice: SoundChoice) {
+        let effects = SoundKind.allCases.map { SoundEffect(choice, $0) }
+        queue.async { [self] in
+            Self.removeStaleFiles()
+            for effect in effects { _ = loaded(effect) }
         }
     }
 
-    /// The rendered file, written if it's missing (deterministic, so an existing one is right).
-    private static func rendered(_ name: String, _ synthesize: () -> [Float]) -> URL? {
+    /// The sound's ID, rendering its file and creating the ID if needed. Only on `queue`.
+    private func loaded(_ effect: SoundEffect) -> SystemSoundID? {
+        dispatchPrecondition(condition: .onQueue(queue))
+        if let id = ids.withLock({ $0[effect] }) { return id }
+        guard let url = Self.rendered(effect) else { return nil }
+        var id: SystemSoundID = 0
+        guard AudioServicesCreateSystemSoundID(url as CFURL, &id) == noErr else { return nil }
+        ids.withLock { [id] in $0[effect] = id }
+        return id
+    }
+
+    /// The rendered file, written if it's missing (deterministic and versioned, so an
+    /// existing one is right).
+    private static func rendered(_ effect: SoundEffect) -> URL? {
         let folder = soundsFolder
-        let url = folder.appending(path: "\(name)-v\(version).aiff")
+        let url = folder.appending(path: effect.fileName)
         if FileManager.default.fileExists(atPath: url.path) { return url }
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try SoundSynthesis.aiff(synthesize()).write(to: url, options: .atomic)
-            Diagnostics.record("sound written name=\(name)")
+            try SoundSynthesis.aiff(effect.render()).write(to: url, options: .atomic)
+            Diagnostics.record("sound written name=\(effect.fileName)")
             return url
         } catch {
-            Diagnostics.record("sound write failed name=\(name)")
+            Diagnostics.record("sound write failed name=\(effect.fileName)")
             return nil
+        }
+    }
+
+    private static let staleFilesRemoved = OSAllocatedUnfairLock(initialState: false)
+
+    /// Deletes sound files from other versions (e.g. the first version's `snap-v1.aiff`).
+    private static func removeStaleFiles() {
+        guard !staleFilesRemoved.withLock({ done in defer { done = true }; return done }) else { return }
+        let suffix = "-v\(SoundPairs.version).aiff"
+        let files = (try? FileManager.default.contentsOfDirectory(at: soundsFolder, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.pathExtension == "aiff" && !file.lastPathComponent.hasSuffix(suffix) {
+            try? FileManager.default.removeItem(at: file)
         }
     }
 

@@ -203,9 +203,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         if Diagnostics.testHooks { installTestHooks(panel) }
-        // Write Clips' sounds (first launch only) and create their IDs now, so the first copy
-        // plays without a delay. A few milliseconds, once.
-        DispatchQueue.main.async { model.soundPlayer.prepare() }
+        // Render the chosen sounds (first launch of a version only) and create their IDs in
+        // the background now, so the first copy plays without a delay.
+        model.soundPlayer.prepare(model.soundChoice)
         DispatchQueue.main.async {
             panel.prewarm()
             if Diagnostics.showPanelAtLaunch { panel.show() }
@@ -248,6 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case "pause": AppModel.shared.pause(for: nil)
                 case "resume": AppModel.shared.resume()
                 case "pin": panel.testTogglePinSelected()
+                case "copy": panel.testCopySelected()
                 case "delete": panel.testDeleteSelected()
                 case "cards": panel.state.cardsFocused = true
                 case "search": panel.state.cardsFocused = false
