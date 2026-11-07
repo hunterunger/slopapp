@@ -65,6 +65,12 @@ public actor ClipDatabase {
                 PRAGMA user_version = 2;
                 """)
         }
+        if version < 3 {
+            // v3: link titles (from the copying app, never fetched).
+            let hasColumn = (try? exec(db, "SELECT title FROM clips LIMIT 0")) != nil
+            if !hasColumn { try exec(db, "ALTER TABLE clips ADD COLUMN title TEXT") }
+            try exec(db, "PRAGMA user_version = 3")
+        }
     }
 
     deinit {
@@ -77,7 +83,7 @@ public actor ClipDatabase {
     public func loadAll() throws -> [Clip] {
         let statement = try prepare("""
             SELECT id, kind, text, text_length, width, height, bytes, rich, source_id, source_name,
-                   created, last_used, use_count, pinned, fingerprint, full_text FROM clips ORDER BY last_used DESC
+                   created, last_used, use_count, pinned, fingerprint, full_text, title FROM clips ORDER BY last_used DESC
             """)
         defer { sqlite3_finalize(statement) }
         var clips: [Clip] = []
@@ -95,6 +101,7 @@ public actor ClipDatabase {
                 hasRichText: sqlite3_column_int(statement, 7) != 0,
                 sourceBundleID: column(statement, 8),
                 sourceName: column(statement, 9),
+                title: column(statement, 16),
                 created: Date(timeIntervalSinceReferenceDate: sqlite3_column_double(statement, 10)),
                 lastUsed: Date(timeIntervalSinceReferenceDate: sqlite3_column_double(statement, 11)),
                 useCount: Int(sqlite3_column_int(statement, 12)),
@@ -186,9 +193,9 @@ public actor ClipDatabase {
 
     /// Updates metadata only (pinned, last used, use count).
     public func update(_ clip: Clip) throws {
-        try run("UPDATE clips SET last_used = ?, use_count = ?, pinned = ?, source_id = ?, source_name = ?, rich = ?, bytes = ? WHERE id = ?",
+        try run("UPDATE clips SET last_used = ?, use_count = ?, pinned = ?, source_id = ?, source_name = ?, rich = ?, bytes = ?, title = ? WHERE id = ?",
                 [clip.lastUsed.timeIntervalSinceReferenceDate, clip.useCount, clip.isPinned ? 1 : 0,
-                 clip.sourceBundleID, clip.sourceName, clip.hasRichText ? 1 : 0, clip.byteCount, clip.id.uuidString])
+                 clip.sourceBundleID, clip.sourceName, clip.hasRichText ? 1 : 0, clip.byteCount, clip.title, clip.id.uuidString])
     }
 
     public func delete(ids: [UUID]) throws {
@@ -219,14 +226,14 @@ public actor ClipDatabase {
     private func upsert(_ clip: Clip, thumbnail: Data?, replaceThumbnail: Bool) throws {
         let sql = """
             INSERT INTO clips(id, kind, text, text_length, width, height, bytes, rich, source_id, source_name,
-                              created, last_used, use_count, pinned, fingerprint, thumbnail, full_text)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              created, last_used, use_count, pinned, fingerprint, thumbnail, full_text, title)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, text = excluded.text,
                 text_length = excluded.text_length, width = excluded.width, height = excluded.height,
                 bytes = excluded.bytes, rich = excluded.rich, source_id = excluded.source_id,
                 source_name = excluded.source_name, last_used = excluded.last_used,
                 use_count = excluded.use_count, pinned = excluded.pinned, fingerprint = excluded.fingerprint,
-                full_text = excluded.full_text
+                full_text = excluded.full_text, title = excluded.title
                 \(replaceThumbnail ? ", thumbnail = excluded.thumbnail" : "")
             """
         let statement = try prepare(sql)
@@ -248,6 +255,7 @@ public actor ClipDatabase {
         bind(statement, 15, clip.fingerprint)
         if let thumbnail { bindBlob(statement, 16, thumbnail) } else { sqlite3_bind_null(statement, 16) }
         bind(statement, 17, clip.longText)
+        bind(statement, 18, clip.title)
         guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
     }
 

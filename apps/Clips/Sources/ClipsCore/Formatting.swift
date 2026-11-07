@@ -94,6 +94,88 @@ public enum ClipText {
         return short
     }
 
+    /// The card header's type word: "Text", "Link", "Image", "File", "Color".
+    public static func kindName(of clip: Clip) -> String {
+        switch clip.kind {
+        case .text: "Text"
+        case .link: "Link"
+        case .image: "Image"
+        case .file: clip.filePaths.count > 1 ? "\(clip.filePaths.count) Files" : "File"
+        case .color: "Color"
+        }
+    }
+
+    /// The length (in UTF-16 units) of a first line that reads like a heading ("Address:",
+    /// "Shopping list"), so the card can set it in semibold; nil otherwise. A heading is short,
+    /// followed by more lines, and ends with a colon or without sentence punctuation.
+    public static func headingLength(of text: String) -> Int? {
+        guard let newline = text.firstIndex(where: \.isNewline) else { return nil }
+        let first = text[..<newline]
+        let trimmed = first.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.count <= 40,
+              !text[newline...].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        if trimmed.hasSuffix(":") { return first.utf16.count }
+        guard let last = trimmed.last, !".,;!?)]}>\"'{=+-*/\\|&".contains(last) else { return nil }
+        // Code and data rarely make headings.
+        guard !trimmed.contains("{"), !trimmed.contains("("), trimmed.split(separator: " ").count <= 6 else { return nil }
+        return first.utf16.count
+    }
+
+    /// The small line at the foot of a card: "65 characters", "2,400 × 1,600", "3 files".
+    /// Nil when the card already says everything (links, colours, a single file).
+    public static func cardFooter(of clip: Clip) -> String? {
+        switch clip.kind {
+        case .text:
+            return clip.textLength == 1 ? "1 character" : "\(clip.textLength.formatted()) characters"
+        case .image:
+            return clip.imageWidth > 0 ? "\(clip.imageWidth.formatted()) × \(clip.imageHeight.formatted())" : nil
+        case .file:
+            return nil
+        case .link, .color:
+            return nil
+        }
+    }
+
+    /// "example.com" for "https://www.example.com/a/b", the address for "mailto:", else the text.
+    public static func host(ofLink text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.lowercased().hasPrefix("mailto:") { return String(trimmed.dropFirst(7)) }
+        let candidate = trimmed.lowercased().hasPrefix("www.") ? "https://" + trimmed : trimmed
+        if let url = URL(string: candidate), let host = url.host(percentEncoded: false), !host.isEmpty {
+            return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        }
+        return trimmed
+    }
+
+    /// The URL without its scheme, for the second line of a link card: "example.com/a/b".
+    public static func shortURL(_ text: String) -> String {
+        var result = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["https://", "http://"] where result.lowercased().hasPrefix(prefix) {
+            result = String(result.dropFirst(prefix.count))
+        }
+        if result.lowercased().hasPrefix("www.") { result = String(result.dropFirst(4)) }
+        if result.hasSuffix("/") { result = String(result.dropLast()) }
+        return result
+    }
+
+    /// One or two letters standing in for a site without fetching its icon: "example.com" → "E".
+    public static func monogram(ofHost host: String) -> String {
+        let parts = host.split(separator: ".")
+        // Skip a leading subdomain like "docs." when there's a real name after it.
+        let name = parts.count > 2 ? parts[parts.count - 2] : (parts.first ?? Substring(host))
+        return name.first.map { String($0).uppercased() } ?? "?"
+    }
+
+    /// A stable small number for a string (FNV-1a), e.g. to pick a colour per site.
+    public static func stableHash(_ text: String) -> UInt64 {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01B3
+        }
+        return hash
+    }
+
     /// "1 line · 42 characters", "1,204 × 800 · 2.1 MB", "3 files".
     public static func details(of clip: Clip) -> String {
         switch clip.kind {

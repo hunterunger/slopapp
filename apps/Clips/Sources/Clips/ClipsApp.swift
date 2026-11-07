@@ -62,9 +62,20 @@ struct MenuBarLabel: View {
 enum HistoryOpener {
     static var action: (() -> Void)?
 
-    static func open() {
-        NSApp.activate()
-        action?()
+    /// `activate: false` is for test hooks (opens it behind whatever is in front).
+    static func open(activate: Bool = true) {
+        if activate { NSApp.activate() }
+        if let action {
+            action()
+            return
+        }
+        // The menu bar icon (where the action is captured) may be hidden: use the Window
+        // menu's command instead.
+        for item in NSApp.mainMenu?.items ?? [] {
+            guard let menu = item.submenu, let index = menu.items.firstIndex(where: { $0.title == "Clip History" }) else { continue }
+            menu.performActionForItem(at: index)
+            return
+        }
     }
 }
 
@@ -80,7 +91,7 @@ struct ClipsMenu: View {
         Divider()
 
         showClipsButton
-        Button("Open History…") {
+        Button("Open History") {
             HistoryOpener.action = { openWindow(id: HistoryWindow.id) }
             HistoryOpener.open()
         }
@@ -186,10 +197,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let panel = PanelController(model: model)
         Self.panel = panel
         model.start()
-        KeyboardShortcuts.onKeyDown(for: .showClips) {
-            Self.panel?.toggle(trigger: Diagnostics.now())
+        if !Diagnostics.noHotkey {
+            KeyboardShortcuts.onKeyDown(for: .showClips) {
+                Self.panel?.toggle(trigger: Diagnostics.now())
+            }
         }
         if Diagnostics.testHooks { installTestHooks(panel) }
+        // Write Clips' sounds (first launch only) and create their IDs now, so the first copy
+        // plays without a delay. A few milliseconds, once.
+        DispatchQueue.main.async { model.soundPlayer.prepare() }
         DispatchQueue.main.async {
             panel.prewarm()
             if Diagnostics.showPanelAtLaunch { panel.show() }
@@ -199,11 +215,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installTestHooks(_ panel: PanelController) {
         let center = DistributedNotificationCenter.default()
         let prefix = "app.slopapp.clips.test."
-        center.addObserver(forName: .init(prefix + "show"), object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { panel.show() }
+        // object "passive": show without taking the keyboard (screenshots while someone may
+        // be typing in another app).
+        center.addObserver(forName: .init(prefix + "show"), object: nil, queue: .main) { note in
+            let passive = note.object as? String == "passive"
+            MainActor.assumeIsolated { panel.show(takesKeyboard: !passive) }
+        }
+        // object = card index: select it.
+        center.addObserver(forName: .init(prefix + "select"), object: nil, queue: .main) { note in
+            let index = (note.object as? String).flatMap(Int.init) ?? 0
+            MainActor.assumeIsolated { panel.state.select(index: index) }
+        }
+        // object "1" / "0": open or close the preview.
+        center.addObserver(forName: .init(prefix + "preview"), object: nil, queue: .main) { note in
+            let open = note.object as? String == "1"
+            MainActor.assumeIsolated { panel.testSetQuickLook(open) }
+        }
+        // object = tab index (All, Pinned, Text, Links, Images, Files).
+        center.addObserver(forName: .init(prefix + "tab"), object: nil, queue: .main) { note in
+            let index = (note.object as? String).flatMap(Int.init) ?? 0
+            MainActor.assumeIsolated {
+                let tabs = ClipFilter.allCases
+                panel.state.filter = tabs[min(max(index, 0), tabs.count - 1)]
+            }
+        }
+        // object "pause" / "resume" / "pin" (toggles the selected clip) / "delete" (the selected
+        // clip; a pinned one asks for a second delete) / "cards" / "search" (keyboard focus).
+        center.addObserver(forName: .init(prefix + "do"), object: nil, queue: .main) { note in
+            let action = note.object as? String ?? ""
+            MainActor.assumeIsolated {
+                switch action {
+                case "pause": AppModel.shared.pause(for: nil)
+                case "resume": AppModel.shared.resume()
+                case "pin": panel.testTogglePinSelected()
+                case "delete": panel.testDeleteSelected()
+                case "cards": panel.state.cardsFocused = true
+                case "search": panel.state.cardsFocused = false
+                case "history": HistoryOpener.open()
+                case "settings": SettingsOpener.open()
+                // Without activating Clips: the window can't take anyone's typing.
+                case "history-passive": HistoryOpener.open(activate: false)
+                case "settings-passive": SettingsOpener.open(activate: false)
+                case "backdrop": panel.testSetBackdrop(true)
+                case "nobackdrop": panel.testSetBackdrop(false)
+                default: break
+                }
+            }
         }
         center.addObserver(forName: .init(prefix + "hide"), object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { panel.dismiss() }
+        }
+        // Shows the cards' ⌘-numbers as if ⌘ were held ("1"), or hides them.
+        center.addObserver(forName: .init(prefix + "numbers"), object: nil, queue: .main) { note in
+            let on = note.object as? String == "1"
+            MainActor.assumeIsolated { panel.state.commandHeld = on }
         }
         center.addObserver(forName: .init(prefix + "search"), object: nil, queue: .main) { note in
             let query = note.object as? String ?? ""

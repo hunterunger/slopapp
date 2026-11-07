@@ -7,6 +7,8 @@ public enum PasteboardType {
     public static let rtfd = "com.apple.flat-rtfd"
     public static let html = "public.html"
     public static let url = "public.url"
+    /// A link's title, written next to `public.url` by Safari, Mail and others.
+    public static let urlName = "public.url-name"
     public static let fileURL = "public.file-url"
     public static let png = "public.png"
     public static let tiff = "public.tiff"
@@ -37,5 +39,5 @@ public enum PasteboardType {
     public static let richTextTypes = [rtf, html, rtfd]
 
     /// Everything Clips stores, in order of preference within an item.
-    public static let stored: [String] = [string, rtf, html, rtfd, url, fileURL, png, tiff, jpeg, heic]
+    public static let stored: [String] = [string, rtf, html, rtfd, url, urlName, fileURL, png, tiff, jpeg, heic]
 }

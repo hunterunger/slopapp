@@ -12,8 +12,12 @@ public enum SyntheticHistory {
                      "juliett", "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo",
                      "sierra", "tango", "uniform", "victor", "whiskey", "xray", "yankee", "zulu",
                      "café", "naïve", "résumé", "invoice", "meeting", "deploy", "release", "draft"]
-        let apps = [("com.apple.TextEdit", "TextEdit"), ("com.apple.Notes", "Notes"),
-                    ("com.apple.Safari", "Safari"), ("com.apple.dt.Xcode", "Xcode"), ("com.apple.mail", "Mail")]
+        // Real (Apple) apps, so the cards show their colours. Only their names and icons are
+        // used; nothing is read from them.
+        let apps = [("com.apple.Safari", "Safari"), ("com.apple.MobileSMS", "Messages"), ("com.apple.mail", "Mail"),
+                    ("com.apple.Notes", "Notes"), ("com.apple.Photos", "Photos"), ("com.apple.dt.Xcode", "Xcode"),
+                    ("com.apple.finder", "Finder"), ("com.apple.Preview", "Preview"), ("com.apple.Music", "Music"),
+                    ("com.apple.iBooksX", "Books"), ("com.apple.Maps", "Maps"), ("com.apple.TextEdit", "TextEdit")]
         var result: [(Clip, ClipPayload)] = []
         result.reserveCapacity(count)
         for index in 0..<count {
@@ -25,13 +29,24 @@ public enum SyntheticHistory {
                 text = "https://example.com/\(prefix)/\(words[Int(rng.next() % UInt64(words.count))])/\(index)"
             case 1:
                 text = "#\(String(format: "%06X", Int(rng.next() % 0xFFFFFF)))"
+            case 3:
+                // Reads like a note with a heading line.
+                let body = (0..<(6 + Int(rng.next() % 20))).map { _ in words[Int(rng.next() % UInt64(words.count))] }
+                    .joined(separator: " ")
+                text = "\(prefix) notes:\n\(body)"
             default:
                 let wordCount = 4 + Int(rng.next() % 60)
                 let body = (0..<wordCount).map { _ in words[Int(rng.next() % UInt64(words.count))] }.joined(separator: " ")
                 let lines = index % 7 == 0 ? "\n\(body)\n\(body)" : ""
                 text = "\(prefix) synthetic #\(index) \(body)\(lines)"
             }
-            let built = ClipBuilder.build(PasteboardSnapshot(text: text), sourceBundleID: app.0, sourceName: app.1, now: date)
+            var snapshot = PasteboardSnapshot(text: text)
+            if index % 20 == 0 {
+                // Every other link carries a title, as Safari's "Copy Link" does.
+                snapshot.items[0].append(Representation(type: PasteboardType.urlName,
+                                                        data: Data("\(prefix) page \(index)".utf8)))
+            }
+            let built = ClipBuilder.build(snapshot, sourceBundleID: app.0, sourceName: app.1, now: date)
             if case .success(let entry) = built { result.append(entry) }
         }
         return result

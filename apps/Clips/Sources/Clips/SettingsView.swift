@@ -69,6 +69,34 @@ private struct GeneralRows: View {
                 .foregroundStyle(.secondary)
         }
         Toggle("Always paste as plain text", isOn: $model.alwaysPlainText)
+        Toggle("Play sound when copying", isOn: $model.playsCopySound)
+        if model.playsCopySound {
+            Picker("Copy sound", selection: Binding(
+                get: { model.copySound },
+                set: { newValue in
+                    model.copySound = newValue
+                    model.chime.preview()
+                }
+            )) {
+                // Clips' own sound first, then the macOS ones.
+                Text(CopySound.snap.title).tag(CopySound.snap)
+                Divider()
+                ForEach(CopySound.allCases.filter(\.isSystemSound)) { Text($0.title).tag($0) }
+            }
+        }
+        Toggle("Play sound when pasting", isOn: Binding(
+            get: { model.playsPasteSound },
+            set: { newValue in
+                model.playsPasteSound = newValue
+                if newValue { model.chime.previewPaste() }
+            }
+        ))
+        if (model.playsCopySound || model.playsPasteSound), !SystemSoundPlayer.userInterfaceSoundsEnabled {
+            Text("Sound effects are off in System Settings › Sound, so Clips stays quiet too.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
 
         Picker("Keep clips for", selection: Binding(
             get: { model.retention },
@@ -103,7 +131,7 @@ private struct GeneralRows: View {
             }
         }
         if let error = model.storageError {
-            Text(error).font(.caption).foregroundStyle(.red)
+            Text(error).font(.caption).foregroundStyle(.textRed)
         }
     }
 
@@ -127,7 +155,7 @@ private struct ShortcutRows: View {
         ForEach(warnings, id: \.self) { warning in
             Label(warning, systemImage: "exclamationmark.triangle")
                 .font(.callout)
-                .foregroundStyle(.orange)
+                .foregroundStyle(.textOrange)
                 .fixedSize(horizontal: false, vertical: true)
         }
         Text("Press the shortcut in any app to search your clips. You can also open Clips from its menu bar icon.")
@@ -182,7 +210,7 @@ private struct PrivacyTab: View {
                             }
                             Text(app.name)
                             if AppIcons.icon(for: app.bundleID) == nil {
-                                Text("Not installed").font(.caption).foregroundStyle(.tertiary)
+                                Text("Not installed").font(.caption).foregroundStyle(.secondary)
                             }
                         }
                         .tag(app.bundleID)

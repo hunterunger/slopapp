@@ -15,6 +15,11 @@
 > afterwards on the pane it opened on. Panel behaviour below comes from the official docs,
 > the app's own UI strings (read from its bundle, not copied) and reviews.
 
+> **Parity pass (2026-11-03):** the owner asked for Clips to look and work much more like
+> Paste, with its copy sound. That supersedes the "centred list + preview pane" panel, the
+> "no sounds" decision and the "won't copy the strip" notes below. See
+> [Parity pass](#parity-pass-2026-11-03) at the end.
+
 ## The job
 
 Clips remembers everything you copy so you can get it back later. People reach for it
@@ -635,3 +640,418 @@ controls.
 
 **Shipped as beta 0.2.0** (`app.json`).
 
+
+## Parity pass (2026-11-03)
+
+Owner's request: "Redesign Clips to look more like Paste. It should also have the sound
+effect when copying." Governed by [`docs/parity-pass.md`](../parity-pass.md).
+
+**How Paste was studied this time.** Paste is the owner's running clipboard manager, so its
+panel was never opened (no ⇧⌘V, no status-item click) and no history was seen or captured.
+Its look came from the official site and help center only: hero and feature images from
+pasteapp.io and the "Paste on Mac" help page, downloaded to `/tmp/clips-parity/` (not
+committed). Menus and Settings were already inventoried in the research step above.
+
+What those show: a strip across the bottom of the display (Paste 7: inset, rounded, glass);
+a top bar with a search icon, the history tab (clock icon) and coloured-dot pinboard tabs
+in the middle, "…" on the right; square-ish cards in a horizontal timeline, newest first,
+each with a header (type word over relative time, the source app's icon on the right; in
+6.x a solid header band in the app's colour) over a large preview (text, full-bleed image
+with "W × H", link with page image + title + address, file icon + path, a colour) and a
+small footer ("65 characters"); a ring around the selected card; Space for Quick Look;
+←/→ to move; ⌘1–9 shown on cards while ⌘ is held; sounds on copy.
+
+### What changed
+
+| Feature / design item | Status | Notes |
+|---|---|---|
+| Panel = full-width strip along the bottom of the active screen | Done | Inset 8 pt from the usable area (above the Dock), Liquid Glass via SlopKit's `FloatingPanel`, slides up 18 pt in 0.14 s (none with Reduce Motion). Non-activating as before. |
+| Top bar: search + tabs centred, "…" menu right | Done | Search capsule (always present, keeps the caret), tabs All · Pinned · Text · Links · Images · Files, clip count and a "…" menu (Open History, Pause ▸, Settings…, Clear History…). Left side: key hints, or the one notice that matters (storage, pinned-delete confirm, clipboard access, Accessibility, paused + Resume). |
+| Cards: header (type, relative time, app icon), big preview, footer | Done | Text (first ~700 characters, wrapped; or the words around a deep match), image (full-bleed, sharp 480 px decode, "W × H" chip), link (site monogram tile, page title, short address), colour (full swatch, hex chip), file(s) (icon, name, folder, "Not found"). Footer: "N characters". |
+| Link titles | Done | From `public.url-name` (Safari, Mail…) or the text of a single `<a>` in copied HTML. Stored (schema v3 `title` column), searchable. Never fetched. |
+| Selection ring, keyboard ←/→ (and ↑/↓), ⌘↑/⌘↓/Home/End, Page Up/Down | Done | Accent-coloured ring outside the card. |
+| ⌘1–⌘9 quick paste, numbers shown while ⌘ is held | Done | Accent badges bottom-right of the first nine cards. |
+| Quick Look (Space) | Done | A larger preview (660×440) above the strip, centred; follows the selection; Space/Esc closes. Rich text rendered there. Space types a space while a search is being typed: Tab first (Paste's model), or open it from the right-click menu. |
+| Tab switches search ↔ cards | Done | Paste's model. The caret hides and the search outline drops while the cards have the keyboard; typing goes back to search. (Previously Tab cycled filters.) |
+| ⌘←/⌘→ previous/next tab | Done | Paste uses these for pinboards. |
+| ⌘O open link/file, Show in Finder | Done | Keys + right-click menu. (Deferred before.) |
+| Drag a card out | Done | Text, links, colours, files; images once pressed (the payload loads on mouse-down). (Deferred before.) |
+| ⌘T pause/resume, ⌘F back to search | Done | |
+| Vertical mouse wheel scrolls the strip sideways | Done | |
+| Paste / copy / plain text / pin / delete + undo / Esc | Kept | Same behaviours as before, same keys. |
+| **Copy sound** | Done | On by default. Plays a macOS system sound (Pop default; Tink, Bottle, Morse, Purr) through AudioToolbox, so it uses the "Play sound effects through" device at the alert volume. Only for copies that were recorded: skipped, ignored, concealed, paused and Clips' own writes never reach it. Silent when System Settings › Sound › "Play user interface sound effects" is off. Throttled to one per 0.2 s. Settings › General: "Play sound when copying" + "Sound" (choosing one previews it). |
+| History window | Kept | See decisions. |
+| Named, coloured pinboards (+, drag onto a tab, ⇧⌘N) | Deferred (M–L, ~1 day) | Needs a board model, schema, tab editing, drag targets. "Pinned" stands in. |
+| Rename (⌘R) / edit (⌘E) / new text item (⌘N) | Deferred (S–M each) | The new `title` column is the first half of rename. |
+| Multi-select (⇧←/→, ⌘A) and paste together | Deferred (M) | |
+| Paste stack (⇧⌘C) | Deferred (L) | Needs an event tap. |
+| Search filter tokens (app, date range, device) | Deferred (M) | Tabs cover type; History covers app. |
+| Text in images (OCR) | Deferred (M) | CPU cost. |
+| Formatted text on the cards | Deferred (S–M) | Needs the payload per card while scrolling; Quick Look shows it. |
+| Resizable strip / compact mode | Deferred (M) | |
+| Paste sound on paste | Skipped | The brief: no sound for Clips' own pastes. |
+| Link previews (page images), iCloud, iOS | Skipped | Network. |
+
+### Decisions
+
+| Question | Decision | Why |
+|---|---|---|
+| Keep the History window? | **Keep**, reachable from ⌘Y, the strip's "…" menu, Window › Clip History and the status menu | Paste has nothing like it, but it doesn't compete with the strip: it's for bulk cleanup (multi-select delete), browsing by app, and reading long clips. Folding those into the strip would need multi-select and filters first (deferred). |
+| Card header colour | ~~Soft wash of the source app's icon colour~~ **Superseded 2026-11-06** (owner: "still missing a bit of the design aesthetic from Paste"): a solid band in the app's colour, see "Paste-closer round" | |
+| Link "image" | **Monogram tile** (first letter of the site, a system colour picked by hashing the host) | Paste downloads page images; Clips never touches the network. |
+| Search field | **Always visible** capsule (Paste shows an icon that expands) | Typing searches at once either way; a fixed field avoids layout jumps and is clearer. |
+| Space | Quick Look when the search is empty or the cards have the keyboard; otherwise a space | Multi-word searches need spaces; Tab gets to the cards as in Paste. |
+| ←/→ while searching | Always move the selection | "Type, arrow, Return" is the main flow; the query is short. |
+| Tab labels | All, Pinned, Text, Links, Images, Files | Our filters stand in for pinboards; "All" keeps the History window's wording. |
+| Number badges | Only while ⌘ is held | As in Paste; keeps the cards clean. VoiceOver labels always include "Command N". |
+| Strip placement | Screen with the mouse, above the Dock. ~~Inset 8 pt~~ 16 pt since 2026-11-06 (a floating slab) | Matches "the display you're working on". |
+| Card accessibility | One button per card with a full label ("Link, AppKit \| Apple Developer Documentation, developer.apple.com, from Safari, 2 min ago, Command 6"); AXPress selects (like a click) | Return pastes; an accidental AX press shouldn't paste. |
+| Sound default | ~~On, Pop~~ **Superseded 2026-11-07**: on, Clips' own synthesized "Snap" (see "Sound round") | Pop felt nothing like Paste's sound. |
+
+### Deviations from the design system (and why)
+
+- **Sound effect** (§ "no sounds"): the owner asked for it. System sound only, on by
+  default with a switch, respects the system UI-sounds setting.
+- **Custom card visuals** (tinted headers, full-bleed images, site colours): matching
+  Paste's card layout needs coloured, content-first cards. All colours are system or
+  derived from the clip/app; no hardcoded palette beyond the system colours.
+- **Panel placement and shape**: a screen-wide strip at the bottom instead of a centred
+  panel, per the parity pass.
+- **Search highlight** uses the system find-highlight colour with black text (readable in
+  both appearances).
+
+### Gates (parity pass)
+
+- **Unit tests: 77 pass** (was 50): new suites for the copy sound policy (fake player:
+  on/off, system UI-sound switch, throttling, chosen sound, sounds exist), strip geometry
+  (visible range, hit testing, reveal, page size), the keyboard model (every panel key),
+  link titles (url-name, single anchor, none for bare URLs, text never titled, kept on
+  re-copy, stored in the database), card text (kind names, footers, hosts, short URLs,
+  monograms).
+- **`scripts/check.sh Clips`: pass** (SlopKit + Clips tests, release bundle, smoke, catalog).
+- **`scripts/check.sh Clips --perf` was not run.** `perf.sh` quits whatever runs from
+  `build/Clips.app`, and a Clips instance I didn't start (pid 10182, launched 16:42 from
+  `build/Clips.app` with no test environment, likely someone's live copy) was running the
+  whole session. The same measurements on a copy of the release build (`/tmp/clips-test/
+  Clips.app`, launched directly, empty history, load average ~5): launch 98–107 ms, first
+  menu bar icon 323–355 ms, idle CPU 0.11 % over 15 s, footprint 33 MB. Run the official
+  gate once that instance can be quit.
+- **5,000 clips** (seeded, release build, 10 cycles of show → type 10 keystrokes → hide):
+  show 16–27 ms (cold shows after 75 s unused: 17–20 ms; one 196 ms outlier right after
+  an idle wait, not reproduced in 3 tries); search settled per keystroke median 13 ms,
+  p90 23 ms, max 35 ms. Budgets: < 50 ms each. Pass.
+- **Footprint after use at 5,000 clips: 63 MB** (the pre-redesign build, measured the same
+  way on the same machine today: 55 MB; right after launch both are ~51–52 MB, so the old
+  "< 50 MB at 5,000" note no longer held either). The extra is window-server memory for a
+  screen-wide glass strip on this 2,544-pt-wide display (~9–11 MB "unmapped") after
+  searching; card labels now draw into one layer per card (CoreAnimation 6.8 → 1.3 MB),
+  the hidden panel parks 900 pt wide, spare cards are released and decoded images trimmed
+  when the strip closes. Idle (never shown) footprint is unaffected.
+- **Walkthrough** (release build, private pasteboard `app.slopapp.clips.test`, data in
+  `/tmp/clips-test`, every panel step only after ≥ 60 s of owner idle): captured text,
+  rich text, links with and without title, colour, two images, one and three files (one
+  missing) → each played the sound (log `copy sound played`); a concealed item was
+  skipped with no sound; Clips' own ⌘C / Return / ⌘2 / ⇧Return writes played none; with
+  "Play sound when copying" off a copy was recorded silently, on again it played (the
+  shared defaults were restored afterwards). Strip, ←/→, Space Quick Look (files, image,
+  rich text), search highlight + snippet, Tab → Space while searching, Esc order (preview
+  → search → close), ⌘→ to Pinned (empty state and with a pin), ⌘P, ⌘C, ⌘2, ⇧Return,
+  ⌘⌫ on a pinned clip asks for a second press, ⌘T pause notice + Resume, no-results
+  state, ⌘Y History, Settings › General. Sounds themselves weren't listened to (no
+  audio check possible here); the player call is logged and unit-tested.
+- **Not tested by hand:** dragging a card out (needs the real mouse and a drop target),
+  ⌘O / Open Link / Show in Finder (would open the owner's browser or Finder), the
+  slide-in animation's feel, real direct paste with ⌘V (the private pasteboard makes
+  Return copy), and the global shortcut (never pressed; ⇧⌘V never touched).
+- **`drive tree`: no `[unlabeled]`** in the strip, cards, Quick Look or Settings.
+
+Screenshots (in `/tmp/clips-parity/shots/`, not committed): `final-strip-light.png`,
+`numbers-light.png` (⌘ held), `strip-dark.png`, `pinned-dark.png`, `quicklook-light-1.png`
+(files), `ql-image-dark-1.png` / `-2.png` (image preview over the strip),
+`search-ql-light-2.png` (search highlight + rich text preview), `tab-ql-light-2.png`
+(cards focused, previewing while searching), `final-paused-light.png`,
+`final-nomatch-light.png`, `history-light.png`, `settings-general-light.png`.
+(`strip-light.png` and `pinned-empty-light.png` show two bugs fixed since: a system focus
+ring inside the search capsule, and the centre group sliding left when the left side was
+empty.)
+
+Code: `ClipsCore/Strip.swift` (geometry + keyboard model), `ClipsCore/CopySound.swift`
+(sound policy), `Clips/ClipStrip.swift` (recycling strip), `Clips/ClipCardView.swift`
+(card), `Clips/AppTint.swift` (app colour), `Clips/SoundPlayer.swift` (AudioToolbox),
+`Clips/PanelView.swift` + `PanelController.swift` (strip, top bar, Quick Look). Removed:
+`Clips/ClipTable.swift` (the list) and the panel's preview pane.
+
+## Polish pass (2026-11-05)
+
+Brief: [`docs/polish-pass.md`](../polish-pass.md) ("very close attention to detail"). Finish,
+not features. The owner's own Clips (build/Clips.app, pid 40930) was quit for the session so a
+test copy could run without fighting it for the hotkey, the bundle path and the perf gate; its
+defaults were exported first (`/tmp/clips-test/polish/defaults-backup.plist`) and the polished
+build was relaunched with `open` at the end. Every screenshot uses synthetic test data
+(`CLIPS_DATA_DIR=/tmp/clips-test/polish/data`, 40 seeded clips + fixtures written to the private
+pasteboard `app.slopapp.clips.test`: rich text, code, a 136-character unbroken word, colour,
+titled link, two images, one, three and a missing file). Nothing touched the real clipboard.
+
+**How it was measured.** The owner was at the Mac on and off (and the screen locked twice), and
+a shown strip takes the keyboard. So the test hooks gained a passive mode: `show` with object
+`passive` shows the strip without making it key, plus `select`, `preview`, `tab` and `do`
+(pause, pin, delete, focus, and `backdrop`). A window shot of a glass panel has no backdrop,
+which falsifies vibrant colours, so `do backdrop` puts a plain window of our own behind the
+strip and preview; `shot --screen --rect` limited to that rectangle then shows the real
+composite and nothing of anyone else's. Text colours were read as the darkest/dominant pixel
+in each text's region (line samples cut through anti-aliasing).
+
+### Defects (before → after)
+
+| # | Surface | Before | After |
+|---|---|---|---|
+| 1 | Cards | Corners rendered **square** (0 pt; the 13 pt layer radius never clipped because AppKit owns `masksToBounds` via `clipsToBounds`, off since macOS 14) inside an 18 pt selection ring | Card radius 10 = `Radius.nested(in: 22, padding: 12)`, read from `floatingPanelCornerRadius`; ring 15 pt, 5 pt outside. `measure corners`: concentric, gap 7.0 pt along the edges, 7.1 pt at the curve |
+| 2 | Strip insets | Card 18 pt from the left edge, 15 pt from the bottom, 15 pt below the search field; search 12 pt from the top; 14 pt between cards | 12 pt (`Spacing.m`) everywhere: edge → bar, bar → cards, edges → cards, card → card. Panel 286 → 280 pt tall. Geometry moved into `ClipsCore.StripGeometry` with tests |
+| 3 | Panel radii | `FloatingPanel(cornerRadius: 22)` and Quick Look `18` (literals, different) | Both `PanelMetrics.cornerRadius = Radius.xxl`; everything inside derives from it |
+| 4 | Card text colours | Body labels resolved the glass's **vibrant** colours and drew them flat: body text #4D4D4D, secondary #999999 on white (2.9:1) | Card colours resolved against plain aqua/darkAqua: body #272727, secondary #808080 (3.9:1, the system floor); dark #DCDCDC / #999999 on #1C1C1C (6.0:1) |
+| 5 | Search placeholder | Drew solid #181818 on glass, darker than the secondary tabs beside it (#646464); a styled `prompt:` was ignored | Own `.secondary` placeholder at the field's text origin; composited it matches "Pinned" |
+| 6 | Foot row | Count text centre at h−11.5, size chip h−17, ⌘ badge h−15 | One centre line (h−15) for all three, 6 pt from the bottom |
+| 7 | ⌘ badge | Radius 6, 6 pt into a 13 pt corner | `Radius.nested(in: cardRadius, padding: 6)` = 4, concentric |
+| 8 | Size / hex chip | Radius 8 on an 18 pt chip (not a capsule); 50 % black → white text 3.9:1 over a white image | Capsule (height/2); 60 % black → 5.7:1 |
+| 9 | Tabs | Pills 26 pt tall next to a 28 pt search capsule | 28 pt, same top/bottom edges and centre line |
+| 10 | ⋯ menu | Glyph 16.5 pt from the right edge; hints 13 pt from the left | Hit area kept at 28 pt, overhangs 4 pt: glyph 12.5 pt from the edge |
+| 11 | Contrast | "Not found" `.systemOrange` (≈2:1), preview "Missing" `.orange`, Settings warnings `.orange`, storage error `.red`, "Space to close" and "Not installed" `.tertiary` (≈1.9:1) | `.textOrange` / `.textRed`; `.secondary` |
+| 12 | Link monogram | Bright site colours (yellow, mint) on their 16 % wash | Darkened 40 % in light mode (dark mode unchanged) |
+| 13 | Hover | No hover state on cards | Neutral ring where the selection ring goes, 0.12 s fade (none with Reduce Motion) |
+| 14 | Selection | Ring was a bare CALayer, so showing it faded in over an implicit 0.25 s, lagging the arrow keys | Instant (actions disabled); only hover fades |
+| 15 | Preview | Image radius literal 6; colour swatch radius 14 + 1 pt border; rich text started 17 pt in (12 inset + 5 line padding) vs 16 pt for plain text | Image `Radius.nested(in: panel, padding: 16)` = 6; swatch `Radius.l` + 0.5 pt hairline; rich text at 16 pt |
+| 16 | Preview, files | Missing file: "Missing", centred on the two-line block | "Not found" (same as the card) on the name's baseline |
+| 17 | History | Detail action bar inset 12 pt under content inset 16 pt; list colour swatch 1 pt border, radius literal 4 | 16 pt leading edge for both; 0.5 pt hairline, `Radius.xs` |
+| 18 | Copy | Status menu "Open History…" (ellipsis, but it asks nothing) vs "Open History" in the strip menu | "Open History" in both |
+| 19 | Card header | Fixed label offsets (7/24 pt) | Kind + age centred as a pair from font metrics (cap top 11.5 pt, last line 11.5 pt from the header's bottom) |
+
+`scripts/lint.sh Clips`: 8 radius literals and 2 spacing warnings → clean.
+
+### Gates
+
+- **Unit tests: 80 pass** (was 77; new `StripGeometry` suite: even insets, card and ring
+  concentric with the panel, a radius never vanishes).
+- **`scripts/check.sh Clips --perf`: pass** on the final code (lint, tests, bundle, smoke,
+  catalog; load 1.8): launch 148 ms, first status item 317 ms, idle CPU 0.037 %, footprint
+  35.4 MB.
+- **5,000 clips** (hooks only): show 38–43 ms, search settled median 43 ms, p90 48 ms. The
+  parity build (`/tmp/clips-test/Clips.app`) measured the same in the same conditions (show
+  ~41 ms, median 45, p90 53): the display was asleep and the screen locked, which slows both
+  against the parity pass's 16–27 ms / 13 ms. No regression from this pass; re-time awake.
+- **`drive tree`: no `[unlabeled]`** in the strip (every state, light and dark), preview and
+  Settings.
+- **Window buttons 16×16** (Settings, About panel).
+
+### Screenshots
+
+`/tmp/slopapp-polish/clips/` (not committed). Before: `before-strip-light.png`. After, light
+and dark (`final-light-*`, `final-dark-*`): `strip`, `strip-composited` (over our own backdrop:
+the true colours), `numbers` (+ `numbers-composited`), `cards-focused`, `search`, `nomatch`,
+`pinned-empty`, `pinned-one`, `pinned-delete`, `paused`, `images`, and the preview for each
+kind `ql-text`, `ql-long`, `ql-rich`, `ql-code`, `ql-color`, `ql-link`, `ql-image`,
+`ql-file1`, `ql-files3`, `ql-missing-file` (+ `final-dark-ql-image-composited`).
+`final-light-about-panel.png`. Intermediate rounds: `r1`–`r10`.
+
+### Not done, and why
+
+- **Settings tabs and the History window weren't re-shot on the stamped build.** Both need
+  Clips activated, which is only safe with the owner away; when they were, the screen was
+  locked (an hour, twice), and macOS hides windows from Accessibility then. Their fixes
+  (#11, #15, #17) were made from the code and the parity-pass shots; the AX tree showed no
+  unlabeled controls and 16×16 buttons. Re-shoot `windows.sh` in `/tmp/clips-test/polish/tools`
+  when the Mac is awake.
+- **Status menu**: checked by its AX tree only (a shot of a system menu alone comes out blank).
+  It's a standard NSMenu; the fix was the "Open History" ellipsis.
+- **Hover ring and its fade**: needs the real mouse; not exercised. Code path: tracking area per
+  card, `.activeAlways` because the strip never activates Clips.
+- **Card body text set in a monospaced font for code**: a feature, not finish; deferred.
+
+### SlopKit notes (not changed here)
+
+- `NSColor.readableText(_:)` is internal, so AppKit views can't get `.textOrange` without
+  `NSColor(Color.textOrange)`. A public NSColor variant would help AppKit-drawn apps.
+- Any AppKit label inside `FloatingPanel`'s glass resolves the vibrant colour variants
+  (`labelColor` 70 % black, secondary lighter still); on an opaque inner surface (a card) they
+  draw a shade too light. Worth a helper or a note in `FloatingPanel`'s docs.
+- A glass `FloatingPanel` captured with `drive shot` has no backdrop, so vibrant text reads
+  wrong in the shot (the search placeholder looked black). Measure text over a backdrop.
+
+
+## Paste-closer round (2026-11-06)
+
+Owner: "Clips is still missing a bit of the design aesthetic from Paste." Studied from
+Paste's public marketing images only (the coordinator's `scratchpad/paste/hero.png`,
+`card1.png`); Paste itself was never opened and no clipboard was captured. Nothing of Paste's
+name, icon, wording or assets is used.
+
+### Decisions
+
+| Question | Decision | Why |
+|---|---|---|
+| Card header | **Solid band in the source app's colour** with bold white type (14 pt bold type word, 11 pt medium time line, both pure white) | The owner asked for Paste's confident colour; supersedes the soft wash. |
+| Header contrast | `ClipsCore.HeaderColor`: darken the app colour only until white reaches **4.5:1** (what the small time line needs). Colours lighter than luminance 0.55 (yellows) and oranges that would need > 30 % darkening (they turn brown) keep their bright colour with **dark type** instead (≥ 4.5:1). Dark mode: white-type colours sit 12 % deeper. No app / grey icon: system grey (darkened to 4.5:1) | Readable at every colour without muddying them. Messages and Safari land on Apple's own accessible variants (#23873C, #0070EA). |
+| App colour | Hue of the icon's dominant bucket, saturation lifted to ≥ 70 % (brightness ≥ 75 %) before the contrast step | Icon averages are paler than the colour people know an app by. |
+| App icon | **44 pt**, overhanging the card's top (2 pt) and right (4 pt) edges, cropped by the card's corner | As in the reference; the crop is the card's own rounded clip. |
+| Panel | A floating glass slab: **16 pt** from the screen's edges and the Dock, **24 pt radius** = card radius 12 (`Radius.l`) + inset 12, system glass (`FloatingPanel`, so the Appearance clear/tinted slider applies) | Concentric by construction, ≈ the reference's radius. |
+| Cards | **216 × 216 pt**, radius 12, **16 pt** apart (`Spacing.l`), 12 pt from the panel's edges; white (content background) body; soft shadow instead of an outline (light: 14 % black, 4 pt blur, 2 pt down; dark: 45 %, 2 pt blur, plus a hairline edge since shadows barely read there) | Roomier and squarer, as asked. |
+| Card text | 13 pt primary; a first line that reads like a heading ("Address:", a short title line followed by more text) is semibold (`ClipText.headingLength`, tested) | Matches the reference's "Address:" cards. |
+| Top bar | Centred calm search capsule (quaternary fill, no focus outline: the caret shows focus) + **text pill tabs** (selected = filled capsule, semibold; widths reserved so nothing shifts); ⋯ at the far right. **Removed**: the left key hints and the clip count | The reference's calm, centred bar. The hints live in the search field's and ⋯'s help tags; the count and the selected clip's actions (Paste in …, as Plain Text, Preview, Pin, Delete) are in the ⋯ menu. No coloured dots: they mean pinboards, which Clips doesn't have yet. |
+| ⋯ menu | AppKit button whose menu is built when it opens | A SwiftUI `Menu` naming the selection rebuilt itself on every keystroke. |
+| Scroller | Hidden (it drew over the cards) | Trackpad, wheel and keys scroll. |
+| Preview | Content on a text-background surface 8 pt in, concentric (16 pt radius) | Readable over any wallpaper at the clearest glass setting (Golden Gate rule). |
+| Test data | Synthetic history and fixtures attributed to real Apple apps (Safari, Messages, Mail, Notes, Photos, Xcode, Finder, Preview, Music, Books, Maps, TextEdit) by bundle ID; fixtures declare their app with `org.nspasteboard.source` | So the header colours show. Only the apps' names and icons are used. |
+
+### Before → after
+
+| | Before (polish pass) | After |
+|---|---|---|
+| Header | 20 % wash, dark 13 pt semibold text, 30 pt icon | Solid app colour, white 14 pt bold / 11 pt medium (≥ 4.5:1; dark type ≥ 4.5:1 on yellows/oranges), 44 pt cropped icon |
+| Panel | 8 pt from the screen, radius 22, reads as a bar | 16 pt from the screen, radius 24, floating glass slab |
+| Cards | 224 × 216, radius 10, 12 pt gaps, 0.5 pt outline, 12 pt text | 216 × 216, radius 12, 16 pt gaps, soft shadow, 13 pt primary text with heading line |
+| Top bar | Key hints left, accent-outlined search, icon tabs, "51 clips" | Centred calm search + text pills, ⋯ only |
+| Scroller | Drawn over the cards | None |
+| Ring | 3 pt accent, 2 pt gap, radius 15 | 3 pt accent, 2 pt gap, radius 17 (concentric: 24 − 7) |
+
+### Speed (5,000 clips, hooks only, same data and conditions, two runs each)
+
+| | Parity build | This build |
+|---|---|---|
+| Show, cold / warm | 51 / 29–36 ms | 39–48 / 8–28 ms |
+| Search settled, median / p90 / max | 32–37 / 39–43 / 50–58 ms | 34–37 / 43–44 / 51–53 ms |
+
+First version of this round had a 102 ms cold first search: the ⋯ `Menu` rebuilding, and
+cold icon loads for apps the first screenful didn't show. Fixed with the AppKit menu and by
+warming every history app's icon and colour while the panel prewarms. The machine was slower
+today than during the parity pass (13 ms medians then), for both builds.
+
+### Golden Gate + light/dark
+
+- Menus: every menu (status menu, ⋯, card and History context menus) is text only. ✓
+- History: system `NavigationSplitView` sidebar (edge to edge, accent-tinted symbols), standard
+  unified toolbar, NSTableView selection (greys when inactive). Shot active and inactive.
+- Glass: the strip and preview are SlopKit `FloatingPanel` (system glass). Readable text on glass
+  is the top bar (system vibrant labels) and the preview header; card and preview content sit
+  on opaque surfaces.
+- Light and dark: every strip state and preview shot in both over a wallpaper-like backdrop
+  (`v2-light-*`, `v2-dark-*`). Header colours, shadows and the card edge resolve per
+  appearance and update on appearance change (`viewDidChangeEffectiveAppearance`). The only
+  fixed colours drawn are the chip's 60 % black (over pictures) and the header inks (white or
+  black, chosen per header colour by contrast).
+
+### Gates (Paste-closer round)
+
+- **Unit tests: 89 pass** (was 80): header colour (white type ≥ 4.5:1 on every white-type
+  colour, darkens only as far as needed, yellows and oranges keep their colour with dark
+  type in both modes, dark mode deeper, contrast maths), heading detection, the 24/12/16
+  strip geometry and its overflow bounds.
+- **`scripts/check.sh Clips --perf`: pass** on the final code (lint, tests, bundle, smoke,
+  catalog): idle CPU 0.046 %, footprint 33.8 MB (launch 168 ms and first status item 396 ms
+  on the run before the last hook changes).
+- **`drive tree`: no `[unlabeled]`** in the strip, Settings (every tab) and History; window
+  buttons 16×16.
+
+### Screenshots (`/tmp/slopapp-polish/clips/`, not committed)
+
+- `compare-paste-light-dark.png`: the reference strip (`card1.png`) above ours, light and dark.
+- Strip and states, composited over our own wallpaper-like backdrop window (the system's
+  Ventura Graphic thumbnail, light and dark): `v2-{light,dark}-strip`, `-numbers`,
+  `-cards-focused`, `-search`, `-nomatch`, `-pinned-empty`, `-images`, `-paused`,
+  `-pinned-delete`, `-strip-end`.
+- Preview per kind: `v2-{light,dark}-ql-*` (short, link-messages, note-heading, image-photos,
+  long-mail, rich-textedit, code-xcode, color, link-safari, link-music, quote-books,
+  unknown-app, link-maps, image-preview, file-missing, files3, file1).
+- History active: `v2-{light,dark}-history-selected.png` (accent sidebar symbols and
+  selection); inactive: `v2-{light,dark}-history-inactive.png`.
+- Settings, every tab, inactive: `v2-{light,dark}-settings-{General,Shortcuts,Privacy,About}-inactive.png`.
+
+### Not done, and why
+
+- **Settings active-window shots**: every attempt lost to the owner coming back within
+  seconds (Settings needs Clips activated, which is only allowed while they're away). The
+  inactive shots cover every tab in both modes; the window is SlopKit's standard tabs.
+- **Pinboard dots** in the tabs: they mean user pinboards, which are still deferred.
+- **Link page images** (the reference shows page previews): need the network; the monogram tile stays.
+- **Hover ring**: needs the real mouse; not exercised.
+
+### Session notes
+
+- The owner's Clips was off for **about 34 minutes** (21:04–21:39), then twice for a few
+  seconds (relaunching it with the right sound setting; the final gate's perf run). A test
+  copy then ran beside it from a separate app copy with `CLIPS_NO_HOTKEY=1`.
+- Twice, every running Clips (the test copy, and once the owner's) disappeared with no crash
+  report; most likely quit from the menu bar while two Clips icons were showing. The owner's
+  copy was relaunched each time; Clips' defaults were restored from the backup and verified
+  identical at the end.
+- New test-only switches: `CLIPS_NO_HOTKEY=1`, `CLIPS_TEST_BACKDROP=/path`, hook actions
+  `do history|settings|history-passive|settings-passive|backdrop|nobackdrop` (passive ones
+  open the window without activating Clips, so a scripted shot can't take anyone's typing).
+- Fix found on the way: with the menu bar icon hidden, ⌘Y / Open History did nothing (the
+  window action is captured by the icon); it now falls back to the Window menu's command.
+
+
+## Sound round (2026-11-07)
+
+Owner: "Clips needs the sound effect similar to Paste. This is a feature I use all the time."
+Paste's two sounds were measured read-only by the coordinator (duration, level, envelope,
+spectrum); nothing of them is copied, bundled, resampled or derived. Clips' sounds are
+synthesized in code from our own parameters (`ClipsCore/SoundSynthesis.swift`).
+
+### Decisions
+
+| Question | Decision | Why |
+|---|---|---|
+| Copy and paste sounds | **Our own synthesized sounds, inspired by the feel of Paste's**: "Snap" when a copy is recorded, a soft "tock" when Clips pastes or copies a clip for you | The owner uses the sound all the time; Pop (1.6 s, 450–700 Hz with bounces) was far too heavy. |
+| Snap | 0.20 s, peak −18 dBFS. Tick at 2 ms: damped 5.3 kHz sine (τ 3 ms) + 1.85 kHz partial at 0.45 (τ 4.5 ms) + a 4 kHz-high-passed noise burst at 0.35 (τ 1.2 ms), 0.6 ms raised-cosine attack. Swish from 82 ms: noise band-passed 7–11.5 kHz, 12 ms attack, 40 ms decay, 12 dB below the tick. 15 ms fade-out, 30 Hz DC block | "tik…shh", a card snapping and sliding, at Paste-like level, with different frequencies and timing. |
+| Tock | 0.08 s, peak −12 dBFS. Damped sine gliding 970 → 880 Hz (glide τ 12 ms), τ 6 ms, 1.2 ms attack, plus a 2.9 kHz click at 0.18 (τ 0.7 ms). 10 ms fade-out | Soft and short, a little lower and rounder than the reference. |
+| Playback | Rendered once to AIFF (16-bit mono 44.1 kHz) in `~/Library/Caches/app.slopapp.clips/Sounds/` (`snap-v1`, `tock-v1`; the test data folder under `CLIPS_DATA_DIR`), played as AudioToolbox system sounds; sound IDs created at launch | Same device and volume as UI sounds; no latency on the first copy; no idle work. Bump `SystemSoundPlayer.version` when the synthesis changes. |
+| Settings | General: "Play sound when copying" (on) → "Copy sound" (Snap, then Pop, Tink, Bottle, Morse, Purr); "Play sound when pasting" (on). Choosing a copy sound previews it; turning the paste sound on previews it | The system sounds stay for anyone who picked one; one paste sound reads tidier than a second picker. |
+| When the paste sound plays | Return, ⇧Return, ⌘1–⌘9, double-click, the card and ⋯ menus, History's Copy, a card dragged into an app. Not ⌘V in other apps (Clips doesn't see it) | "Clips did it for you." Clips' own pasteboard write never counts as a copy, so no Snap on top. |
+| Rules kept | System Settings' "Play user interface sound effects" off → silent; throttle 0.2 s per kind | As before. |
+| Migration | No saved `copySound` (the owner's settings) → Snap. A saved choice ("Pop" …) is kept. No saved `playsPasteSound` → on | Nobody loses an explicit choice. |
+
+### Measured (the `analyze` tool, 5 ms RMS windows, dB)
+
+Copy, ours (0.200 s, peak −18.0 dBFS) vs the reference (0.207 s, peak −18.4):
+
+```
+ours  0–40 ms  -29 -35 -47 -58 -68 -78 -87 -96      | gap -120 … | 80 ms -62 -45 -40 -38 -40 -41 -43 -43 -45 -45 -46 -48 … -59 -64 -78 -120
+ref   0–40 ms  -53 -46 -49 -42 -27 -32 -38 -46      | gap -46 … -61 | 100 ms -38 -44 -43 -43 -44 -45 -44 -46 -44 -46 -48 … -60 -62 -66
+spectrum: ours tick 5.3 kHz + 1.85 kHz, swish centroid ~9.5 kHz; ref tick 6.7 + 2.6 kHz, swish ~10.7 kHz
+```
+
+Paste, ours (0.080 s, peak −12.0 dBFS) vs the reference (0.080 s, peak −10.4):
+
+```
+ours  -18 -22 -29 -36 -43 -51 -58 -65 -72 -79 -86 -92 -106 -120   (centroid ~900 Hz, gliding to 883 Hz)
+ref   -65 -16 -22 -30 -46 -58 -71 -84 -97 -110 -119 -120          (centroid ~1,000 Hz)
+```
+
+Same shapes (one bright tick, a quiet gap, a soft high swish ~20 dB down; one fast low
+tock), our own frequencies and timing. Ours tick right away (2 ms) where the reference
+ramps in over ~20 ms, and the tock decays ~6 dB per 5 ms against the reference's ~10, so it
+rings slightly longer and softer. Nobody listened to them (no audio check is possible here):
+these numbers and the unit tests are the evidence.
+
+Verified in the built app (test copy, private pasteboard, test data): the files are written
+on first launch and are byte-identical to a standalone render; a recorded copy logs
+`copy sound played sound=Snap`; Return and ⌘2 in the strip log `paste sound played` with
+no copy sound after.
+
+Tests: **97 pass** (was 89): synthesis deterministic, lengths, peaks, no clipping, no DC,
+silent ends, the copy envelope's two events and the paste envelope's single fast decay,
+AIFF header; the policy (copy and paste switches, system switch, separate throttles, chosen
+sound, previews, migration, Clips' own write isn't a copy).
+
+Gate and install (2026-11-07):
+
+- **`scripts/check.sh Clips --perf`: pass**, run with the installed copy quit: launch 160 ms,
+  first status item 412 ms, idle CPU 0.029 %, footprint 31.9 MB. Pre-creating the two
+  sound IDs at launch costs nothing measurable (31.3–31.5 MB with, 31.5–32.5 without).
+- Caught on the way: with another Clips running (the installed one), `open build/Clips.app`
+  hands over to the running copy (same bundle ID) instead of starting the build. A first
+  gate run therefore "failed" at 60 MB by measuring the owner's own copy, and its reopen
+  opened that copy's Settings (closed again). Run perf and smoke with Clips quit.
+- Installed with `ditto build/Clips.app /Applications/Slopapp/Clips.app`, `lsregister -f`
+  on it, `lsregister -u build/Clips.app` (and the two old test copies); downtime 53 s
+  (the gate ran inside it). Clips' defaults were restored from the backup: no sound keys,
+  so Snap and both sounds are on.

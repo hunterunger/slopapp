@@ -12,6 +12,8 @@ final class PanelState {
         didSet {
             guard query != oldValue else { return }
             let started = Diagnostics.now()
+            // Typing always goes back to the search.
+            if cardsFocused { cardsFocused = false }
             refresh(resetSelection: true)
             Diagnostics.recordWhenIdle("panel search settled results=\(results.count)", since: started)
         }
@@ -31,10 +33,20 @@ final class PanelState {
     }
     /// A pinned clip waiting for a second ⌘⌫.
     var pendingPinnedDelete: UUID?
-    /// Bumped when the selection moves by keyboard, so the list scrolls to it.
+    /// Bumped when the selection moves by keyboard, so the strip scrolls to it.
     private(set) var scrollRequest = 0
     /// Bumped on every show, so the search field takes focus again.
     private(set) var focusRequest = 0
+    /// ⌘ is held: the first nine cards show their number.
+    var commandHeld = false
+    /// Tab moved the keyboard to the cards (Space previews; typing goes back to search).
+    var cardsFocused = false {
+        didSet { if cardsFocused != oldValue { onCardsFocusChange?(cardsFocused) } }
+    }
+    @ObservationIgnored var onCardsFocusChange: ((Bool) -> Void)?
+    var quickLookOpen = false
+    /// Whole cards visible at once (the strip reports it), for Page Up / Page Down.
+    @ObservationIgnored var pageSize = 5
     /// The app Return pastes into.
     @ObservationIgnored var target: NSRunningApplication?
     private(set) var targetName: String?
@@ -66,6 +78,9 @@ final class PanelState {
         if !query.isEmpty { query = "" }
         if filter != .all { filter = .all }
         if pendingPinnedDelete != nil { pendingPinnedDelete = nil }
+        if cardsFocused { cardsFocused = false }
+        if commandHeld { commandHeld = false }
+        if quickLookOpen { quickLookOpen = false }
         if resultsRevision != model.revision { refresh() }
         if selectedID != results.first?.id || selectedIndex != 0 {
             selectedID = results.first?.id
@@ -110,18 +125,26 @@ final class PanelState {
     }
 }
 
-/// The search panel: a non-activating floating panel centered on the active screen.
+/// The panel: a non-activating strip along the bottom of the active screen, with a larger
+/// preview (Space) floating above it.
 @MainActor
 final class PanelController {
     let state: PanelState
     private let model: AppModel
     private var panel: FloatingPanel?
+    private var quickLook: FloatingPanel?
     private var didWarmWithHistory = false
-    private var escapeMonitor: Any?
+    private var monitors: [Any] = []
+    /// Where the strip is while showing (its frame may still be sliding into place).
+    private var shownFrame: CGRect = .zero
 
     init(model: AppModel) {
         self.model = model
         state = PanelState(model: model)
+        state.onCardsFocusChange = { [weak self] focused in
+            // No blinking caret in the search while the cards have the keyboard.
+            (self?.panel?.firstResponder as? NSTextView)?.insertionPointColor = focused ? .clear : .controlTextColor
+        }
         model.onHistoryChange = { [weak self] in
             guard let self else { return }
             if self.isShowing {
@@ -138,24 +161,41 @@ final class PanelController {
     /// invisible and off-screen, so `isVisible` isn't the answer.)
     private(set) var isShowing = false
 
+    private var actions: PanelActions {
+        PanelActions(
+            choose: { [weak self] clip, plain in self?.choose(clip, plain: plain) },
+            copy: { [weak self] clip in self?.copy(clip) },
+            togglePin: { [weak self] clip in self?.model.togglePin(clip) },
+            delete: { [weak self] clip in self?.delete(clip) },
+            preview: { [weak self] clip in
+                self?.state.selectedID = clip.id
+                self?.setQuickLook(open: true)
+            },
+            open: { [weak self] clip in self?.open(clip) },
+            reveal: { [weak self] clip in self?.reveal(clip) },
+            dismiss: { [weak self] in self?.dismiss() }
+        )
+    }
+
     private func makePanel() -> FloatingPanel {
-        let panel = FloatingPanel(cornerRadius: 18) { [state, model] in
-            PanelView(state: state, model: model, actions: PanelActions(
-                choose: { [weak self] clip, plain in self?.choose(clip, plain: plain) },
-                copy: { [weak self] clip in self?.copy(clip) },
-                togglePin: { [weak self] clip in self?.model.togglePin(clip) },
-                delete: { [weak self] clip in self?.delete(clip) },
-                dismiss: { [weak self] in self?.dismiss() }
-            ))
+        let panel = FloatingPanel(cornerRadius: PanelMetrics.cornerRadius) { [state, model, actions] in
+            PanelView(state: state, model: model, actions: actions)
         }
         panel.keyHandler = { [weak self] event in
             // A parked (closed) panel must never act on keys.
             guard let self, self.isShowing else { return false }
             return self.handleKey(event)
         }
+        // Clicking another app closes the strip, but clicking the preview above it must not:
+        // so the panel doesn't close itself on losing key status; this decides.
+        panel.dismissesOnResignKey = false
+        let center = NotificationCenter.default
+        center.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.panelDidResignKey() }
+        }
         // AppKit may hand key status to the parked panel when another of our windows or an
         // alert closes. It's invisible then, so it would swallow keys: take it off screen.
-        NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main) { [weak self] _ in
+        center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, !self.isShowing else { return }
                 self.panel?.orderOut(nil)
@@ -165,10 +205,24 @@ final class PanelController {
         panel.onDismiss = { [weak self] in self?.didDismiss() }
         panel.setAccessibilityLabel("Clips")
         panel.animationBehavior = .none
-        // The panel handles Tab itself; recomputing the key-view loop for every new table row
+        // The panel handles Tab itself; recomputing the key-view loop for every new card
         // is expensive and pointless here.
         panel.autorecalculatesKeyViewLoop = false
         return panel
+    }
+
+    private func panelDidResignKey() {
+        guard isShowing else { return }
+        // Let AppKit settle who's key now (a click on the preview, an open menu…).
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isShowing, let panel = self.panel, !panel.isKeyWindow else { return }
+            if let quickLook = self.quickLook, quickLook.isKeyWindow {
+                panel.makeKey()
+                return
+            }
+            Diagnostics.record("panel lost key; closing (key window: \(NSApp.keyWindow.map { String(describing: type(of: $0)) } ?? "none"))")
+            self.dismiss()
+        }
     }
 
     /// Builds and draws the panel once, then parks it.
@@ -181,35 +235,81 @@ final class PanelController {
         panel.displayIfNeeded()
         // The search field's editor is otherwise created on the first real show.
         _ = panel.fieldEditor(true, for: nil)
+        warmAppColors()
+    }
+
+    /// Loads the icon and header colour of every app in the history now, while nobody is
+    /// waiting: done on the first search instead, a dozen cold icon loads cost ~50 ms.
+    private func warmAppColors() {
+        guard model.isLoaded else { return }
+        var seen = Set<String>()
+        for clip in model.history.clips {
+            guard let id = clip.sourceBundleID, seen.insert(id).inserted else { continue }
+            _ = AppTint.color(for: id)
+            if seen.count >= 64 { break }
+        }
+    }
+
+    /// The strip's frame on a screen: the full width of the usable area, at the bottom.
+    private func stripFrame(on screen: NSScreen?) -> CGRect {
+        let visible = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let margin = PanelMetrics.margin
+        return CGRect(x: visible.minX + margin, y: visible.minY + margin,
+                      width: visible.width - margin * 2, height: PanelMetrics.height)
     }
 
     /// Ordering a window in costs ~40 ms (window server + SwiftUI appearance work), more than
     /// the whole show budget. So between uses the panel stays ordered in: fully transparent,
-    /// ignoring the mouse, far off-screen. Showing it is then a move.
+    /// ignoring the mouse, far off-screen. It parks narrow, because a screen-wide window
+    /// keeps a screen-wide backing store (11 MB on a 5K display); widening it on show costs
+    /// a few milliseconds of layout.
     private func park(_ panel: FloatingPanel) {
         panel.alphaValue = 0
         panel.ignoresMouseEvents = true
-        panel.setFrame(NSRect(origin: CGPoint(x: -20_000, y: -20_000), size: PanelMetrics.size), display: false)
+        let size = CGSize(width: PanelMetrics.parkedWidth, height: PanelMetrics.height)
+        panel.setFrame(NSRect(origin: CGPoint(x: -20_000, y: -20_000), size: size), display: false)
         panel.orderFrontRegardless()
     }
 
-    /// Esc clears a search first and only then closes. FloatingPanel closes on Esc before
-    /// the panel's key handler runs, so this uses an app-level monitor, which runs earlier.
-    private func watchEscape() {
-        guard escapeMonitor == nil else { return }
-        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.keyCode == 53, self.isShowing, self.panel?.isKeyWindow == true,
-                  !self.state.query.isEmpty else { return event }
+    /// Key presses AppKit would otherwise send straight to the search field: Esc (clears a
+    /// search or closes the preview first; FloatingPanel closes on Esc before its key handler
+    /// runs) and ⌘ held down (shows the cards' numbers).
+    private func startMonitors() {
+        guard monitors.isEmpty else { return }
+        if let escape = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard let self, event.keyCode == 53, self.isShowing, self.panel?.isKeyWindow == true else { return event }
             if let editor = self.panel?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
+            if self.state.quickLookOpen {
+                self.setQuickLook(open: false)
+                return nil
+            }
+            guard !self.state.query.isEmpty else { return event }
             self.state.query = ""
             return nil
+        }) {
+            monitors.append(escape)
+        }
+        if let flags = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { [weak self] event in
+            guard let self, self.isShowing else { return event }
+            let held = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.shift, .capsLock, .function, .numericPad]) == .command
+            if self.state.commandHeld != held { self.state.commandHeld = held }
+            return event
+        }) {
+            monitors.append(flags)
         }
     }
 
+    private func stopMonitors() {
+        for monitor in monitors { NSEvent.removeMonitor(monitor) }
+        monitors.removeAll()
+    }
+
     private func didDismiss() {
+        Diagnostics.record("panel closed")
         isShowing = false
-        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
-        escapeMonitor = nil
+        stopMonitors()
+        setQuickLook(open: false)
+        if backdrop != nil { testSetBackdrop(false) }
         guard let panel else { return }
         // Get the next show ready while nobody is waiting (after a paste has gone out):
         // clear the search, re-park.
@@ -219,6 +319,7 @@ final class PanelController {
             self.park(panel)
             panel.contentView?.layoutSubtreeIfNeeded()
             panel.displayIfNeeded()
+            ImageCache.shared.trim()
             Memory.relieveSoon()
         }
     }
@@ -227,7 +328,9 @@ final class PanelController {
         if isShowing { dismiss() } else { show(trigger: trigger) }
     }
 
-    func show(trigger: TimeInterval = Diagnostics.now()) {
+    /// `takesKeyboard: false` is for test hooks only: the strip shows without becoming key,
+    /// so a person typing elsewhere is never interrupted by a scripted screenshot.
+    func show(trigger: TimeInterval = Diagnostics.now(), takesKeyboard: Bool = true) {
         guard !isShowing else { return }
         let panel = self.panel ?? makePanel()
         self.panel = panel
@@ -238,18 +341,31 @@ final class PanelController {
         panel.sharingType = model.windowSharingType
         state.prepareForShow(target: target)
         let prepared = Diagnostics.now()
-        // Fixed size, so place it directly (FloatingPanel.show(at:) measures the content first).
+        // The screen the user is working on: where the mouse is.
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
-        let visible = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-        panel.setFrame(PanelPlacement.center.frame(size: PanelMetrics.size, mouse: mouse, visibleFrame: visible), display: false)
+        let frame = stripFrame(on: screen)
+        shownFrame = frame
+        let slides = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        panel.setFrame(slides ? frame.offsetBy(dx: 0, dy: -18) : frame, display: false)
         if !panel.isVisible { panel.orderFrontRegardless() }
         panel.ignoresMouseEvents = false
-        panel.alphaValue = 1
         isShowing = true
-        watchEscape()
-        panel.makeKey()
-        panel.displayIfNeeded()
+        startMonitors()
+        if takesKeyboard { panel.makeKey() }
+        if slides {
+            panel.alphaValue = 0
+            panel.displayIfNeeded()
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.14
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().setFrame(frame, display: true)
+                panel.animator().alphaValue = 1
+            }
+        } else {
+            panel.alphaValue = 1
+            panel.displayIfNeeded()
+        }
         Diagnostics.record("panel shown clips=\(model.history.clips.count) ms=\(Diagnostics.milliseconds(since: trigger)) prepare=\(String(format: "%.1f", (prepared - trigger) * 1000))")
         // Pick up a copy made in the last half second.
         model.watcher.check()
@@ -258,6 +374,91 @@ final class PanelController {
     func dismiss() {
         guard isShowing else { return }
         panel?.dismiss()
+    }
+
+    // MARK: - Test hooks (CLIPS_TEST_HOOKS=1)
+
+    func testSetQuickLook(_ open: Bool) { setQuickLook(open: open) }
+
+    func testTogglePinSelected() {
+        if let clip = state.selected { model.togglePin(clip) }
+    }
+
+    func testDeleteSelected() {
+        if let clip = state.selected { delete(clip) }
+    }
+
+    private var backdrop: NSWindow?
+
+    /// A plain window of our own behind the strip and the preview, so a screenshot of that
+    /// rectangle shows the glass composited over something real, and nothing of anyone else's.
+    func testSetBackdrop(_ on: Bool) {
+        backdrop?.orderOut(nil)
+        backdrop = nil
+        guard on, let panel, isShowing else { return }
+        let strip = shownFrame
+        let height = strip.height + QuickLookMetrics.gap + QuickLookMetrics.size.height + PanelMetrics.margin * 2
+        let frame = CGRect(x: strip.minX - PanelMetrics.margin, y: strip.minY - PanelMetrics.margin,
+                           width: strip.width + PanelMetrics.margin * 2, height: height)
+        let window = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.backgroundColor = .windowBackgroundColor
+        // CLIPS_TEST_BACKDROP=/path/image: a wallpaper-like picture, so the glass reads.
+        if let path = ProcessInfo.processInfo.environment["CLIPS_TEST_BACKDROP"], let image = NSImage(contentsOfFile: path) {
+            let view = NSImageView(image: image)
+            view.imageScaling = .scaleAxesIndependently
+            window.contentView = view
+        }
+        window.level = panel.level
+        window.ignoresMouseEvents = true
+        window.sharingType = .readOnly
+        window.order(.below, relativeTo: panel.windowNumber)
+        backdrop = window
+    }
+
+    // MARK: - Quick Look
+
+    private func setQuickLook(open: Bool) {
+        if open {
+            guard isShowing, state.selected != nil, let panel else { return }
+            let preview = quickLook ?? makeQuickLook()
+            quickLook = preview
+            preview.sharingType = model.windowSharingType
+            let strip = shownFrame
+            let screen = NSScreen.screens.first { $0.frame.intersects(strip) } ?? NSScreen.main
+            let visible = screen?.visibleFrame ?? strip
+            let size = QuickLookMetrics.size
+            let y = min(strip.maxY + QuickLookMetrics.gap, visible.maxY - size.height)
+            let frame = CGRect(x: strip.midX - size.width / 2, y: max(y, visible.minY), width: size.width, height: size.height)
+            preview.setFrame(frame, display: false)
+            if preview.parent == nil { panel.addChildWindow(preview, ordered: .above) }
+            preview.orderFrontRegardless()
+            if !state.quickLookOpen { state.quickLookOpen = true }
+        } else {
+            if let quickLook {
+                quickLook.parent?.removeChildWindow(quickLook)
+                quickLook.orderOut(nil)
+            }
+            if state.quickLookOpen { state.quickLookOpen = false }
+        }
+    }
+
+    private func makeQuickLook() -> FloatingPanel {
+        let preview = FloatingPanel(cornerRadius: PanelMetrics.cornerRadius) { [state] in
+            QuickLookView(state: state)
+        }
+        // Scrolling the preview doesn't need key status, so the strip keeps the keyboard.
+        preview.becomesKeyOnlyIfNeeded = true
+        preview.dismissesOnResignKey = false
+        preview.animationBehavior = .none
+        preview.setAccessibilityLabel("Clip Preview")
+        preview.keyHandler = { [weak self] event in
+            // If a click made the preview key, keys still drive the strip.
+            guard let self, self.isShowing else { return false }
+            self.panel?.makeKey()
+            return self.handleKey(event)
+        }
+        return preview
     }
 
     // MARK: - Actions
@@ -271,6 +472,29 @@ final class PanelController {
     private func copy(_ clip: Clip) {
         dismiss()
         model.use(clip, .copy)
+    }
+
+    private func open(_ clip: Clip) {
+        let url: URL?
+        switch clip.kind {
+        case .link:
+            let text = clip.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            url = URL(string: text.lowercased().hasPrefix("www.") ? "https://" + text : text)
+        case .file:
+            url = clip.filePaths.first.map { URL(fileURLWithPath: $0) }
+        default:
+            url = nil
+        }
+        guard let url else { return }
+        dismiss()
+        NSWorkspace.shared.open(url)
+    }
+
+    private func reveal(_ clip: Clip) {
+        let urls = clip.filePaths.map { URL(fileURLWithPath: $0) }
+        guard !urls.isEmpty else { return }
+        dismiss()
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
     }
 
     /// Pinned clips take a second ⌘⌫ (within a few seconds) so a favourite isn't lost to a
@@ -290,83 +514,78 @@ final class PanelController {
         state.refresh()
         if !state.results.isEmpty {
             state.select(index: min(index, state.results.count - 1))
+        } else {
+            setQuickLook(open: false)
         }
     }
 
     // MARK: - Keyboard
 
-    /// Key codes for 1–9 on the number row and the keypad.
-    private static let digitKeys: [UInt16: Int] = [
-        18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9,
-        83: 1, 84: 2, 85: 3, 86: 4, 87: 5, 88: 6, 89: 7, 91: 8, 92: 9,
-    ]
-
     private func handleKey(_ event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-        let command = flags.contains(.command)
         // Let input methods (Japanese, Chinese…) finish composing before we take Return/arrows.
-        if let editor = panel?.firstResponder as? NSTextView, editor.hasMarkedText() { return false }
-
-        if command, let number = Self.digitKeys[event.keyCode] {
-            guard state.results.indices.contains(number - 1) else { return true }
-            choose(state.results[number - 1], plain: flags.contains(.shift))
-            return true
-        }
-        switch event.keyCode {
-        case 36, 76: // Return, Enter
-            if let clip = state.selected { choose(clip, plain: flags.contains(.shift)) }
-            return true
-        case 125: // ↓
-            command ? state.moveSelection(by: .max / 2) : state.moveSelection(by: 1)
-            return true
-        case 126: // ↑
-            command ? state.moveSelection(by: -.max / 2) : state.moveSelection(by: -1)
-            return true
-        case 121: state.moveSelection(by: 10); return true // Page Down
-        case 116: state.moveSelection(by: -10); return true // Page Up
-        case 48: // Tab / ⇧Tab
-            state.cycleFilter(by: flags.contains(.shift) ? -1 : 1)
-            return true
-        default:
-            break
-        }
-        guard command else { return false }
-        switch event.charactersIgnoringModifiers?.lowercased() {
-        case "c":
-            // Copy the search text if some of it is selected; otherwise copy the clip.
-            if let editor = panel?.firstResponder as? NSTextView, editor.selectedRange().length > 0 { return false }
+        let editor = panel?.firstResponder as? NSTextView
+        if let editor, editor.hasMarkedText() { return false }
+        let flags = event.modifierFlags
+        var modifiers: PanelKeys.Modifiers = []
+        if flags.contains(.command) { modifiers.insert(.command) }
+        if flags.contains(.shift) { modifiers.insert(.shift) }
+        if flags.contains(.option) { modifiers.insert(.option) }
+        if flags.contains(.control) { modifiers.insert(.control) }
+        let context = PanelKeys.Context(queryIsEmpty: state.query.isEmpty, cardsFocused: state.cardsFocused,
+                                        quickLookOpen: state.quickLookOpen,
+                                        searchHasSelection: (editor?.selectedRange().length ?? 0) > 0)
+        guard let command = PanelKeys.command(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers,
+                                              modifiers: modifiers, context: context) else { return false }
+        switch command {
+        case .choose(let plain):
+            if let clip = state.selected { choose(clip, plain: plain) }
+        case .quickPaste(let index, let plain):
+            if state.results.indices.contains(index) { choose(state.results[index], plain: plain) }
+        case .move(let delta):
+            state.moveSelection(by: delta)
+        case .first:
+            state.select(index: 0)
+        case .last:
+            state.select(index: state.results.count - 1)
+        case .pageBack:
+            state.moveSelection(by: -state.pageSize)
+        case .pageForward:
+            state.moveSelection(by: state.pageSize)
+        case .previousTab:
+            state.cycleFilter(by: -1)
+        case .nextTab:
+            state.cycleFilter(by: 1)
+        case .toggleFocus:
+            state.cardsFocused.toggle()
+        case .quickLook:
+            setQuickLook(open: !state.quickLookOpen)
+        case .copy:
             if let clip = state.selected { copy(clip) }
-            return true
-        case "p":
+        case .togglePin:
             if let clip = state.selected { model.togglePin(clip) }
-            return true
-        case "z" where flags.subtracting(.shift) == .command && event.charactersIgnoringModifiers == "z":
-            if model.canUndoDelete {
-                let restored = model.undoDelete()
-                state.refresh()
-                if let first = restored.first { state.selectedID = first.id }
-                return true
-            }
-            return false
-        case "w":
+        case .open:
+            if let clip = state.selected { open(clip) }
+        case .delete:
+            if let clip = state.selected { delete(clip) }
+        case .undo:
+            guard model.canUndoDelete else { return false }
+            let restored = model.undoDelete()
+            state.refresh()
+            if let first = restored.first { state.selectedID = first.id }
+        case .togglePause:
+            if model.isPaused { model.resume() } else { model.pause(for: nil) }
+        case .focusSearch:
+            state.cardsFocused = false
+        case .close:
             dismiss()
-            return true
-        case "y":
+        case .openHistory:
             dismiss()
             HistoryOpener.open()
-            return true
-        case ",":
+        case .openSettings:
             dismiss()
             SettingsOpener.open()
-            return true
-        default:
-            break
         }
-        if event.keyCode == 51 || event.keyCode == 117 { // ⌘⌫, ⌘⌦
-            if let clip = state.selected { delete(clip) }
-            return true
-        }
-        return false
+        return true
     }
 }
 
@@ -376,8 +595,9 @@ enum SettingsOpener {
     /// Set by a view that has SwiftUI's `openSettings` action.
     static var action: (() -> Void)?
 
-    static func open() {
-        NSApp.activate()
+    /// `activate: false` is for test hooks (opens it behind whatever is in front).
+    static func open(activate: Bool = true) {
+        if activate { NSApp.activate() }
         if let action {
             action()
         } else {
@@ -385,7 +605,7 @@ enum SettingsOpener {
             // responder chain instead.
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         }
-        SettingsWindow.bringToFront()
+        if activate { SettingsWindow.bringToFront() }
     }
 }
 

@@ -64,6 +64,37 @@ final class ImageCache {
         return image
     }
 
+    private var cardImages: [UUID: CGImage] = [:]
+    private var cardOrder: [UUID] = []
+    /// Sharp enough for a card at 2×, small enough that two dozen stay cheap.
+    static let cardPixelSize = 480
+    static let cardCacheLimit = 24
+
+    func cachedCardImage(for id: UUID) -> CGImage? { cardImages[id] }
+
+    /// A card-sized image decoded from the clip's payload, off the main thread.
+    func cardImage(for clip: Clip) async -> CGImage? {
+        if let cached = cardImages[clip.id] { return cached }
+        guard let payload = await AppModel.shared.payload(for: clip.id),
+              let data = payload.items.first?.first?.data else { return nil }
+        let size = Self.cardPixelSize
+        let image = await Task.detached(priority: .userInitiated) {
+            ImageInfo.thumbnail(of: data, maxPixelSize: size)
+        }.value
+        guard let image else { return nil }
+        if cardImages[clip.id] == nil { cardOrder.append(clip.id) }
+        cardImages[clip.id] = image
+        while cardOrder.count > Self.cardCacheLimit { cardImages[cardOrder.removeFirst()] = nil }
+        return image
+    }
+
+    /// Lets go of most decoded images (the panel closed).
+    func trim() {
+        while cardOrder.count > 6 { cardImages[cardOrder.removeFirst()] = nil }
+        previews.removeAll()
+        previewOrder.removeAll()
+    }
+
     func cachedPreview(for id: UUID) -> NSImage? { previews[id] }
 
     func preview(for clip: Clip) async -> NSImage? {

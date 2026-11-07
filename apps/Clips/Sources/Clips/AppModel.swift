@@ -47,6 +47,29 @@ final class AppModel {
         hideFromScreenSharing && !Diagnostics.allowCapture ? .none : .readOnly
     }
 
+    /// A short sound when Clips pastes or copies a clip for you (on by default).
+    var playsPasteSound: Bool {
+        didSet {
+            defaults.set(playsPasteSound, forKey: Keys.playsPasteSound)
+            chime.playsPasteSound = playsPasteSound
+        }
+    }
+
+    /// A short sound when a copy is recorded (on by default).
+    var playsCopySound: Bool {
+        didSet {
+            defaults.set(playsCopySound, forKey: Keys.playsCopySound)
+            chime.isEnabled = playsCopySound
+        }
+    }
+
+    var copySound: CopySound {
+        didSet {
+            defaults.set(copySound.rawValue, forKey: Keys.copySound)
+            chime.sound = copySound
+        }
+    }
+
     var ignoredApps: [IgnoredApp] {
         didSet { defaults.set(IgnoredApp.encode(ignoredApps), forKey: Keys.ignoredApps) }
     }
@@ -71,6 +94,8 @@ final class AppModel {
     let watcher: ClipboardWatcher
     @ObservationIgnored private var database: ClipDatabase?
     @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored let chime: CopyChime
+    @ObservationIgnored let soundPlayer = SystemSoundPlayer()
     @ObservationIgnored private var pauseTimer: Timer?
     @ObservationIgnored private var undoStack: [DeletedClips] = [] {
         didSet { undoableDeletes = undoStack.count }
@@ -89,6 +114,9 @@ final class AppModel {
         static let ignoredApps = "ignoredApps"
         static let hideFromScreenSharing = "hideFromScreenSharing"
         static let pausedUntil = "pausedUntil"
+        static let playsCopySound = "playsCopySound"
+        static let copySound = "copySound"
+        static let playsPasteSound = "playsPasteSound"
     }
 
     private init() {
@@ -97,6 +125,16 @@ final class AppModel {
         alwaysPlainText = defaults.bool(forKey: Keys.alwaysPlainText)
         hideFromScreenSharing = defaults.object(forKey: Keys.hideFromScreenSharing) as? Bool ?? true
         ignoredApps = IgnoredApp.decode(defaults.data(forKey: Keys.ignoredApps))
+        let playsSound = defaults.object(forKey: Keys.playsCopySound) as? Bool ?? true
+        // No saved choice gets Clips' own Snap; a saved "Pop" (or another) is kept.
+        let sound = CopySound.saved(defaults.string(forKey: Keys.copySound))
+        let playsPaste = defaults.object(forKey: Keys.playsPasteSound) as? Bool ?? true
+        // Assigning in init doesn't run didSet, so nothing is written back.
+        playsCopySound = playsSound
+        copySound = sound
+        playsPasteSound = playsPaste
+        chime = CopyChime(player: soundPlayer, isEnabled: playsSound, playsPasteSound: playsPaste, sound: sound,
+                          systemSoundsEnabled: { SystemSoundPlayer.userInterfaceSoundsEnabled })
         let paused = defaults.double(forKey: Keys.pausedUntil)
         pausedUntil = paused > 0 ? Date(timeIntervalSinceReferenceDate: paused) : nil
         pasteboard = SystemPasteboard(name: Diagnostics.pasteboardName)
@@ -211,6 +249,9 @@ final class AppModel {
         if let database {
             Task { try? await database.save(saved, payload: payload, thumbnail: thumbnail) }
         }
+        // Only copies that were really recorded get here: skipped, ignored and concealed
+        // content returns earlier, and Clips' own pastes never count as a change.
+        if chime.copyRecorded() { Diagnostics.record("copy sound played sound=\(copySound.rawValue)") }
         prune()
         changed()
     }
@@ -290,12 +331,15 @@ final class AppModel {
                 // Give the target app a moment to take key focus back from the panel.
                 try? await Task.sleep(for: .milliseconds(60))
                 Paster.sendPaste()
+                clipDelivered()
                 Diagnostics.record("pasted kind=\(clip.kind) plain=\(plain)")
             case .paste:
+                clipDelivered()
                 HUD.show(hasAccessibility || !pasteDirectly ? "Copied. Press ⌘V to paste." : "Copied. Allow Accessibility to paste directly.",
                          systemImage: "doc.on.clipboard")
                 Diagnostics.record("copied kind=\(clip.kind) plain=\(plain) reason=noDirectPaste")
             case .copy:
+                clipDelivered()
                 HUD.show("Copied", systemImage: "doc.on.doc")
                 Diagnostics.record("copied kind=\(clip.kind) plain=\(plain)")
             }
@@ -306,7 +350,14 @@ final class AppModel {
     func copyText(_ text: String) {
         let payload = ClipPayload(items: [[Representation(type: PasteboardType.string, data: Data(text.utf8))]])
         watcher.noteOwnWrite(changeCount: pasteboard.write(payload))
+        clipDelivered()
         HUD.show("Copied", systemImage: "doc.on.doc")
+    }
+
+    /// Clips pasted or copied a clip for you (or you dragged a card into an app): the paste
+    /// sound. Clips' own pasteboard write doesn't count as a copy, so no copy sound follows.
+    func clipDelivered() {
+        if chime.clipUsed() { Diagnostics.record("paste sound played") }
     }
 
     func togglePin(_ clip: Clip) {

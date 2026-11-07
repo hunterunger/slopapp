@@ -65,6 +65,7 @@ public struct History: Sendable {
             existing.useCount += 1
             existing.sourceBundleID = clip.sourceBundleID ?? existing.sourceBundleID
             existing.sourceName = clip.sourceName ?? existing.sourceName
+            existing.title = clip.title ?? existing.title
             existing.hasRichText = clip.hasRichText
             existing.byteCount = clip.byteCount
             existing.rebuildSearchKey()

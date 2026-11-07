@@ -72,11 +72,11 @@ public enum ClipBuilder {
         now: Date, maxBytes: Int = 50_000_000
     ) -> Result<(Clip, ClipPayload), SkipReason> {
         func clip(_ kind: ClipKind, text: String, payload: ClipPayload, fingerprint: String,
-                  width: Int = 0, height: Int = 0, rich: Bool = false) -> Result<(Clip, ClipPayload), SkipReason> {
+                  width: Int = 0, height: Int = 0, rich: Bool = false, title: String? = nil) -> Result<(Clip, ClipPayload), SkipReason> {
             guard payload.byteCount <= maxBytes else { return .failure(.tooLarge) }
             let clip = Clip(kind: kind, text: text, imageWidth: width, imageHeight: height,
                             byteCount: payload.byteCount, hasRichText: rich,
-                            sourceBundleID: sourceBundleID, sourceName: sourceName,
+                            sourceBundleID: sourceBundleID, sourceName: sourceName, title: title,
                             created: now, fingerprint: fingerprint)
             return .success((clip, payload))
         }
@@ -106,16 +106,17 @@ public enum ClipBuilder {
             if !trimmed.isEmpty {
                 var reps = [Representation(type: PasteboardType.string, data: Data(text.utf8))]
                 var rich = false
-                for type in PasteboardType.richTextTypes + [PasteboardType.url] {
+                for type in PasteboardType.richTextTypes + [PasteboardType.url, PasteboardType.urlName] {
                     if let rep = item.first(where: { $0.type == type }), rep.data.count <= richTextLimit {
                         reps.append(rep)
-                        if type != PasteboardType.url { rich = true }
+                        if PasteboardType.richTextTypes.contains(type) { rich = true }
                     }
                 }
                 let kind: ClipKind = LinkDetector.isLink(trimmed) ? .link
                     : (ColorValue(hex: trimmed) != nil ? .color : .text)
+                let title = kind == .link ? LinkTitle.from(item: item, url: trimmed) : nil
                 return clip(kind, text: text, payload: ClipPayload(items: [reps]),
-                            fingerprint: "text:" + digest(Data(text.utf8)), rich: rich)
+                            fingerprint: "text:" + digest(Data(text.utf8)), rich: rich, title: title)
             }
         }
 
@@ -133,6 +134,50 @@ public enum ClipBuilder {
 
     static func digest(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// A link's title, from what the copying app put next to it. Never fetched.
+public enum LinkTitle {
+    /// `public.url-name` (Safari, Mail…), else the text of a single `<a>` in the HTML (a
+    /// link copied from a web page). Nil when there's nothing better than the URL itself.
+    public static func from(item: [Representation], url: String) -> String? {
+        if let data = item.first(where: { $0.type == PasteboardType.urlName })?.data,
+           let title = clean(String(decoding: data, as: UTF8.self), url: url) {
+            return title
+        }
+        if let data = item.first(where: { $0.type == PasteboardType.html })?.data, data.count <= 8_000 {
+            return anchorText(String(decoding: data, as: UTF8.self), url: url)
+        }
+        return nil
+    }
+
+    /// The text inside the only `<a …>…</a>` of a small HTML fragment.
+    static func anchorText(_ html: String, url: String) -> String? {
+        let lower = html.lowercased()
+        guard let open = lower.range(of: "<a "), lower.range(of: "<a ", range: open.upperBound..<lower.endIndex) == nil,
+              let close = lower.range(of: "</a>", range: open.upperBound..<lower.endIndex),
+              let tagEnd = lower.range(of: ">", range: open.upperBound..<close.lowerBound) else { return nil }
+        let inner = String(html[tagEnd.upperBound..<close.lowerBound])
+        return clean(stripTags(inner), url: url)
+    }
+
+    static func stripTags(_ html: String) -> String {
+        var result = ""
+        var inTag = false
+        for character in html {
+            if character == "<" { inTag = true } else if character == ">" { inTag = false } else if !inTag { result.append(character) }
+        }
+        return result
+            .replacingOccurrences(of: "&amp;", with: "&").replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">").replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'").replacingOccurrences(of: "&nbsp;", with: " ")
+    }
+
+    private static func clean(_ raw: String, url: String) -> String? {
+        let title = ClipText.oneLine(raw, limit: 300)
+        guard !title.isEmpty, title != url, !LinkDetector.isLink(title) else { return nil }
+        return title
     }
 }
 

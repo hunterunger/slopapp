@@ -12,8 +12,14 @@ import QuartzCore
 /// - `CLIPS_APPEARANCE=light|dark`: force an appearance (screenshots).
 /// - `CLIPS_SHOW_PANEL=1`: open the panel right after launch (scripted tests).
 /// - `CLIPS_TEST_HOOKS=1`: listen for the distributed notifications
-///   `app.slopapp.clips.test.show`, `.hide` and `.search` (object = query) so scripts can
-///   time the panel without Accessibility or synthetic keys.
+///   `app.slopapp.clips.test.show` (object "passive": without taking the keyboard), `.hide`,
+///   `.search` (object = query), `.numbers` (object "1" shows the ⌘-number badges as if ⌘
+///   were held), `.select` (card index), `.preview` ("1"/"0"), `.tab` (tab index) and `.do`
+///   ("pause", "resume", "pin", "delete", "cards", "search", "history", "settings",
+///   "backdrop", "nobackdrop") so scripts can time and
+///   screenshot the panel without Accessibility or synthetic keys.
+/// - `CLIPS_NO_HOTKEY=1`: don't register the global shortcut, so a test copy can run beside
+///   someone's real Clips without taking ⇧⌥V from it.
 /// - `CLIPS_ALLOW_CAPTURE=1`: let screenshots see the panel even when "Hide from screen
 ///   sharing" is on (scripted tests and blind testers need screenshots).
 enum Diagnostics {
@@ -27,6 +33,7 @@ enum Diagnostics {
     static let showPanelAtLaunch = environment["CLIPS_SHOW_PANEL"] == "1"
     static let allowCapture = environment["CLIPS_ALLOW_CAPTURE"] == "1"
     static let testHooks = environment["CLIPS_TEST_HOOKS"] == "1"
+    static let noHotkey = environment["CLIPS_NO_HOTKEY"] == "1"
     private static let logFile = environment["CLIPS_LOG"].map { URL(fileURLWithPath: $0) }
 
     static var isLogging: Bool { logFile != nil }

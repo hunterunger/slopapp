@@ -69,6 +69,9 @@ public struct Clip: Identifiable, Sendable, Equatable {
     public var hasRichText: Bool
     public var sourceBundleID: String?
     public var sourceName: String?
+    /// A link's page title, when the copying app provided one (Safari's "Copy Link", a link
+    /// copied from a web page). Never fetched from the network.
+    public var title: String?
     public var created: Date
     public var lastUsed: Date
     public var useCount: Int
@@ -83,7 +86,7 @@ public struct Clip: Identifiable, Sendable, Equatable {
     public init(
         id: UUID = UUID(), kind: ClipKind, text: String, textLength: Int? = nil, longText: String? = nil,
         imageWidth: Int = 0, imageHeight: Int = 0, byteCount: Int = 0, hasRichText: Bool = false,
-        sourceBundleID: String? = nil, sourceName: String? = nil,
+        sourceBundleID: String? = nil, sourceName: String? = nil, title: String? = nil,
         created: Date, lastUsed: Date? = nil, useCount: Int = 1, isPinned: Bool = false,
         fingerprint: String
     ) {
@@ -104,6 +107,7 @@ public struct Clip: Identifiable, Sendable, Equatable {
         self.hasRichText = hasRichText
         self.sourceBundleID = sourceBundleID
         self.sourceName = sourceName
+        self.title = title
         self.created = created
         self.lastUsed = lastUsed ?? created
         self.useCount = useCount
@@ -129,6 +133,7 @@ public struct Clip: Identifiable, Sendable, Equatable {
     mutating func rebuildSearchKey() {
         var key = longText ?? text
         if kind == .image { key = "image" }
+        if let title { key += "\n" + title }
         if let sourceName { key += "\n" + sourceName }
         searchKey = Array(SearchText.fold(key).utf8)
     }
@@ -138,7 +143,7 @@ public struct Clip: Identifiable, Sendable, Equatable {
             && lhs.textLength == rhs.textLength && lhs.imageWidth == rhs.imageWidth
             && lhs.imageHeight == rhs.imageHeight && lhs.byteCount == rhs.byteCount
             && lhs.hasRichText == rhs.hasRichText && lhs.sourceBundleID == rhs.sourceBundleID
-            && lhs.sourceName == rhs.sourceName && lhs.created == rhs.created
+            && lhs.sourceName == rhs.sourceName && lhs.title == rhs.title && lhs.created == rhs.created
             && lhs.lastUsed == rhs.lastUsed && lhs.useCount == rhs.useCount
             && lhs.isPinned == rhs.isPinned && lhs.fingerprint == rhs.fingerprint
     }

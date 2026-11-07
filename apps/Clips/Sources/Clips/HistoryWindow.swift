@@ -203,7 +203,9 @@ struct HistoryWindow: View {
                     }
                     .controlSize(.small)
                 }
-                .padding(Spacing.m)
+                // Same leading edge as the clip's content above (Spacing.l).
+                .padding(.horizontal, Spacing.l)
+                .padding(.vertical, Spacing.m)
             }
         } else if clips.count > 1 {
             ContentUnavailableView {

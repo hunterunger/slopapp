@@ -10,17 +10,25 @@ An open alternative to Paste.
 ## What it does
 
 Clips remembers what you copy: text (with its formatting), links, colors, images and
-files. Press **⇧⌥V** in any app and a search panel opens over it. Type a few letters,
-press **Return**, and the clip is pasted into the app you were using.
+files. Press **⇧⌥V** in any app and a strip of cards slides up along the bottom of the
+screen, newest on the left. Type a few letters, press **Return**, and the clip is pasted
+into the app you were using. A soft "snap" tells you each copy was saved, and a quiet "tock" when Clips pastes one for
+you. Both are Clips' own sounds, made in code. Settings › General turns either off or picks
+a macOS sound for copies instead. Both stay quiet when macOS sound effects are off.
 
-- **Search** matches every word you type, ignoring case and accents, and bolds the matches.
-  It looks through the first million characters of every clip; when a match is further in
-  than the row can show, the row shows the words around it. **Tab** switches
-  between All, Pinned, Text, Links, Images and Files.
+- **Cards** show what kind of clip it is, which app it came from and when, over a big
+  preview: the text itself, the image, a link with its page title (when the app you copied
+  from provided one; Clips never fetches anything), a color swatch, or the file.
+- **Search** matches every word you type, ignoring case and accents, and highlights the
+  matches. It looks through the first million characters of every clip; when a match is
+  further in than a card can show, the card shows the words around it.
+- **Tabs** next to the search: All, Pinned, Text, Links, Images and Files (⌘← ⌘→).
+- **Preview** (Space) opens the selected clip big, above the strip.
 - **Pin** clips you reuse (⌘P). Pinned clips are never removed automatically.
-- **History window** (⌘Y in the panel, Window › Clip History, or the menu bar icon):
-  browse by kind or by app, select several clips, copy or delete them.
-- **Pause** recording for 15 minutes, an hour, or until you resume, or skip just the
+- **Drag** a card into any app.
+- **History window** (⌘Y in the panel, the ⋯ menu, Window › Clip History, or the menu
+  bar icon): browse by kind or by app, select several clips, copy or delete them.
+- **Pause** recording (⌘T, or for 15 minutes or an hour from the menu), or skip just the
   next copy.
 
 ## Keyboard (in the panel)
@@ -28,16 +36,21 @@ press **Return**, and the clip is pasted into the app you were using.
 | Key | Action |
 |---|---|
 | ⇧⌥V | Open or close the panel (change it in Settings › Shortcuts) |
-| ↑ ↓, ⌘↑ ⌘↓ | Move the selection |
-| Return | Paste the selected clip (or copy it, see below) |
+| ← →, ↑ ↓ | Move the selection |
+| ⌘↑ ⌘↓, Home End | First or last clip |
+| Return / double-click | Paste the selected clip (or copy it, see below) |
 | ⇧Return | Paste as plain text |
-| ⌘1 – ⌘9 | Paste that row right away (⇧ for plain text) |
+| ⌘1 – ⌘9 | Paste that card right away (⇧ for plain text); hold ⌘ to see the numbers |
+| Space | Preview (while typing a search, press Tab first) |
+| Tab | Switch the keyboard between the search and the cards |
+| ⌘← ⌘→ | Previous or next tab |
 | ⌘C | Copy only |
+| ⌘O | Open a link or file |
 | ⌘P | Pin or unpin |
 | ⌘⌫ | Delete (⌘Z brings it back) |
-| Tab, ⇧Tab | Next or previous filter |
+| ⌘T | Pause or resume recording |
 | ⌘Y | Open the History window |
-| Esc | Clear the search, then close |
+| Esc | Close the preview, then clear the search, then close |
 
 Pinned clips take a second ⌘⌫ to delete. In the History window, ⌘F searches, Delete or
 ⌘⌫ deletes (asking first for several clips or pinned ones), ⌘C copies, and Edit › Undo
@@ -64,8 +77,9 @@ Pinned clips take a second ⌘⌫ to delete. In the History window, ⌘F searche
 
 ## Not there yet
 
-Drag clips out of the panel, Quick Look, text search inside images, a paste stack,
-editing a clip before pasting, named pinboards, and a switch for iPhone (Universal
+Named pinboards, renaming and editing clips, a paste stack, selecting several cards at
+once, search filters by app or date, text search inside images, formatted text on the
+cards (the preview shows it), a resizable strip, and a switch for iPhone (Universal
 Clipboard) copies.
 
 ## Develop
@@ -93,10 +107,12 @@ scripts/drive launch build/Clips.app \
 | `CLIPS_PASTEBOARD` | Watch and write a private named pasteboard instead of the clipboard |
 | `CLIPS_SEED=5000` | Fill an empty test history with synthetic clips (needs `CLIPS_DATA_DIR`) |
 | `CLIPS_ALLOW_CAPTURE=1` | Let screenshots see the panel |
+| `CLIPS_NO_HOTKEY=1` | Don't register the global shortcut (run a test copy beside a real one) |
+| `CLIPS_TEST_BACKDROP=/path` | Image for the test hook `do backdrop` (a wallpaper-like window behind the strip) |
 | `CLIPS_LOG=/path` | Log timings (never clipboard content) |
 | `CLIPS_APPEARANCE=light\|dark` | Force an appearance |
 | `CLIPS_SHOW_PANEL=1` | Open the panel at launch |
-| `CLIPS_TEST_HOOKS=1` | Accept `app.slopapp.clips.test.show/hide/search` distributed notifications |
+| `CLIPS_TEST_HOOKS=1` | Accept `app.slopapp.clips.test.show/hide/search/numbers/select/preview/tab/do` distributed notifications (`show` with object `passive` doesn't take the keyboard; see `Diagnostics.swift`) |
 
 Design follows [`docs/design-system.md`](../../docs/design-system.md). Research and build
 notes: [`docs/research/clips.md`](../../docs/research/clips.md).

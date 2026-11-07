@@ -39,8 +39,8 @@ final class ClipCellView: NSTableCellView {
         let iconSize: CGFloat = style == .compact ? 20 : 24
         icon.imageScaling = .scaleProportionallyUpOrDown
         swatch.wantsLayer = true
-        swatch.layer?.cornerRadius = 4
-        swatch.layer?.borderWidth = 1
+        swatch.layer?.cornerRadius = Radius.xs
+        swatch.layer?.borderWidth = 0.5
         title.lineBreakMode = .byTruncatingTail
         title.maximumNumberOfLines = 1
         title.usesSingleLineMode = true

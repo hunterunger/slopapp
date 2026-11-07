@@ -3,51 +3,6 @@ import ClipsCore
 import SlopKit
 import SwiftUI
 
-/// The selected clip, big enough to recognise, with where it came from and what you can do.
-struct ClipPreview: View {
-    let clip: Clip
-    let now: Date
-    /// "Paste" or "Copy", for the main button.
-    let pasteLabel: String
-    let actions: PanelActions
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ClipContentView(clip: clip)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            Divider()
-            HStack(spacing: Spacing.s) {
-                ClipSourceLine(clip: clip, now: now)
-                Spacer(minLength: Spacing.s)
-                Button {
-                    actions.togglePin(clip)
-                } label: {
-                    Image(systemName: clip.isPinned ? "pin.slash" : "pin")
-                }
-                .help(clip.isPinned ? "Unpin (⌘P)" : "Pin (⌘P)")
-                .accessibilityLabel(clip.isPinned ? "Unpin" : "Pin")
-                Button {
-                    actions.delete(clip)
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .help("Delete (⌘⌫)")
-                .accessibilityLabel("Delete")
-                if pasteLabel != "Copy" {
-                    Button("Copy") { actions.copy(clip) }
-                        .help("Copy to the clipboard (⌘C)")
-                }
-                Button(pasteLabel) { actions.choose(clip, false) }
-                    .buttonStyle(.borderedProminent)
-                    .help(pasteLabel == "Paste" ? "Paste into the app you were using (Return)" : "Copy to the clipboard (Return)")
-            }
-            .controlSize(.small)
-            .padding(.horizontal, Spacing.m)
-            .padding(.vertical, Spacing.s)
-        }
-    }
-}
-
 /// "From Safari · 5 min ago · 2 lines · 84 characters"
 struct ClipSourceLine: View {
     let clip: Clip
@@ -87,7 +42,7 @@ struct ClipContentView: View {
         case .text:
             TextPreview(clip: clip)
         case .link:
-            LinkPreview(text: clip.text.trimmingCharacters(in: .whitespacesAndNewlines))
+            LinkPreview(text: clip.text.trimmingCharacters(in: .whitespacesAndNewlines), title: clip.title)
         case .color:
             ColorPreview(text: clip.text.trimmingCharacters(in: .whitespacesAndNewlines))
         case .image:
@@ -100,6 +55,7 @@ struct ClipContentView: View {
 
 private struct LinkPreview: View {
     let text: String
+    let title: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
@@ -107,6 +63,9 @@ private struct LinkPreview: View {
                 Text(host).font(.title3.weight(.semibold)).lineLimit(1)
             } icon: {
                 Image(systemName: "link").symbolRenderingMode(.hierarchical).foregroundStyle(.secondary)
+            }
+            if let title {
+                Text(title).font(.body.weight(.medium)).lineLimit(3)
             }
             Text(text)
                 .font(.callout)
@@ -120,13 +79,7 @@ private struct LinkPreview: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var host: String {
-        if let url = URL(string: text), let host = url.host(percentEncoded: false) {
-            return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-        }
-        if text.lowercased().hasPrefix("mailto:") { return String(text.dropFirst(7)) }
-        return text
-    }
+    private var host: String { ClipText.host(ofLink: text) }
 }
 
 private struct ColorPreview: View {
@@ -135,9 +88,9 @@ private struct ColorPreview: View {
     var body: some View {
         VStack(spacing: Spacing.m) {
             if let color = ColorValue(hex: text) {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.l, style: .continuous)
                     .fill(Color(.sRGB, red: color.red, green: color.green, blue: color.blue, opacity: color.alpha))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.separator))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.l, style: .continuous).strokeBorder(.separator, lineWidth: 0.5))
                     .frame(width: 140, height: 140)
                     .accessibilityHidden(true)
             }
@@ -152,6 +105,7 @@ private struct ColorPreview: View {
 private struct ImagePreview: View {
     let clip: Clip
     @State private var image: NSImage?
+    @Environment(\.floatingPanelCornerRadius) private var panelRadius
 
     var body: some View {
         Group {
@@ -159,7 +113,9 @@ private struct ImagePreview: View {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    // Concentric with the surface it sits on, `Spacing.l` in.
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.nested(in: panelRadius, padding: Spacing.l, minimum: Radius.s),
+                                                style: .continuous))
                     .accessibilityLabel("Image, \(clip.imageWidth) by \(clip.imageHeight) pixels")
             } else {
                 ProgressView().controlSize(.small)
@@ -187,19 +143,23 @@ private struct FilesPreview: View {
                             .frame(width: 32, height: 32)
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text((path as NSString).lastPathComponent)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                            // "Not found" sits on the name's baseline, as on the card.
+                            HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                                Text((path as NSString).lastPathComponent)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                if !FileManager.default.fileExists(atPath: path) {
+                                    Text("Not found")
+                                        .font(.caption)
+                                        .foregroundStyle(.textOrange)
+                                        .fixedSize()
+                                }
+                            }
                             Text((path as NSString).deletingLastPathComponent)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
-                        }
-                        if !FileManager.default.fileExists(atPath: path) {
-                            Text("Missing")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
                         }
                     }
                     .accessibilityElement(children: .combine)
@@ -273,7 +233,9 @@ private struct RichTextView: NSViewRepresentable {
             view.isSelectable = true
             view.drawsBackground = false
             view.usesAdaptiveColorMappingForDarkAppearance = true
-            view.textContainerInset = NSSize(width: Spacing.m, height: Spacing.l)
+            // Text starts Spacing.l in, like the plain-text preview (no extra line padding).
+            view.textContainer?.lineFragmentPadding = 0
+            view.textContainerInset = NSSize(width: Spacing.l, height: Spacing.l)
             view.setAccessibilityLabel("Clip text")
         }
         return scroll
