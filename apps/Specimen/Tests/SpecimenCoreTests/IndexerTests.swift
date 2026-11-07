@@ -1,5 +1,8 @@
 import Foundation
 import Testing
+
+/// Shared CI runners are much slower than a real Mac; speed budgets get 4x headroom there.
+private let ciSlack = ProcessInfo.processInfo.environment["CI"] == nil ? 1 : 4
 @testable import SpecimenCore
 
 @Suite struct IndexerTests {
@@ -75,9 +78,9 @@ import Testing
         }
         #expect(families.count == 2000)
         #expect(!items.isEmpty)
-        #expect(elapsed < .seconds(3))
+        #expect(elapsed < .seconds(3) * ciSlack)
         let filterTime = clock.measure { _ = LibraryFilter.items(in: families, query: LibraryQuery(search: "s3")) }
         print("10k faces: index+group+filter \(elapsed), one search over 2,000 families \(filterTime)")
-        #expect(filterTime < .milliseconds(150))
+        #expect(filterTime < .milliseconds(150) * ciSlack)
     }
 }

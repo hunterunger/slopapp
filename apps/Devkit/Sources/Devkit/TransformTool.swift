@@ -447,8 +447,12 @@ extension TransformSpec {
                     }
                     let trimmed = input.filter { !$0.isWhitespace }
                     let bytes: Data
-                    if trimmed.allSatisfy(\.isHexDigit), trimmed.count.isMultiple(of: 2), !trimmed.isEmpty, (try? HexText.bytes(from: trimmed)).map({ $0.first == 0x1F || $0.first == 0x78 }) == true {
-                        bytes = try HexText.bytes(from: trimmed)
+                    // Hex that starts like gzip (1F) or zlib (78); otherwise Base64.
+                    let looksHex: Bool = !trimmed.isEmpty && trimmed.count.isMultiple(of: 2) && trimmed.allSatisfy(\.isHexDigit)
+                    let hexBytes: Data? = looksHex ? (try? HexText.bytes(from: trimmed)) : nil
+                    let first: UInt8? = hexBytes?.first
+                    if let hexBytes, first == 0x1F || first == 0x78 {
+                        bytes = hexBytes
                     } else {
                         do { bytes = try Base64.decode(trimmed) } catch { throw GZip.GZipError(description: "That isn't Base64 or hex") }
                     }

@@ -217,7 +217,13 @@ final class ProgressBox: @unchecked Sendable {
         try await Task.sleep(for: .milliseconds(10))
         queue.cancel(item)
         queue.retry(item)
-        #expect(item.state == .waiting)
+        // Queued again: waiting for the slot, or already in it on a fast cancel.
+        let requeued: Bool
+        switch item.state {
+        case .waiting, .working: requeued = true
+        default: requeued = false
+        }
+        #expect(requeued)
         await queue.waitUntilIdle()
         #expect(item.output != nil)
     }

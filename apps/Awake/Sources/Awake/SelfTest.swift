@@ -40,7 +40,7 @@ enum SelfTest {
         app.preferences.leftClick = .toggle
 
         // The real NSMenu, built from the same entries, and its items' actions.
-        let menu = MenuBuilder(app: app).build(MenuContent.entries(for: controller, appName: app.info.name))
+        let menu = StatusMenuBuilder(app: app).build(MenuContent.entries(for: controller, appName: app.info.name))
         let titles = menu.items.map(\.title)
         check(titles.first == "Turn On", "menu starts with Turn On")
         check(titles.contains("Until…") && titles.contains("Custom Duration…"), "menu has Until… and Custom Duration…")
@@ -57,7 +57,7 @@ enum SelfTest {
         }
         run("30 Minutes", in: menu)
         check(controller.session?.duration == .minutes(30), "menu: 30 Minutes starts a session")
-        let active = MenuBuilder(app: app).build(MenuContent.entries(for: controller, appName: app.info.name))
+        let active = StatusMenuBuilder(app: app).build(MenuContent.entries(for: controller, appName: app.info.name))
         check(active.items.first?.title == "30 min left", "menu shows time left")
         check(active.items.contains { $0.title == "30 Minutes" && $0.state == .on }, "menu checks the running preset")
         run("Add 30 Minutes", in: active)

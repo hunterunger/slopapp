@@ -19,23 +19,29 @@ IDENTITY="${SLOPAPP_SIGN_IDENTITY:--}"
 # 1. Compile.
 ARCH_FLAGS=()
 [[ "$CONFIG" == "release" ]] && ARCH_FLAGS=(--arch arm64 --arch x86_64)
-# Stamp the real SDK version into the binary. SwiftPM's driver tells the linker the SDK is
-# the deployment target (14.0), and macOS 26+ then runs the app in its old compatibility
+# Stamp the real SDK version into the binary. SwiftPM's driver can tell the linker the SDK
+# is the deployment target (14.0), and macOS 26+ then runs the app in its old compatibility
 # look: small window buttons, older controls. The deployment target stays as it is.
+# Re-stamped after linking with vtool: linker flags don't survive every SwiftPM build
+# backend (Xcode 26's universal builds hand them to clang, which rejects them).
 MIN_MACOS="$(json_get "$MANIFEST" .minimumMacOS)"; MIN_MACOS="${MIN_MACOS:-14.0}"
 SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
-LINK_FLAGS=(-Xlinker -platform_version -Xlinker macos -Xlinker "$MIN_MACOS" -Xlinker "$SDK_VERSION")
 say "Building $NAME ($CONFIG, macOS $MIN_MACOS+, SDK $SDK_VERSION)"
-run_logged "$LOG_DIR/$NAME-build.log" swift build --package-path "$DIR" -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} "${LINK_FLAGS[@]}"
-BIN_PATH="$(swift build --package-path "$DIR" -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} "${LINK_FLAGS[@]}" --show-bin-path)"
-# Fail rather than ship the compatibility look again.
-STAMPED_SDK="$(otool -l "$BIN_PATH/$NAME" | awk '/LC_BUILD_VERSION/{f=1} f && $1=="sdk" {print $2; exit}')"
-[[ "${STAMPED_SDK%%.*}" -ge 26 ]] || die "$NAME is stamped with SDK ${STAMPED_SDK:-?} (want 26+): macOS would show it in the old compatibility look"
+run_logged "$LOG_DIR/$NAME-build.log" swift build --package-path "$DIR" -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"}
+BIN_PATH="$(swift build --package-path "$DIR" -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --show-bin-path)"
+stamped_sdk() { otool -arch all -l "$1" | awk '/LC_BUILD_VERSION/{f=1} f && $1=="sdk" {print $2; f=0}' | sort -V | head -1; }
 
 # 2. Assemble the .app.
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH/$NAME" "$APP/Contents/MacOS/$NAME"
+if [[ "$(stamped_sdk "$APP/Contents/MacOS/$NAME")" != "$SDK_VERSION" ]]; then
+  vtool -set-build-version macos "$MIN_MACOS" "$SDK_VERSION" -replace -output "$APP/Contents/MacOS/$NAME.stamped" "$APP/Contents/MacOS/$NAME"
+  mv "$APP/Contents/MacOS/$NAME.stamped" "$APP/Contents/MacOS/$NAME"
+fi
+# Fail rather than ship the compatibility look again.
+STAMPED_SDK="$(stamped_sdk "$APP/Contents/MacOS/$NAME")"
+[[ "${STAMPED_SDK%%.*}" -ge 26 ]] || die "$NAME is stamped with SDK ${STAMPED_SDK:-?} (want 26+): macOS would show it in the old compatibility look"
 # SwiftPM resource bundles (from `resources:` in Package.swift), if any.
 shopt -s nullglob
 for bundle in "$BIN_PATH"/*.bundle "$BIN_PATH"/*.resources; do

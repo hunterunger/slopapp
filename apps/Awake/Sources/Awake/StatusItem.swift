@@ -112,7 +112,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     /// The menu as it stands now (its status line keeps itself current while open).
     private func makeMenu() -> NSMenu {
-        let menu = MenuBuilder(app: app).build(MenuContent.entries(for: app.controller, appName: app.info.name))
+        let menu = StatusMenuBuilder(app: app).build(MenuContent.entries(for: app.controller, appName: app.info.name))
         menu.delegate = self
         return menu
     }
@@ -135,7 +135,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
 /// Turns `MenuEntry` rows into an `NSMenu`.
 @MainActor
-struct MenuBuilder {
+struct StatusMenuBuilder {
     let app: AppController
     /// Whether the menu being built shows checkmarks: AppKit indents every title to make room
     /// for them, and the status line has to follow.

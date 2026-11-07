@@ -112,7 +112,10 @@ final class FakeClipboard: Clipboard {
         let (model, storage, _) = makeModel("a = 2")
         model.textDidChange("a = 2\na * 21")
         #expect(model.displays.last??.text == "42")
-        try await Task.sleep(for: .milliseconds(900))
+        // Autosave is debounced; give slow CI runners up to 5 s.
+        for _ in 0..<50 where storage.text != "a = 2\na * 21" {
+            try await Task.sleep(for: .milliseconds(100))
+        }
         #expect(storage.text == "a = 2\na * 21")
         model.textDidChange("b = 2\na * 21")
         #expect(model.displays.last??.text == "unknown name “a”")
