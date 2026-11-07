@@ -44,7 +44,8 @@ import Testing
         let applier = IconApplier(system: fake)
         let cases: [(TargetInfo, String)] = [
             (TargetInfo(exists: false), "moved or deleted"),
-            (TargetInfo(isApplication: true), "app icons"),
+            (TargetInfo(isApplication: true, isSystemApp: true), "come with macOS"),
+            (TargetInfo(isApplication: true, isWritable: false), "administrator"),
             (TargetInfo(isLocked: true), "locked"),
             (TargetInfo(isWritable: false), "permission"),
             (TargetInfo(isVolume: true, isReadOnlyVolume: true), "read-only"),
@@ -119,7 +120,19 @@ import Testing
         #expect(!system.hasCustomIcon(folder))
     }
 
-    @Test func realLockedFileAndAppBundleAreRefused() throws {
+    @Test func blockedAppChangePointsToAppManagement() {
+        let fake = FakeFileIcons()
+        fake.infos[a.path] = TargetInfo(isApplication: true)
+        fake.refuseSet = [a.path]
+        let change = IconApplier(system: fake).apply(icon, to: [a])
+        #expect(change.results[0].needsAppManagement)
+        #expect(change.results[0].outcome.message.contains("App Management"))
+        // A user's own app that macOS lets us change is just applied.
+        fake.refuseSet = []
+        #expect(IconApplier(system: fake).apply(icon, to: [a]).results[0].outcome == .applied)
+    }
+
+    @Test func realLockedFileIsRefusedAndOwnAppBundleChanges() throws {
         let dir = try makeTestFolder()
         let locked = dir.appending(path: "locked.txt")
         try "x".write(to: locked, atomically: true, encoding: .utf8)
@@ -135,9 +148,13 @@ import Testing
         let change = applier.apply(image, to: [locked, dir.appending(path: "Fake.app"), dir.appending(path: "gone")])
         let messages = change.results.map(\.outcome.message)
         #expect(messages[0].contains("locked"))
-        #expect(messages[1].contains("app icons"))
+        #expect(messages[1] == "Icon applied")
         #expect(messages[2].contains("moved or deleted"))
-        #expect(change.changedCount == 0)
+        #expect(change.changedCount == 1)
+        // Apple's own apps are refused before anything is touched.
+        #expect(WorkspaceFileIcons().info(URL(fileURLWithPath: "/System/Applications/Calculator.app")).isSystemApp)
+        let removal = applier.remove(from: [dir.appending(path: "Fake.app")])
+        #expect(removal.results.first?.outcome == .removed)
     }
 }
 

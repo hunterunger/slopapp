@@ -11,11 +11,10 @@ struct SettingsView: View {
         TabView {
             SettingsForm {
                 Section {
-                    Toggle("Show exported files in Finder", isOn: $model.prefs.revealAfterExport)
-                    Text("Selects the new file in Finder, reusing a window that already shows its folder.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Toggle(isOn: $model.prefs.revealAfterExport) {
+                        Text("Show exported files in Finder")
+                        Text("Selects the new file, reusing an open Finder window.")
+                    }
                 }
             }
             .tabItem { Label("General", systemImage: "gearshape") }

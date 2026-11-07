@@ -72,10 +72,10 @@ public struct ExportWriter: Sendable {
                 let iconset = staging.appending(path: "icon.iconset")
                 try writeFiles(plan.files, into: iconset)
                 try Self.compileICNS(iconset: iconset, output: staged)
-            case .png, .ico:
+            case .png, .jpg, .ico:
                 guard let file = plan.files.first else { throw ExportError.renderFailed }
                 try file.data.write(to: staged)
-            case .iconset, .xcode, .favicons:
+            case .folder, .iconset, .xcode, .favicons, .android:
                 try writeFiles(plan.files, into: staged)
             }
             if fm.fileExists(atPath: destination.path) {
@@ -93,7 +93,9 @@ public struct ExportWriter: Sendable {
     private func writeFiles(_ files: [ExportFile], into folder: URL) throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for file in files {
-            try file.data.write(to: folder.appending(path: file.path))
+            let url = folder.appending(path: file.path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try file.data.write(to: url)
         }
     }
 

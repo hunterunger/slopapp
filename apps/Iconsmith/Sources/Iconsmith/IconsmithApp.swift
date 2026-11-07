@@ -16,7 +16,7 @@ struct IconsmithApp: App {
         Window("Iconsmith", id: "main") {
             MainView(model: model)
         }
-        .defaultSize(width: 820, height: 700)
+        .defaultSize(width: 820, height: 760)
         .commands { IconsmithCommands(model: model, info: info) }
 
         Settings {
@@ -34,6 +34,8 @@ struct IconsmithCommands: Commands {
             Button("About Iconsmith") { AboutWindow.show(info: info) }
         }
         CommandGroup(replacing: .newItem) {
+            Button("New Blank Icon") { model.newBlank() }
+                .keyboardShortcut("n")
             Button("Open Image…") { model.chooseImage() }
                 .keyboardShortcut("o")
                 .disabled(model.isPresentingPanel)
@@ -51,6 +53,10 @@ struct IconsmithCommands: Commands {
                 }
             }
             .disabled(!model.hasSource || model.isPresentingPanel)
+            Divider()
+            Button("Export All \(model.sources.count) Pictures…") { model.export(all: true) }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(!model.isBatch || model.isPresentingPanel)
             Divider()
             Button("Close Image") { model.closeImage() }
                 .disabled(!model.hasSource)
@@ -88,18 +94,49 @@ struct IconsmithCommands: Commands {
                 .keyboardShortcut("j", modifiers: [.command, .shift])
                 .disabled(model.isPresentingPanel)
         }
+        CommandGroup(before: .toolbar) {
+            Button("Create Icons") { model.mode = .create }
+                .keyboardShortcut("1", modifiers: [.command, .control])
+            Button("Restore Icons") { model.mode = .restore }
+                .keyboardShortcut("2", modifiers: [.command, .control])
+            Divider()
+        }
         CommandMenu("Icon") {
             ForEach(Array(IconShape.allCases.enumerated()), id: \.element) { index, shape in
                 Toggle(shape.title, isOn: Binding(get: { model.style.shape == shape }, set: { _ in model.setShape(shape) }))
                     .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
             }
-            Menu("Background") {
-                ForEach(BackgroundMode.allCases) { mode in
-                    Toggle(mode.title, isOn: Binding(get: { model.style.background == mode },
-                                                     set: { _ in model.edit("Change Background") { $0.background = mode } }))
+            Menu(model.style.shape.colorTitle) {
+                if model.style.shape.isFolder {
+                    Toggle("Standard", isOn: Binding(get: { model.style.background != .color },
+                                                     set: { _ in model.edit("Change Folder Color") { $0.background = .automatic } }))
+                    Toggle("Custom", isOn: Binding(get: { model.style.background == .color },
+                                                   set: { _ in model.edit("Change Folder Color") { $0.background = .color } }))
+                } else {
+                    ForEach(BackgroundMode.allCases) { mode in
+                        Toggle(mode.title, isOn: Binding(get: { model.style.background == mode },
+                                                         set: { _ in model.edit("Change Background") { $0.background = mode } }))
+                    }
                 }
             }
             .disabled(!model.style.shape.usesBackground)
+            Divider()
+            Button("Adjust…") { model.showsAdjust = true }
+                .keyboardShortcut("a", modifiers: [.command, .option])
+                .disabled(!model.hasSource || model.mode != .create)
+            Button("Text…") { model.showsText = true }
+                .keyboardShortcut("t")
+                .disabled(!model.hasSource || model.mode != .create)
+            Button("Remove Text") { model.removeText() }
+                .disabled(model.style.text.visible == nil)
+            if model.canRestoreBackground {
+                Button("Restore Background") { model.restoreBackground() }
+                    .keyboardShortcut("b", modifiers: [.command, .option])
+            } else {
+                Button("Remove Background") { model.removeBackground() }
+                    .keyboardShortcut("b", modifiers: [.command, .option])
+                    .disabled(!model.hasSource || model.isRemovingBackground || model.source?.isBlank == true)
+            }
             Divider()
             Menu("Framing") {
                 Toggle("Fit", isOn: Binding(get: { !model.style.fill }, set: { _ in model.setFill(false) }))
@@ -128,6 +165,23 @@ struct IconsmithCommands: Commands {
             Button("Re-center") { model.resetPosition() }
                 .keyboardShortcut("0")
                 .disabled(!model.hasSource || model.style.isCentered)
+            Button("Rotate Left") { model.rotate(by: 90) }
+                .keyboardShortcut("[")
+                .disabled(!model.hasSource)
+            Button("Rotate Right") { model.rotate(by: -90) }
+                .keyboardShortcut("]")
+                .disabled(!model.hasSource)
+            Button("Reset Adjustments") { model.resetAdjustments() }
+                .disabled(!model.hasSource)
+            if model.isBatch {
+                Divider()
+                Button("Previous Picture") { model.select(model.index - 1) }
+                    .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                    .disabled(model.index == 0)
+                Button("Next Picture") { model.select(model.index + 1) }
+                    .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                    .disabled(model.index >= model.sources.count - 1)
+            }
         }
         CommandGroup(replacing: .help) {
             Button("Iconsmith Help") {

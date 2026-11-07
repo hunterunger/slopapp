@@ -9,15 +9,18 @@ public struct TargetInfo: Equatable, Sendable {
     public var isWritable = true
     public var isVolume = false
     public var isReadOnlyVolume = false
+    /// An app that comes with macOS (on the sealed system volume): it can never change.
+    public var isSystemApp = false
 
     public init(exists: Bool = true, isApplication: Bool = false, isLocked: Bool = false, isWritable: Bool = true,
-                isVolume: Bool = false, isReadOnlyVolume: Bool = false) {
+                isVolume: Bool = false, isReadOnlyVolume: Bool = false, isSystemApp: Bool = false) {
         self.exists = exists
         self.isApplication = isApplication
         self.isLocked = isLocked
         self.isWritable = isWritable
         self.isVolume = isVolume
         self.isReadOnlyVolume = isReadOnlyVolume
+        self.isSystemApp = isSystemApp
     }
 }
 
@@ -61,10 +64,13 @@ public struct TargetResult: Identifiable, Equatable, Sendable {
     public let id = UUID()
     public let url: URL
     public let outcome: TargetOutcome
+    /// macOS probably blocked an app change: offer the App Management settings.
+    public let needsAppManagement: Bool
 
-    public init(url: URL, outcome: TargetOutcome) {
+    public init(url: URL, outcome: TargetOutcome, needsAppManagement: Bool = false) {
         self.url = url
         self.outcome = outcome
+        self.needsAppManagement = needsAppManagement
     }
 
     public var name: String { FileManager.default.displayName(atPath: url.path) }
@@ -130,18 +136,28 @@ public final class IconApplier {
         }
         let info = system.info(url)
         if !info.exists { return "It was moved or deleted." }
-        if info.isApplication { return "Changing app icons isn’t supported yet." }
+        if info.isApplication && info.isSystemApp { return "Apps that come with macOS can’t be changed." }
         if info.isLocked { return "It’s locked. Unlock it in Finder’s Get Info window, then try again." }
         if info.isReadOnlyVolume { return "This disk is read-only, so its icon can’t change." }
-        if !info.isWritable { return "You don’t have permission to change it. Check its sharing & permissions in Get Info." }
+        if !info.isWritable {
+            return info.isApplication
+                ? "This app belongs to the system (App Store apps do), so only an administrator can change it. Try Get Info in Finder."
+                : "You don’t have permission to change it. Check its sharing & permissions in Get Info."
+        }
         return nil
     }
 
-    func failureAfterSet(_ url: URL, removing: Bool) -> String {
-        if system.info(url).isVolume {
-            return "This disk’s format doesn’t keep custom icons."
+    func failureAfterSet(_ url: URL, removing: Bool) -> TargetResult {
+        let info = system.info(url)
+        if info.isVolume {
+            return TargetResult(url: url, outcome: .failed("This disk’s format doesn’t keep custom icons."))
         }
-        return removing ? "macOS didn’t allow removing the icon. Try Get Info in Finder." : "macOS didn’t allow the change. Try Get Info in Finder."
+        if info.isApplication {
+            return TargetResult(url: url, outcome: .failed("macOS blocked the change. Allow Iconsmith in Privacy & Security ▸ App Management, then try again."),
+                                needsAppManagement: true)
+        }
+        return TargetResult(url: url, outcome: .failed(removing ? "macOS didn’t allow removing the icon. Try Get Info in Finder."
+                                                                 : "macOS didn’t allow the change. Try Get Info in Finder."))
     }
 
     static func unique(_ urls: [URL]) -> [URL] {
@@ -162,7 +178,7 @@ public final class IconApplier {
                 results.append(TargetResult(url: url, outcome: .applied))
                 snapshots.append(.init(url: url, before: before, after: image))
             } else {
-                results.append(TargetResult(url: url, outcome: .failed(failureAfterSet(url, removing: false))))
+                results.append(failureAfterSet(url, removing: false))
             }
         }
         return IconChange(kind: .apply, results: results, snapshots: snapshots)
@@ -185,7 +201,7 @@ public final class IconApplier {
                 results.append(TargetResult(url: url, outcome: .removed))
                 snapshots.append(.init(url: url, before: before, after: nil))
             } else {
-                results.append(TargetResult(url: url, outcome: .failed(failureAfterSet(url, removing: true))))
+                results.append(failureAfterSet(url, removing: true))
             }
         }
         return IconChange(kind: .remove, results: results, snapshots: snapshots)
@@ -215,13 +231,17 @@ public final class WorkspaceFileIcons: FileIconSystem {
         guard fm.fileExists(atPath: url.path) else { return TargetInfo(exists: false) }
         let values = try? url.resourceValues(forKeys: [.contentTypeKey, .isUserImmutableKey, .isVolumeKey, .volumeIsReadOnlyKey])
         let isVolume = values?.isVolume ?? false
+        let isApplication = values?.contentType?.conforms(to: .application) ?? false
+        let real = url.resolvingSymlinksInPath().path
         return TargetInfo(
             exists: true,
-            isApplication: values?.contentType?.conforms(to: .application) ?? false,
+            isApplication: isApplication,
             isLocked: values?.isUserImmutable ?? false,
             isWritable: access(url.path, W_OK) == 0,
             isVolume: isVolume,
-            isReadOnlyVolume: isVolume && (values?.volumeIsReadOnly ?? false)
+            isReadOnlyVolume: isVolume && (values?.volumeIsReadOnly ?? false),
+            // Apple's apps live on the sealed, read-only system volume.
+            isSystemApp: isApplication && (real.hasPrefix("/System/") || (values?.volumeIsReadOnly ?? false))
         )
     }
 

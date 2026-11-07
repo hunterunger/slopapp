@@ -356,12 +356,13 @@ Owner defaults, recorded 2026-11-03:
 
 1. **Icons on apps (`.app`)**: later. It needs App Management and breaks signatures / is
    wiped by updates. Iconsmith refuses `.app` targets with "Changing app icons isn’t
-   supported yet."
+   supported yet." *(Superseded by the parity pass: built, behind a confirmation.)*
 2. **Icon Composer `.icon` export**: later.
 3. **Favicons and Windows .ico**: should, done (both shipped in v1).
-4. **Android**: later.
-5. **Background removal**: later.
-6. **Text/emoji overlay**: skip (macOS 26 Finder's Customize Folder does it).
+4. **Android**: later. *(Parity pass: built.)*
+5. **Background removal**: later. *(Parity pass: built with Vision.)*
+6. **Text/emoji overlay**: skip (macOS 26 Finder's Customize Folder does it). *(Parity
+   pass: built, incl. badges.)*
 7. **Default export location**: a save panel opening in the source image's folder (Desktop
    for pasted pictures).
 
@@ -510,6 +511,163 @@ Owner defaults, recorded 2026-11-03:
 - Folder art is measured from the current OS's folder icon; if a future macOS changes the
   folder shape a lot, `FolderLayout.standard` is the fallback.
 
+## Parity pass (2026-11-03)
+
+Owner's direction (docs/parity-pass.md): look and work much more like the original, and
+don't miss features. This section supersedes the "skip"/"later" calls above where they
+conflict.
+
+### How the original was studied this time
+
+The installed Setapp build still stops at the Setapp licence check, so it wasn't launched
+again (getting past it means touching the owner's Setapp login). Sources: the official
+site's screenshots and copy (img2icnsapp.com: main window, export window, template
+settings popover, batch counter, text/emoji, background removal, restore, folder colours),
+the four Mac App Store screenshots, and the bundle's resource file names (read-only
+listing: per-template `_back`/`_mask`/`_top` artwork for folders, documents, drives, discs,
+cartridges…). Images were downloaded to `/tmp/iconsmith-parity/` and viewed there; none
+were copied into the repo.
+
+What the original looks like: a compact white window. Most of it is a **big round drop
+canvas** (the picture, drawn in the current template, on a checkerboard), with a round
+**back** button at its top left and a round **template settings** button at its top right.
+Under the canvas, a one-line hint ("now drop a file or folder…") and two buttons: **Remove
+Background** and **Export**. A **template column** runs down the **right** side (the
+research above said left, from the interface files; the screenshots show it on the right):
+each template is a large live preview of your picture with its name, the selected one
+highlighted. Empty state: the canvas says "drop any image", and **Create / Restore** tabs
+sit along the bottom edge. Export opens a window of format tiles (Folder, ICNS, iOS,
+Android, Favicon, Iconset, ICO, PNG, JPEG) with per-format checklists. Template settings is
+a popover: Horizontal Offset, Vertical Offset, Zoom, Rotation sliders, Background colour,
+Reset All. Batch: a round counter with a menu of the loaded files.
+
+### Gap table
+
+| Item (original) | Before this pass | Now | Notes |
+|---|---|---|---|
+| Big canvas as the main element, round corner buttons (back, settings) | Preview left, inspector form right | **done** | Canvas with a close (×) button top-left and an Adjust button top-right, like theirs; our canvas is a rounded square (theirs is a circle on stripes / checkerboard: signature look, not copied). |
+| Template column with live previews down the right side | 3-column shape grid in the inspector | **done** | `TemplateGallery`: two sections (App Icons, Folders & Files), 64 pt live previews with names; shows each template with a picture glyph before anything is loaded. |
+| Create / Restore tabs along the bottom | Two drop wells at the bottom | **done** | Segmented control in a bottom bar (⌃⌘1/⌃⌘2). Restore is a big drop zone with per-item results. |
+| Drop a folder/file on the canvas to apply | Separate "Apply" well | **done** | Same flow, **no timer**: files, folders, disks and apps dropped on the icon get it; pictures dropped there replace the picture (⌥-drop applies to pictures too). Hint line under the canvas + "Choose…" (⌘J). |
+| Template settings popover (H/V offset, zoom, rotation, background, Reset All) | Size slider, Fit/Fill, background in the inspector | **done** | Adjust popover: Size, Horizontal, Vertical, **Rotation** (new), each with value + per-row reset; Framing Fit/Fill; Background or Folder Color with 11 system-colour swatches + colour panel; Reset All. ⌘[ / ⌘] rotate 90°. |
+| Export window of format tiles with per-format options | Format popup + save-panel accessory | **done** | Export popover: 3×3 tiles (Folder, ICNS, Xcode, Android, Favicon, Iconset, ICO, PNG, JPEG), the chosen format's options and description, Export…. ⌘E still exports the last format directly; the save panel keeps its accessory. |
+| Folder templates: full, centred, engraved, dark variants | One Folder shape | **done** | Folder (centred), **Folder Cover** (full front), **Folder Symbol** (engraved: the picture's silhouette pressed into the folder in a darker tone, white details become holes), all composed on the live system folder. Dark folders = the folder colour (black/grey swatch). |
+| Folder colours | — | **done** | Folder Color recolours the system folder keeping its shading (grey × colour, colour-dodge for bright tints); symbols and text follow it. |
+| Document template | — | **done** | On the live blank-document icon. |
+| iOS-style rounded template | — | **done** | "Rounded": full-canvas continuous corners. |
+| Text / emoji (typeface, weight, size, colour, alignment) | skip | **done** | Text popover: text/emoji field + Emoji & Symbols button, Position (Middle/Top/Bottom/**Badge**), Font (System/Rounded/Serif/Monospaced), Weight, Fit Automatically or manual size, Automatic/Custom colour, badge colour, Remove Text. Top/Bottom labels shrink the picture away from the text. Folder text is pressed in like a symbol. |
+| Use Blank Image | — | **done** | File ▸ New Blank Icon (⌘N) and a button on the empty state. |
+| Remove background (colour-pick lens + tolerance) | later | **done (better)** | Vision subject lifting (`VNGenerateForegroundInstanceMaskRequest`, on device), one button; Restore Background / ⌘Z. Clear message when there's no subject. |
+| Batch: many images, counter + menu, export all | later | **done** | Drop/open several; toolbar "1 of N" menu, ⌥⌘←/→; Export popover "All N pictures, into one folder" (⇧⌘E) writes one output per picture with collision-free names. Same template/colour/text for all. |
+| Export: Android | later | **done** | `res/mipmap-{m,h,xh,xxh,xxxh}dpi/ic_launcher(.png,_round,_foreground,_background)`, `mipmap-anydpi-v26` adaptive XML (+ monochrome for logos), 512 px Play Store icon. |
+| Export: iOS dark / tinted | later | **done** | Xcode option "iOS dark and tinted icons": dark = picture on transparency, tinted = greyscale on black, `appearances: luminosity` entries. `actool` (iphoneos 18, macosx) compiles it with no warnings. |
+| Export: Folder | skip | **done** | A new folder carrying the icon (through the same applier, so it respects `ICONSMITH_ALLOWED_ROOT`). |
+| Export: JPEG | skip | **done** | On white, PNG sizes; notes when transparency became white. |
+| Export: ICNS, Iconset, ICO, PNG, Favicon | done | done | Unchanged (modern sets). |
+| Drag the result out | later | **done** | Drag any of the small sizes to Finder: `.icns` (⌥: PNG), written at drag start. |
+| Icon for `.app` bundles | refused | **done (careful)** | Apps dropped or chosen ask first (Change Icon / Use Its Icon as the Picture / Cancel) and explain that updates reset it. Apple's apps (system volume) and admin-owned apps are refused with a reason before anything is touched; a macOS refusal shows "Allow Iconsmith in Privacy & Security ▸ App Management" with an **Open Settings** button. Undoable. Tested only on our own stand-in `Fake Tool.app` under /tmp/iconsmith-test. |
+| Restore mode | done (well) | done (tab) | — |
+| Shortcuts actions (Set icon, Restore, Open with file) | later | **deferred** | ~0.5–1 day: App Intents in a SwiftPM-built app need an `AppShortcutsProvider` and metadata processing that our scripts don't run yet; needs a pipeline check first. |
+| Novelty templates (CD/DVD/Blu-ray, vinyl, floppy, cartridges, Polaroid, stamp, film, booklet, drive, USB, SD…) | skip | **deferred / skip** | They're the original's bundled artwork (signature, not copyable). Drawing our own: ~1–2 h each; a generic photo frame and stack are the only ones with everyday value. Drive/USB could use the system's own drive icons (~1 h). |
+| iOS legacy per-size sets, "rounded" iOS/Android option | — | **skip** | Xcode 14+ wants one 1024 px icon and masks it itself; pre-rounding causes double corners. The Rounded template covers the look. |
+| Share button | later | **skip** | Drag-out, Export and ⌘C cover it. |
+| Icon Composer `.icon` export | later | **deferred** | ~0.5 day; format undocumented and changing. |
+| Finder Quick Action | later | **deferred** | Needs an app extension target, which the SwiftPM-only pipeline can't build yet (~1 day incl. tooling). |
+| Localization (9 languages) | later | **deferred** | Strings are plain; needs String Catalog support in the pipeline. |
+| Help menu how-tos, x-callback URL scheme, upsell/rating | — | **skip** | Help points to the README; no URL scheme (App Intents later); no upsells. |
+
+### Deviations from the design system (and why)
+
+- **Custom-drawn gallery cells and round corner buttons on the canvas** instead of stock
+  controls: that's the original's layout (template column, back/settings buttons on the
+  canvas). Built from SF Symbols, materials and the accent colour; labelled for VoiceOver.
+- **Popovers instead of an inspector** for Adjust, Text and Export, because that's where the
+  original keeps them. All three are also reachable from the menu bar with shortcuts.
+- **Create / Restore tabs as a segmented control in a bottom bar**, matching the original's
+  bottom tabs rather than a toolbar control.
+- **Colour swatches and the badge's default red** are icon *content* colours (written into
+  exports), not UI colours; the UI itself still uses only system colours.
+- Not copied: the circular striped/checkerboard canvas, the dark teal template column, the
+  Avenir type, their bundled template artwork, names and wording.
+
+### Builder decisions (parity pass)
+
+- **Gallery on the right**, as the screenshots show, though the interface files suggested left.
+- **Canvas drop rules**: pictures replace the picture (as dropping onto the original's canvas
+  before its timer does), everything else gets the icon; ⌥ forces "apply". Removes the
+  original's timing problem while keeping its one-target flow.
+- **Apps always confirm**, even from the chooser: the change lives inside someone else's
+  bundle and updates undo it. The drop variant also offers "Use Its Icon as the Picture",
+  because dropping an app to grab its icon is the other common intent.
+- **Folder colour = the background setting** for folder templates (as in the original's
+  template settings); Automatic/None mean the standard folder.
+- **Batch keeps one template** for all pictures and resets only placement when switching.
+- **Small previews are 64/32/16 pt** (were 128/32/16): the big canvas already shows the
+  large size, and the shorter row leaves room for the hint and buttons.
+- **Text autosize** fits the line into its area; manual size is a fraction of the
+  template's text area so it means the same on every template.
+- **Test hook** `ICONSMITH_DEBUG_DIR` (DebugHarness.swift): commands over a distributed
+  notification + PNG renders of Iconsmith's own windows. Added because the Mac's screen was
+  locked for this whole session, which hides windows from Accessibility and screen capture.
+  Off unless the env var is set; renders only our windows.
+
+### Gates (parity pass)
+
+- Unit tests: **86** (Swift Testing; +23 this pass: every template renders, rounded
+  corners, folder colour, folder symbol (alpha and ink masks), document placement,
+  rotation, blank + text, text autosize/manual size, badge position/colour, automatic text
+  colours, cut-out with a fake remover + no-subject + vector sources, Android plan and
+  nested write, iOS dark/tinted (alpha, greyscale, JSON), JPEG, Folder export, batch
+  naming, older ExportOptions decoding, colour maths, App Management hint, own `.app`
+  bundle round-trip, Apple app detection) + 2 opt-in (volume icons, contact sheet).
+- `scripts/check.sh Iconsmith --perf`: all PASS (final run: launch 152 ms, first window
+  316 ms, idle CPU 0.021% lowest window, footprint 46.6 MB; earlier run 141/292 ms,
+  0.011%, 46.8 MB).
+- `actool`: an exported AppIcon with macOS + iOS + watchOS + dark/tinted compiles for
+  iphoneos (18.0) and macosx with no warnings or errors.
+- Real effects, all under /tmp/iconsmith-test via the debug hook on the release build
+  (`ICONSMITH_ALLOWED_ROOT=/tmp/iconsmith-test`): every export format written and
+  checked (`iconutil` round-trip, Android tree, JPEG opaque, Folder export has `Icon\r` +
+  FinderInfo); canvas drop applied to 2 folders, the app confirmation alert shown, then
+  `Fake Tool.app` got `Icon\r`, undo removed it, redo put it back; Restore removed all
+  three; batch of 4 exported (`logo.icns`, `logo 2.icns`, …); Vision removed the
+  background of `subject.jpg` and reported "no subject" on the synthetic landscape.
+- Screenshots (offscreen renders of our windows, light + dark), all looked at: see below.
+- Walkthrough with `scripts/drive`, `drive tree` for `[unlabeled]`, and the drag-out /
+  Finder drop with the real mouse: **not run (screen locked)**, see "Walkthrough status".
+
+Screenshots: `/tmp/iconsmith-test/parity/`, `light-*` and `dark-*` (offscreen renders of
+Iconsmith's own windows by the debug hook; `-main` is the window, `-1`/`-2` the popover or
+alert): 01 empty (gallery shows each template with a picture glyph), 02 logo, 03 Adjust
+popover, 04 Text popover, 05 Export popover, 06 Folder Symbol + orange folder + "Design"
+label, 07 batch "1 of 3" + Folder Cover, 08 blank folder with "LOL 😆", 09 Restore tab +
+results, 10 badge, 11 background removed, 12 app confirmation, 13 app applied;
+`light-14-no-subject-alert.png`. Replay: `/tmp/iconsmith-test/tools/walk.sh light|dark`.
+Originals for comparison: `/tmp/iconsmith-parity/` (not committed).
+
+#### Walkthrough status
+
+- **Not run this pass: `scripts/drive` walkthrough, `drive tree` `[unlabeled]` scan, and the
+  real-mouse drags** (drag a small icon to Finder; drag a folder from Finder onto the
+  canvas). The Mac's screen was locked for the whole session (HID idle > 30 min,
+  `loginwindow` frontmost), and macOS hides every window from Accessibility and screen
+  capture while locked, so SlopDrive can't see or drive the app. Nobody was there to unlock
+  it, and unlocking it isn't ours to do. Waited 30 more minutes for an unlock; none came.
+- What stands in for now: the same flows driven through the debug hook on the release
+  build with real effects checked on disk (above), offscreen renders of every state in
+  light and dark, and a label audit by reading the code. Every new control has an
+  accessible name: corner buttons ("Close Image", "Adjust"), template cells (template
+  name + selected trait), format tiles (format title + selected), swatches (colour
+  names), slider rows (title, value, "Reset …"), Emoji & Symbols, the batch menu
+  ("Pictures", "n of N"), small previews ("Preview at n points" + drag hint), the mode
+  picker ("Mode").
+- To do on the next unlocked run (blind tester or builder): `scripts/drive tree Iconsmith`
+  in each state (empty, loaded, each popover, Restore, the app alert); drag `targets/Project
+  Alpha` from Finder onto the canvas (owner-away rule, `--allow-over Finder`); drag the
+  64 pt preview into a Finder window showing `/tmp/iconsmith-test/exports` (expect
+  `logo.icns`; with ⌥, `logo.png`). The drag file is written at drag start (≈60 ms for an
+  .icns, release).
+
 ## Blind test log
 
 One section per round, newest last. See docs/dev-cycle.md step 5.
@@ -534,3 +692,127 @@ only, no `[unlabeled]` controls.
 | F8 manifest.webmanifest escaped slashes and lacked fields | nit | accept | `.withoutEscapingSlashes`; adds `name`, `short_name` (picture name), `theme_color` / `background_color` (the icon's background as #RRGGBB), `display: standalone`. Test added. |
 | F9 Launch at login doesn't belong; Finder window per export | nit | accept | Settings is our own TabView (General + About) without Launch at login. Reveal already reuses a Finder window that shows the folder; the setting's caption says so. |
 | Untested by the tester: applying icons by dragging from Finder | — | verified by builder | With the owner idle ≥ 60 s: dragged `targets/Project Alpha` from Finder onto Apply to Files & Folders → "Applied to 1 item", Finder custom-icon flag set; ⌘Z posted to the background app removed it. The ⌘J chooser now opens in `ICONSMITH_ALLOWED_ROOT`, but the out-of-process panel can't select items through Accessibility. Lesson for testers: `--allow-over Finder` also allows a *drop* on another Finder window covering the well (a first attempt moved the folder into an open "pictures" window, all inside /tmp/iconsmith-test; moved back). Check the drop point alone with `clickxy Iconsmith x y --allow-mouse --check` first. |
+
+## Polish pass (2026-11-05)
+
+Brief: `docs/polish-pass.md` ("a very close attention to detail"). Finish only, no new
+features. Release build stamped with SDK 27.0 (full-size 16×16 window buttons, current
+controls). Every surface shot with `scripts/drive shot` in light and dark
+(`SLOP_APPEARANCE`), state driven through the debug hook, popovers also rendered in-process
+for exact geometry; all measured with `scripts/measure` (pixel probes at `--scale 1` for
+hairlines). Test data only under `/tmp/iconsmith-test/`.
+
+### Defects found and fixed (before → after)
+
+| # | Where | Before | After |
+|---|---|---|---|
+| 1 | Lint | 8 corner-radius literals (canvas 16, format tiles 8, gallery cells 10), 1 spacing literal (swatches 6) | 0 / 0: `Radius.xxl` canvas, `Radius.l` tiles, gallery ring derived from each template's outline, swatch spacing `Spacing.s` |
+| 2 | Separators | 3 SwiftUI `Divider`s in the window + 1 in Export: 1 pt (2 px `#EAEAEA`) | `Hairline()`: 0.5 pt (1 px), measured |
+| 3 | Canvas corner buttons | 30 pt circles (r 15) 8 pt inside a 16 pt canvas: not concentric (needs r 8) | 28 pt circles (r 14) 8 pt inside a 22 pt canvas (22 − 8 = 14); measured inset 8.0 pt on both axes, 28 pt wide |
+| 4 | Canvas states | 1 pt `primary` 8 % border; drop target 2 pt *dashed* accent; focus = 1 pt accent 50 % border, shown after every popover closed | 0.5 pt separator hairline; drop target solid 2 pt accent + 10 % tint (as SlopKit `DropZone`); system focus ring (3 pt, follows the corners) only with Keyboard navigation on, like Preview's image view |
+| 5 | Empty → loaded | Drop zone 438 × 438 at y 117, radius 12; canvas 411 at y 72, radius 16: the box jumped and changed corners on load | One square slot for both, radius 22, controls under it reserved in both states: 0 pt shift (366 pt square at y 72 in both at the default size) |
+| 6 | Export result | "Saved …" line appeared under the buttons and pushed the canvas up | Moved to the leading end of the bottom bar (status-bar style), middle-truncated, 20 pt icon targets: 0 pt shift |
+| 7 | Action row alignment | 440 pt wide under a 411 pt canvas (14.5 pt past each edge) | Exactly the canvas width (366 = 366); when the canvas is narrower than the buttons (min window), they overhang it evenly, never truncate |
+| 8 | Action row heights | Text 28 pt, Remove Background 29 pt, Export 29 pt (symbol baselines) | All 29 pt (fixed label height) |
+| 9 | Gallery selection | 1.5 pt accent ring around the whole 144 × 99 cell at radius 10, unrelated to the 64 pt tile; label tinted accent | Ring 2.5 pt outside each template's own outline and 2.5 pt wide: concentric with the macOS superellipse, the circle, the square (true arcs), an icon-tile square for templates without an outline. Label in a Finder-style accent pill. Hover ring. Geometry in `TemplateRingGeometry` with a test |
+| 10 | Gallery scrolling | ⌘1–⌘9 / Icon menu could pick a template that stayed off-screen | Scrolls it to the centre (snappy, Reduce Motion: no animation); clicks don't scroll |
+| 11 | Gallery under toolbar | Scrolled content drew into the toolbar strip (faint "App Icons" at y ≈ 41 pt, above the column); dark strip over the column lighter (`#323435` vs `#2B2E2E`, macOS 26 scroll edge effect) | Clipped at the column; edge effect hidden: strip `#292A2A` = column |
+| 12 | Results list | "Icon applied"/"Restored" plain green ≈ 2.0 : 1 on white; failures plain orange; "⌘Z to undo" in `.tertiary`, and shown after "No custom icons removed" (nothing to undo); icon buttons 12 × 13 / 13 × 13 pt targets; 16 pt side padding | `.textGreen` ≈ 3.9 : 1 on the anti-aliased caption glyph, `.textOrange`; hint `.secondary` and only when something changed; 20 × 20 targets; 20 pt (window margin) |
+| 13 | Restore tab | Drop zone 518 × 438, radius 12 | Same square slot and 22 pt radius as Create's |
+| 14 | Bottom bar | Vertical padding 10 (s + 2); tabs in a 300 pt frame drawn 149 pt wide | 12 pt; natural width, centred by equal flexible sides |
+| 15 | Adjust popover | "Background" header *and* "Background" picker (folders: "Folder Color" twice); caption a separate row, 1–2 lines depending on mode; colour well row only in Color mode (popover grew 45 pt); swatches had no selected, hover or pressed state | One label; caption is the picker's one-line subtitle in every mode; "Custom Color" well always there (no resize); chosen swatch gets a 2 pt accent ring 1.5 pt outside (no layout change), hover darkens its hairline, press scales to 92 % |
+| 16 | Popover footers | Reset All / Remove Text / Done at 16 pt from the sides while sections sit at 10 pt (6 pt off); 18 pt above vs 10 pt below | 10 / 10 / 10, edges flush with the sections (measured) |
+| 17 | Popover widths | 340 / 340 / 360 | 360 for all three |
+| 18 | Export popover | Changed height per format (options 0 → ~70 pt for Xcode), so Export… moved; tiles had no hover/pressed state | Options area reserved at the tallest format; `TileStyle` hover (7 %) and pressed (12 %) fills |
+| 19 | Text popover | Position segmented wrapped and floated with a 56 pt hole on the left | Label above, control leading-aligned under it |
+| 20 | Drag-out handles | 64/32/16 pt previews: tooltip only | Hover highlight (`Radius.m`, 4 pt outset, no layout change) + open-hand cursor |
+| 21 | Round buttons | No hover or pressed state; 1 pt 12 % stroke | 8 % / 16 % overlays; hairline border |
+| 22 | Transparency | None shown: transparent margins looked like canvas, a white Circle/Square tile was barely visible on the light canvas | Subtle 8 pt checkerboard behind the icon's own square (= the exported image's extent, whole cells only); dashed guide kept for Background None, its tint dropped |
+| 23 | Background removal | Bare large spinner | "Removing Background…" capsule with a small spinner (fades in) |
+| 24 | Settings | Explanation as its own row, 2 lines | Subtitle under the toggle, one line |
+| 25 | Batch counter | "n of N" proportional digits | `.monospacedDigit()` |
+
+Also checked and fine: macOS App shadow (10 px offset, 24 px blur, 30 % black at 1024,
+same as `scripts/icongen.swift`; Apple-template reconstructions range 10–12 px / 10–28 px /
+30–50 %, so kept so Slopapp's own icons match), Apple grid tile (824/1024), alerts (system),
+About (SlopKit), minimum window size 700 × 640 with a 90-character file name, 6 results,
+and a favicon export status (middle truncation, nothing overlaps).
+
+Decisions: the checkerboard is the generic transparency grid, limited to the icon's square;
+the original's whole-canvas circular checkerboard isn't copied. The results panel still
+shrinks the canvas when it appears (≈ 110 pt for 3 rows): a panel the user caused, and
+overlaying it would cover the gallery and the canvas.
+
+### Gates
+
+- `scripts/lint.sh Iconsmith`: pass (was 8 failures + 1 warning).
+- `scripts/check.sh Iconsmith --perf`: all PASS. 88 tests (+2: swatch matching, ring
+  concentricity on every template). Final run: launch 166 ms, first window 335 ms, idle CPU
+  0.042 % (lowest window), footprint 50.9 MB (parity pass: 152 / 316 ms, 0.021 %, 46.6 MB).
+- `scripts/drive tree`: no `[unlabeled]` in the window (empty, loaded, batch, results,
+  status), the three popovers, the app alert or Settings. Window buttons 16 × 16.
+
+### Screenshots
+
+`/tmp/slopapp-polish/iconsmith/`: `before-light/`, `before-dark/` (start of the pass),
+`after-light/`, `after-dark/` (final build: 01 empty, 02 logo, 03 every template, 04
+Background None, 05 Adjust (app, colour, folder), 06 Text (+ badge), 07 Export (ICNS,
+Folder, Xcode, PNG), 08 export HUD + status, 09 results, 10 app alert, 11 batch (+ export),
+12 blank folder with text, 13 background removed, 14 error alert, 15 Restore (+ results),
+16 Settings; popovers rendered in-process in `dbg/after-*`), `r5-dark/16-settings-general.png`,
+`edge/` (minimum window size, long name, 6 results), `dbg/cutout-progress*-main.png`.
+Walkthrough: `/tmp/slopapp-polish/iconsmith/tools/walk.sh light|dark <prefix>`.
+
+### Not done, and why
+
+- **Hover with the real pointer** (gallery cells, swatches, tiles, round buttons, small
+  previews) and the **real-mouse drags** (drag-out to Finder, Finder drop on the canvas):
+  not observed. The owner was at the Mac the whole pass (HID idle 2–11 s), so no real-cursor
+  actions. All hover states are designed in code.
+- **The save panel's accessory** wasn't re-shot (out-of-process panel).
+- **Background-removal progress** shows for under 120 ms on this Mac (Vision); the result
+  state was checked, the overlay itself barely appears in a render.
+- Test-only debug hook commands added: `reveal:on|off`, `swatch:<name>`, `winsize:<w>,<h>`.
+  The walkthrough resets `app.slopapp.iconsmith` preferences (the parity script did too);
+  the key was deleted at the end so the app starts from defaults.
+
+### Golden Gate + light/dark (2026-11-06)
+
+Owner: "ensure all the apps are optimized for dark/light mode AND look like they fit in with
+macOS Golden Gate" (this Mac: macOS 27.2). Checked against design system §4 "Fitting in on
+macOS 27 Golden Gate" and §10 items 25–26, on the release build, every surface in light and
+dark side by side, plus inactive-window shots and a live appearance switch.
+
+| Check | Before | After |
+|---|---|---|
+| Menus text-only | Menu bar commands and the batch menu were already plain text; the Create/Restore segments carried symbols (hidden, but in the AX tree) | Segments are `Text` only. Symbols stay only in toolbar items (standard) |
+| Toolbar | Real `.toolbar` (Open Image, batch menu), system glass | Unchanged: standard |
+| Inactive window | Gallery ring + label pill, swatch ring, format tiles stayed accent blue when the window wasn't key, while the system's own Export button and tabs went grey | `Color.selectionRing` / `.selectionFill` / `.selectionTint` / `.windowAccent` on `controlActiveState`: all grey together (label text switches to `.primary` on the grey pill). Drop-target accent kept (it shows during a drag from Finder, when Finder is key) |
+| Glass | `.regularMaterial` on the round buttons and the background-removal capsule; system popovers | Unchanged: system only |
+| `.secondary` as the only copy | "No custom icon" (a row's outcome) in `.secondary`, ≈ 3.1 : 1 in light on 27.2 | `.primary`; `.secondary` left only on supporting text (hints, captions, sizes) |
+| Drawn pure white / black | Gallery placeholders (before a picture): glyph in `secondaryLabelColor`, drawn off the main thread, came out light grey in dark mode and vanished on the white Automatic tile, leaving blank white squares | Glyph in `systemGray`, reads on the white tile and on clear templates in both modes. White/black swatches are icon colours (data) with a `primary` 20 % hairline |
+| Chrome around previews | Canvas fill, checkerboard, guide, thumbnail outlines are `primary` opacities; tile shadow is part of the exported icon (data) | Verified in both modes; nothing fixed-grey |
+| Live appearance change | — | Launched light, switched to dark while running (and the reverse): canvas fill, both checker tones, gallery, bottom bar and hairline pixels identical to a dark (light) launch |
+| Hairlines (SlopKit `Hairline` now lays out 1 pt) | Bottom bar 12.5 pt above the tabs / 12 below; results list 8.5 / 8; export popover divider 12 / 12.5 | Content under a hairline gives back the unused half point (`HairlineGap`): 12 / 12, 8 / 8, 12 / 12 (pixel-measured, light and dark) |
+| DropZone (SlopKit update) | — | Empty Create and Restore zones re-shot both modes: radius 22 via `.dropZoneCornerRadius`, same square slot as the canvas, dashed outline readable in dark |
+
+Gates: `scripts/check.sh Iconsmith --perf` all PASS (88 tests; launch 154 ms, first window
+343 ms, idle CPU 0.015 %, footprint 51.8 MB). No `[unlabeled]` in any state. Lint clean.
+
+Screenshots (`/tmp/slopapp-polish/iconsmith/`): `final-light/`, `final-dark/` (every surface,
+same numbering as the polish pass), `final-gg-light/`, `final-gg-dark/` (01 active, 02
+inactive main window with Settings in front, 03 Restore, 04 live switch to the other mode),
+popover renders `dbg/final-*` and `dbg/final-gg-*-export-active-1.png` (popover in an
+active app: accent selection).
+
+**Idea, not built: Golden Gate icon looks.** Golden Gate shows app icons as Default, Dark,
+Clear and Tinted, and generates those looks itself for icons that only ship a single image
+(our `.icns` / iconset / Xcode macOS sizes). A natural fit: a "Look" control under the small
+previews (Default · Dark · Clear · Tinted) that previews roughly how the system will show
+the icon (~0.5 day; approximate, Apple's derivation isn't public), and later an Icon Composer
+`.icon` export with a real dark variant (~1 day, format undocumented; already deferred
+above). Waiting for the coordinator's call.
+
+Not done: real-pointer hover and drags (owner present). The owner's `app.slopapp.iconsmith`
+defaults were backed up before the first launch and restored exactly at the end (verified
+by diff); the owner's copy wasn't running.

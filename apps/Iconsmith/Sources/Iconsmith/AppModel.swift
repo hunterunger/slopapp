@@ -12,8 +12,20 @@ final class AppModel {
 
     // MARK: State
 
-    private(set) var source: IconSource?
+    /// Every picture loaded (more than one is a batch: one template, exported for each).
+    private(set) var sources: [IconSource] = []
+    private(set) var index = 0
+    var source: IconSource? { sources.indices.contains(index) ? sources[index] : nil }
     private(set) var isLoading = false
+    /// Create icons, or restore standard icons (the bottom tabs).
+    var mode: Mode = .create
+    /// Popovers, so menu commands can open them too.
+    var showsAdjust = false
+    var showsText = false
+    var showsExport = false
+    private(set) var isRemovingBackground = false
+    /// Apps waiting for a yes before their icon changes.
+    var pendingApps: PendingApps?
     var style = IconStyle() {
         didSet {
             guard style != oldValue else { return }
@@ -37,6 +49,8 @@ final class AppModel {
     private(set) var resultSummary: String?
     /// The results on show come from an undo (so the hint offers redo).
     private(set) var resultsAreUndo = false
+    /// Whether the results can be undone (something changed), so the hint isn't offered for nothing.
+    private(set) var resultsCanUndo = false
     private(set) var isExporting = false
     /// A save or open panel is up; menu commands that would open another wait.
     private(set) var isPresentingPanel = false
@@ -46,7 +60,9 @@ final class AppModel {
     /// What Edit ▸ Undo / Redo show; refreshed from the undo manager's notifications.
     private(set) var undoState = UndoState()
 
-    static let smallSizes = [128, 32, 16]
+    static let smallSizes = [64, 32, 16]
+    /// Gallery thumbnails, in points.
+    static let thumbnailPoints: CGFloat = 64
     /// One arrow-key nudge: 4 px on a 1024 px icon.
     static let nudgeStep = 1.0 / 256
 
@@ -64,7 +80,21 @@ final class AppModel {
     @ObservationIgnored private var renderTask: Task<Void, Never>?
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     @ObservationIgnored private var editStart: IconStyle?
+    @ObservationIgnored private var editName = "Change Icon"
     @ObservationIgnored private var thumbnailsDirty = true
+    /// Cut-outs and the pictures they came from (Restore Background).
+    @ObservationIgnored private var cutoutOriginals: [UUID: IconSource] = [:]
+    /// What the gallery shows before a picture is loaded: a generic picture glyph. It's drawn
+    /// into the icon (often on the white Automatic tile), off the main thread, so it uses a mid
+    /// grey that reads on white and on a dark window alike; `secondaryLabelColor` resolved to
+    /// light grey in dark mode and vanished on the white tile.
+    @ObservationIgnored private let placeholder: IconSource? = {
+        let config = NSImage.SymbolConfiguration(pointSize: 256, weight: .regular)
+            .applying(.init(paletteColors: [.systemGray]))
+        guard let symbol = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)?.withSymbolConfiguration(config)
+        else { return IconSource.blank() }
+        return IconSource(content: .vector(symbol), name: "", url: nil, size: symbol.size)
+    }()
 
     private init() {
         prefs = store.load()
@@ -90,47 +120,78 @@ final class AppModel {
     }
 
     var hasSource: Bool { source != nil }
+    var isBatch: Bool { sources.count > 1 }
 
     // MARK: Loading
 
     /// Image types offered by Open (anything else dropped still works: its icon is used).
     static let openTypes: [UTType] = [.image, .pdf, .svg, .icns, .application]
 
-    func load(_ url: URL) {
+    func load(_ url: URL) { load([url]) }
+
+    /// Loads one picture, or several as a batch. Replaces what was loaded.
+    func load(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
         loadTask?.cancel()
         isLoading = true
+        mode = .create
         loadTask = Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try SourceLoader.load(url) }
+            let results = await Task.detached(priority: .userInitiated) {
+                urls.map { url in Result { try SourceLoader.load(url) } }
             }.value
             guard !Task.isCancelled else { return }
             isLoading = false
-            switch result {
-            case .success(let source): setSource(source)
-            case .failure(let error): self.error = ErrorReport("Couldn’t Open the Picture", error)
+            let loaded = results.compactMap { try? $0.get() }
+            if !loaded.isEmpty { setSources(loaded) }
+            if let failure = results.lazy.compactMap({ result -> Error? in
+                if case .failure(let error) = result { return error } else { return nil }
+            }).first {
+                self.error = ErrorReport(loaded.isEmpty ? "Couldn’t Open the Picture" : "Some Pictures Couldn’t Open", failure)
             }
         }
     }
 
-    func load(_ urls: [URL]) {
-        guard let first = urls.first else { return }
-        load(first)
+    private func setSource(_ newSource: IconSource) { setSources([newSource]) }
+
+    private func setSources(_ newSources: [IconSource]) {
+        sources = newSources
+        index = 0
+        cutoutOriginals = [:]
+        mode = .create
+        exportStatus = nil
+        resetPlacement()
+        // Undo history for the old picture's edits doesn't apply to the new one.
+        undoManager.removeAllActions(withTarget: editTarget)
+        refreshUndoState()
     }
 
-    private func setSource(_ newSource: IconSource) {
-        let defaults = IconStyle.placementDefaults(transparentEdges: newSource.edges.isTransparent)
-        source = newSource
-        exportStatus = nil
+    /// Placement that suits the current picture (size, fit, centred); the template stays.
+    private func resetPlacement() {
+        guard let source else { return }
+        let defaults = IconStyle.placementDefaults(transparentEdges: source.edges.isTransparent)
         thumbnails = [:]
         var fresh = style
         fresh.scale = defaults.scale
         fresh.fill = defaults.fill
         fresh.offset = .zero
+        fresh.rotation = 0
         thumbnailsDirty = true
         if style == fresh { scheduleRender() } else { style = fresh }
-        // Undo history for the old picture's edits doesn't apply to the new one.
-        undoManager.removeAllActions(withTarget: editTarget)
-        refreshUndoState()
+    }
+
+    /// Shows another picture of the batch. The template, colour and text stay.
+    func select(_ newIndex: Int) {
+        guard sources.indices.contains(newIndex), newIndex != index else { return }
+        index = newIndex
+        thumbnailsDirty = true
+        scheduleRender()
+    }
+
+    /// A blank picture: an icon made of its template, colour and text.
+    func newBlank() {
+        guard let blank = IconSource.blank() else { return }
+        setSource(blank)
+        if !style.shape.isFolder && !style.shape.hasOutline { edit("Change Shape") { $0.shape = .folder } }
     }
 
     func chooseImage() {
@@ -163,19 +224,71 @@ final class AppModel {
     }
 
     func closeImage() {
-        source = nil
+        sources = []
+        index = 0
+        cutoutOriginals = [:]
         preview = nil
         smallPreviews = [:]
         thumbnails = [:]
+        thumbnailsDirty = true
         exportStatus = nil
         undoManager.removeAllActions(withTarget: editTarget)
         refreshUndoState()
+        scheduleRender()
+    }
+
+    // MARK: Background removal
+
+    var canRestoreBackground: Bool { source.map { cutoutOriginals[$0.id] != nil } ?? false }
+
+    /// Lifts the subject off its background (Vision, on this Mac). Undoable.
+    func removeBackground() {
+        guard let source, !isRemovingBackground, !source.isBlank else { return }
+        isRemovingBackground = true
+        let at = index
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try Cutout.make(from: source, remover: VisionBackgroundRemover()) }
+            }.value
+            isRemovingBackground = false
+            switch result {
+            case .success(let cut):
+                guard sources.indices.contains(at), sources[at].id == source.id else { return }
+                cutoutOriginals[cut.id] = source
+                swapSource(at: at, to: cut, from: source, name: "Remove Background")
+            case .failure(let error):
+                self.error = ErrorReport("Couldn’t Remove the Background", error)
+            }
+        }
+    }
+
+    func restoreBackground() {
+        guard let source, let original = cutoutOriginals[source.id] else { return }
+        swapSource(at: index, to: original, from: source, name: "Restore Background")
+    }
+
+    /// Replaces one picture of the batch; undo swaps it back (and redo again).
+    private func swapSource(at position: Int, to new: IconSource, from old: IconSource, name: String, style target: IconStyle? = nil) {
+        guard sources.indices.contains(position) else { return }
+        closeContinuousEdit()
+        let previousStyle = style
+        sources[position] = new
+        thumbnailsDirty = true
+        // A cut-out is placed like a logo (whole, with a margin).
+        var placed = target ?? style
+        if target == nil { placed.fill = IconStyle.placementDefaults(transparentEdges: new.edges.isTransparent).fill }
+        if placed != style { style = placed } else { scheduleRender() }
+        undoManager.registerUndo(withTarget: editTarget) { [weak self] _ in
+            MainActor.assumeIsolated { self?.swapSource(at: position, to: old, from: new, name: name, style: previousStyle) }
+        }
+        undoManager.setActionName(name)
     }
 
     // MARK: Style edits (undoable)
 
     /// A one-step change (menu, picker, button).
     func edit(_ actionName: String, _ change: (inout IconStyle) -> Void) {
+        closeContinuousEdit()
         let old = style
         var new = style
         change(&new)
@@ -189,14 +302,42 @@ final class AppModel {
     func setFill(_ fill: Bool) { edit("Change Framing") { $0.fill = fill } }
 
     /// Continuous changes (slider, drag): one undo step for the whole gesture.
-    func beginContinuousEdit() {
-        if editStart == nil { editStart = style }
+    func beginContinuousEdit(_ actionName: String = "Change Icon") {
+        if editStart == nil {
+            editStart = style
+            editName = actionName
+        }
     }
 
-    func endContinuousEdit(_ actionName: String) {
+    func endContinuousEdit(_ actionName: String? = nil) {
         guard let start = editStart else { return }
         editStart = nil
-        if start != style { registerStyleUndo(start, actionName) }
+        if start != style { registerStyleUndo(start, actionName ?? editName) }
+    }
+
+    /// Ends a gesture still in progress (typing, a slider) so the next step undoes separately.
+    private func closeContinuousEdit() { endContinuousEdit() }
+
+    /// Changes during a gesture (slider drag, typing): one undo step until it ends.
+    func change(_ actionName: String, _ change: (inout IconStyle) -> Void) {
+        beginContinuousEdit(actionName)
+        var new = style
+        change(&new)
+        style = new.clamped()
+    }
+
+    @ObservationIgnored private var settleTask: Task<Void, Never>?
+
+    /// Like `change`, for controls with no "done" moment (the colour panel, typing): the
+    /// undo step closes after a short pause.
+    func changeSettling(_ actionName: String, _ change: (inout IconStyle) -> Void) {
+        self.change(actionName, change)
+        settleTask?.cancel()
+        settleTask = Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            endContinuousEdit()
+        }
     }
 
     private func registerStyleUndo(_ old: IconStyle, _ actionName: String) {
@@ -207,6 +348,29 @@ final class AppModel {
 
     func setShape(_ shape: IconShape) { edit("Change Shape") { $0.shape = shape } }
     func resetPosition() { edit("Re-center") { $0.offset = .zero } }
+    func rotate(by degrees: Double) {
+        edit("Rotate") { style in
+            var r = style.rotation + degrees
+            while r > 180 { r -= 360 }
+            while r < -180 { r += 360 }
+            style.rotation = r
+        }
+    }
+
+    /// Size, position and rotation back to how the picture first appeared; template,
+    /// colour and text stay.
+    func resetAdjustments() {
+        guard let source else { return }
+        let defaults = IconStyle.placementDefaults(transparentEdges: source.edges.isTransparent)
+        edit("Reset Adjustments") {
+            $0.scale = defaults.scale
+            $0.fill = defaults.fill
+            $0.offset = .zero
+            $0.rotation = 0
+        }
+    }
+
+    func removeText() { edit("Remove Text") { $0.text.string = "" } }
 
     func resetSize() {
         guard let source else { return }
@@ -231,8 +395,11 @@ final class AppModel {
 
     // MARK: Rendering
 
-    private func scheduleRender() {
-        guard let renderer else { return }
+    func scheduleRender() {
+        guard let renderer else {
+            renderPlaceholderThumbnails()
+            return
+        }
         let withThumbnails = thumbnailsDirty
         renderTask?.cancel()
         let style = style, scale = backingScale
@@ -240,7 +407,7 @@ final class AppModel {
         renderTask = Task {
             let output = await PreviewRenderer.shared.render(renderer, style: style, previewPixels: previewPixels,
                                                              smallSizes: Self.smallSizes, scale: scale,
-                                                             thumbnails: withThumbnails ? 88 : nil)
+                                                             thumbnails: withThumbnails ? Int(Self.thumbnailPoints * scale) : nil)
             guard !Task.isCancelled, let output else { return }
             preview = output.preview
             smallPreviews = output.small
@@ -251,12 +418,39 @@ final class AppModel {
         }
     }
 
+    /// With nothing loaded, the gallery shows each template empty, so a template can be
+    /// picked before the picture.
+    private func renderPlaceholderThumbnails() {
+        guard let placeholder, thumbnails.isEmpty || thumbnailsDirty else { return }
+        let renderer = IconRenderer(source: placeholder, folder: folderArt)
+        var style = style
+        style.text = IconText()
+        let scale = backingScale
+        renderTask?.cancel()
+        renderTask = Task {
+            let output = await PreviewRenderer.shared.render(renderer, style: style, previewPixels: 0, smallSizes: [], scale: scale,
+                                                             thumbnails: Int(Self.thumbnailPoints * scale))
+            guard !Task.isCancelled, let output, source == nil else { return }
+            thumbnails = output.thumbnails
+            thumbnailsDirty = false
+        }
+    }
+
     // MARK: Export
 
-    func export(_ format: ExportFormat? = nil) {
+    /// Exports with a save panel; `all` exports every picture of a batch into one folder.
+    func export(_ format: ExportFormat? = nil, all: Bool = false) {
         guard let source, renderer != nil, !isExporting, !isPresentingPanel else { return }
         let format = format ?? prefs.format
         if format != prefs.format { prefs.format = format }
+        if format == .xcode, prefs.options.xcodePlatforms.isEmpty {
+            error = ErrorReport("Choose a Platform", ExportError.noPlatforms)
+            return
+        }
+        if all && isBatch {
+            exportBatch(format)
+            return
+        }
         let panel = NSSavePanel()
         panel.title = "Export Icon"
         panel.prompt = "Export"
@@ -323,6 +517,10 @@ final class AppModel {
             isExporting = false
             switch result {
             case .success(let (written, notes)):
+                if format == .folder, let failure = giveIcon(renderer, style: style, toNewFolder: written) {
+                    self.error = ErrorReport("Couldn’t Export the Icon", ExportError.write(failure))
+                    return
+                }
                 exportStatus = ExportStatus(url: written, notes: notes, hasHTML: format == .favicons)
                 HUD.show("Exported", systemImage: "checkmark.circle")
                 // Finder reuses a window already showing the folder.
@@ -330,6 +528,98 @@ final class AppModel {
             case .failure(let error):
                 self.error = ErrorReport("Couldn’t Export the Icon", error)
             }
+        }
+    }
+
+    func writeForDebug(_ format: ExportFormat, to url: URL) { write(format, to: url) }
+    func writeBatchForDebug(_ format: ExportFormat, into folder: URL) { writeBatch(format, into: folder) }
+
+    /// Gives a just-exported empty folder the icon. Returns why it failed (the folder is
+    /// then removed again).
+    private func giveIcon(_ renderer: IconRenderer, style: IconStyle, toNewFolder folder: URL) -> String? {
+        let change = applier.apply(renderer.multiResolutionImage(style), to: [folder])
+        guard let result = change.results.first, result.outcome != .applied else { return nil }
+        try? FileManager.default.removeItem(at: folder)
+        return result.outcome.message
+    }
+
+    /// Every picture of the batch, same template, into one chosen folder.
+    private func exportBatch(_ format: ExportFormat) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Export \(sources.count) Icons"
+        panel.message = "Choose where to save \(format.title) for each of the \(sources.count) pictures"
+        panel.directoryURL = source?.folder ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+        present(panel) { [weak self] in
+            guard let self, let folder = panel.url else { return }
+            self.writeBatch(format, into: folder)
+        }
+    }
+
+    private func writeBatch(_ format: ExportFormat, into folder: URL) {
+        let renderers = sources.map { IconRenderer(source: $0, folder: folderArt) }
+        let style = style, options = prefs.options, reveal = prefs.revealAfterExport
+        let existing = Set((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
+        let names = BatchNaming.names(for: sources.map(\.name), format: format, existing: existing)
+        isExporting = true
+        exportStatus = nil
+        Task {
+            let result = await Task.detached(priority: .userInitiated) { () -> Result<([URL], [String]), Error> in
+                Result {
+                    var written: [URL] = [], notes: [String] = []
+                    for (renderer, name) in zip(renderers, names) {
+                        let plan = try IconExporter(renderer: renderer).plan(format, style: style, options: options)
+                        written.append(try ExportWriter(trash: Trash.current()).write(plan, format: format, to: folder.appending(path: name)))
+                        for note in plan.notes where !notes.contains(note) { notes.append(note) }
+                    }
+                    return (written, notes)
+                }
+            }.value
+            isExporting = false
+            switch result {
+            case .success(let (written, notes)):
+                if format == .folder {
+                    for (renderer, url) in zip(renderers, written) {
+                        if let failure = giveIcon(renderer, style: style, toNewFolder: url) {
+                            self.error = ErrorReport("Couldn’t Export the Icons", ExportError.write(failure))
+                            return
+                        }
+                    }
+                }
+                exportStatus = ExportStatus(url: folder, notes: notes, hasHTML: format == .favicons, count: written.count)
+                HUD.show("Exported \(written.count) Icons", systemImage: "checkmark.circle")
+                if reveal { NSWorkspace.shared.activateFileViewerSelecting(written) }
+            case .failure(let error):
+                self.error = ErrorReport("Couldn’t Export the Icons", error)
+            }
+        }
+    }
+
+    // MARK: Drag out
+
+    @ObservationIgnored private var lastDragFolder: URL?
+
+    /// The icon as a file for dragging to Finder or another app: .icns, or PNG with ⌥.
+    /// Written when the drag starts (a few dozen milliseconds).
+    func dragItem() -> NSItemProvider {
+        guard let renderer, let source else { return NSItemProvider() }
+        let format: ExportFormat = NSEvent.modifierFlags.contains(.option) ? .png : .icns
+        let fm = FileManager.default
+        if let old = lastDragFolder { try? fm.removeItem(at: old) }
+        let folder = fm.temporaryDirectory.appending(path: "Iconsmith Drag/\(UUID().uuidString)")
+        lastDragFolder = folder
+        do {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            var options = prefs.options
+            options.pngSize = 1024
+            let plan = try IconExporter(renderer: renderer).plan(format, style: style, options: options)
+            let url = try ExportWriter().write(plan, format: format, to: folder.appending(path: format.suggestedName(base: source.name)))
+            return NSItemProvider(contentsOf: url) ?? NSItemProvider()
+        } catch {
+            return NSItemProvider()
         }
     }
 
@@ -369,13 +659,62 @@ final class AppModel {
         present(panel) { [weak self] in
             guard let self else { return }
             remove ? self.removeIcons(from: panel.urls) : self.applyIcon(to: panel.urls)
+            if remove { self.mode = .restore }
         }
     }
 
-    func applyIcon(to urls: [URL]) {
-        guard let renderer, !urls.isEmpty else { return }
+    /// Gives items this icon. Apps are asked about first (their updates undo it, and it's
+    /// easy to drop one meaning "use its icon").
+    func applyIcon(to urls: [URL], fromDrop: Bool = false) {
+        guard renderer != nil, !urls.isEmpty else { return }
+        let apps = urls.filter(Self.isApp)
+        let others = urls.filter { !Self.isApp($0) }
+        if !others.isEmpty { performApply(others) }
+        if !apps.isEmpty { pendingApps = PendingApps(apps: apps, fromDrop: fromDrop) }
+    }
+
+    func confirmApps(_ pending: PendingApps) {
+        pendingApps = nil
+        performApply(pending.apps)
+    }
+
+    func useAppIcon(_ pending: PendingApps) {
+        pendingApps = nil
+        load(pending.apps)
+    }
+
+    private func performApply(_ urls: [URL]) {
+        guard let renderer else { return }
         let image = renderer.multiResolutionImage(style)
         record(applier.apply(image, to: urls), actionName: "Apply Icon")
+    }
+
+    /// A drop on the icon: pictures replace the picture; files, folders, disks and apps get
+    /// the icon. With ⌥, everything gets the icon (pictures too).
+    func dropOnCanvas(_ urls: [URL]) {
+        let everything = NSEvent.modifierFlags.contains(.option)
+        let pictures = urls.filter(Self.isPicture)
+        if !everything, !pictures.isEmpty, pictures.count == urls.count {
+            load(pictures)
+            return
+        }
+        applyIcon(to: everything ? urls : urls.filter { !Self.isPicture($0) }, fromDrop: true)
+    }
+
+    static func isPicture(_ url: URL) -> Bool {
+        guard let type = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType ?? UTType(filenameExtension: url.pathExtension)
+        else { return false }
+        return type.conforms(to: .image) || type.conforms(to: .pdf) || type.conforms(to: .svg)
+    }
+
+    static func isApp(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType?.conforms(to: .application) ?? (url.pathExtension == "app")
+    }
+
+    func openAppManagementSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     func removeIcons(from urls: [URL]) {
@@ -387,6 +726,7 @@ final class AppModel {
         results = change.results
         resultSummary = change.summary
         resultsAreUndo = false
+        resultsCanUndo = change.changedCount > 0
         if change.changedCount > 0 { registerIconUndo(change, actionName: actionName, undoing: true) }
     }
 
@@ -399,6 +739,7 @@ final class AppModel {
                 let ok = restored.filter(\.outcome.isSuccess).count
                 model.resultSummary = undoing ? "Put back \(ok) icon\(ok == 1 ? "" : "s")" : change.summary
                 model.resultsAreUndo = undoing
+                model.resultsCanUndo = true
                 model.registerIconUndo(change, actionName: actionName, undoing: !undoing)
             }
         }
@@ -456,7 +797,7 @@ actor PreviewRenderer {
     func render(_ renderer: IconRenderer, style: IconStyle, previewPixels: Int, smallSizes: [Int], scale: CGFloat,
                 thumbnails thumbnailPixels: Int?) -> Output? {
         guard !Task.isCancelled else { return nil }
-        let preview = renderer.render(style, pixels: previewPixels)
+        let preview = previewPixels > 0 ? renderer.render(style, pixels: previewPixels) : nil
         var small: [Int: CGImage] = [:]
         for points in smallSizes {
             guard !Task.isCancelled else { return nil }
@@ -500,6 +841,25 @@ struct ExportStatus: Equatable {
     let notes: [String]
     /// A favicon export: offer to copy the HTML.
     let hasHTML: Bool
+    /// More than one: a batch, `url` is the folder.
+    var count = 1
+}
+
+enum Mode: String, CaseIterable, Identifiable {
+    case create, restore
+    var id: String { rawValue }
+}
+
+/// Apps dropped or chosen as targets, waiting for confirmation.
+struct PendingApps: Identifiable {
+    let id = UUID()
+    let apps: [URL]
+    let fromDrop: Bool
+
+    var names: String {
+        let names = apps.map { FileManager.default.displayName(atPath: $0.path) }
+        return names.count == 1 ? "“\(names[0])”" : "\(names.count) apps"
+    }
 }
 
 /// The clipboard the app reads and writes. `ICONSMITH_PASTEBOARD=<name>` swaps in a named

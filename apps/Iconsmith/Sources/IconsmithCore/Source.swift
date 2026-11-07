@@ -21,14 +21,29 @@ public struct IconSource: @unchecked Sendable {
     public let edges: EdgeInfo
     /// The source was a file or folder whose icon we took.
     public let isFileIcon: Bool
+    /// The background was removed (a cut-out of another source).
+    public let isCutout: Bool
+    /// A blank, transparent picture: the icon is just its template, colour and text.
+    public let isBlank: Bool
+    /// Tells apart two loads of the same file (caches, batch rows).
+    public let id = UUID()
 
-    public init(content: Content, name: String, url: URL?, size: CGSize, isFileIcon: Bool = false) {
+    public init(content: Content, name: String, url: URL?, size: CGSize, isFileIcon: Bool = false, isCutout: Bool = false,
+                isBlank: Bool = false) {
         self.content = content
         self.name = name
         self.url = url
         self.size = CGSize(width: max(size.width, 1), height: max(size.height, 1))
         self.isFileIcon = isFileIcon
-        self.edges = EdgeInfo.analyze(content)
+        self.isCutout = isCutout
+        self.isBlank = isBlank
+        self.edges = isBlank ? EdgeInfo(isTransparent: true, color: nil, hasAlpha: true) : EdgeInfo.analyze(content)
+    }
+
+    /// A blank picture, for icons made of a template, a colour and text.
+    public static func blank() -> IconSource? {
+        guard let context = Bitmap.context(pixels: 16), let image = context.makeImage() else { return nil }
+        return IconSource(content: .raster(image), name: "Untitled", url: nil, size: CGSize(width: 1024, height: 1024), isBlank: true)
     }
 
     public var aspect: CGFloat { size.width / size.height }
@@ -52,7 +67,7 @@ public struct IconSource: @unchecked Sendable {
     /// Rasters smaller than this look soft at the large icon sizes.
     public static let smallThreshold: CGFloat = 512
 
-    public var isSmall: Bool { !isVector && max(size.width, size.height) < Self.smallThreshold }
+    public var isSmall: Bool { !isVector && !isBlank && max(size.width, size.height) < Self.smallThreshold }
 
     /// The folder new exports are offered in.
     public var folder: URL? { url?.deletingLastPathComponent() }
@@ -265,11 +280,18 @@ public enum Bitmap {
     }
 
     /// Draws an NSImage (vector or multi-resolution) into a Core Graphics context.
-    static func drawVector(_ image: NSImage, in rect: CGRect, context: CGContext) {
+    static func drawVector(_ image: NSImage, in rect: CGRect, context: CGContext, operation: NSCompositingOperation = .sourceOver) {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-        image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+        image.draw(in: rect, from: .zero, operation: operation, fraction: 1)
         NSGraphicsContext.restoreGraphicsState()
+    }
+
+    public static func jpegData(_ image: CGImage, quality: Double = 0.9) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+        return CGImageDestinationFinalize(destination) ? data as Data : nil
     }
 
     public static func pngData(_ image: CGImage) -> Data? {

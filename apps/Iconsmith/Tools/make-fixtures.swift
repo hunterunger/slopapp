@@ -65,12 +65,38 @@ try """
 </svg>
 """.write(to: pictures.appending(path: "mark.svg"), atomically: true, encoding: .utf8)
 
+// A "photo" with one clear subject (an emoji drawn large on a soft backdrop), for background removal.
+save(bitmap(1200, 900) { c in
+    let colors = [CGColor(srgbRed: 0.78, green: 0.84, blue: 0.9, alpha: 1), CGColor(srgbRed: 0.55, green: 0.6, blue: 0.66, alpha: 1)] as CFArray
+    let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: colors, locations: [0, 1])!
+    c.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 900), end: CGPoint(x: 0, y: 0), options: [])
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: c, flipped: false)
+    NSAttributedString(string: "🐶", attributes: [.font: NSFont.systemFont(ofSize: 520)]).draw(at: CGPoint(x: 290, y: 120))
+    NSGraphicsContext.restoreGraphicsState()
+}, "subject.jpg", type: "public.jpeg")
+
+// Several pictures for a batch.
+for (i, hue) in [0.0, 0.33, 0.6].enumerated() {
+    save(bitmap(512, 512) { c in
+        c.setFillColor(NSColor(hue: hue, saturation: 0.6, brightness: 0.9, alpha: 1).cgColor)
+        c.fill(CGRect(x: 0, y: 0, width: 512, height: 512))
+        c.setFillColor(CGColor(gray: 1, alpha: 0.9))
+        c.fillEllipse(in: CGRect(x: 156, y: 156, width: 200, height: 200))
+    }, "batch-\(i + 1).png")
+}
+
 // Not a picture.
 try Data("this is not an image".utf8).write(to: pictures.appending(path: "broken.png"))
 
-// Targets: folders and a document to put icons on.
+// Targets: folders and a document to put icons on, and a stand-in app bundle (ours, so
+// changing its icon needs no App Management permission).
 for name in ["Project Alpha", "Project Beta", "Photos 2026"] {
     try fm.createDirectory(at: targets.appending(path: name), withIntermediateDirectories: true)
 }
+let fakeApp = targets.appending(path: "Fake Tool.app/Contents")
+try fm.createDirectory(at: fakeApp, withIntermediateDirectories: true)
+try #"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>test.iconsmith.faketool</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>"#
+    .write(to: fakeApp.appending(path: "Info.plist"), atomically: true, encoding: .utf8)
 try "Some notes.".write(to: targets.appending(path: "notes.txt"), atomically: true, encoding: .utf8)
-print("Fixtures in \(root.path): pictures/ (landscape.jpg, logo.png, tiny.png, mark.svg, broken.png), targets/ (3 folders, notes.txt), exports/")
+print("Fixtures in \(root.path): pictures/ (landscape.jpg, logo.png, tiny.png, mark.svg, subject.jpg, batch-1…3.png, broken.png), targets/ (3 folders, notes.txt, Fake Tool.app), exports/")

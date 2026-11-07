@@ -12,24 +12,43 @@ public enum IconGeometry {
     /// The area the picture fits into at 100% size. Logos (transparent edges, trimmed to
     /// their visible part) get a margin so they don't touch the shape's outline; photos
     /// fill it.
-    public static func contentRect(for shape: IconShape, logo: Bool = false, folder: FolderLayout = .standard) -> CGRect {
+    public static func contentRect(for shape: IconShape, logo: Bool = false, folder: FolderLayout = .standard,
+                                   document: DocumentLayout = .standard) -> CGRect {
         switch shape {
         case .macOSApp: logo ? tileRect.insetBy(dx: tileRect.width * 0.14, dy: tileRect.height * 0.14) : tileRect
+        case .rounded: logo ? canvas.insetBy(dx: 0.14, dy: 0.14) : canvas
         case .square: logo ? canvas.insetBy(dx: 0.12, dy: 0.12) : canvas
         // The largest square inside the circle, plus a little air.
         case .circle: logo ? canvas.insetBy(dx: 0.18, dy: 0.18) : canvas
         case .asIs: canvas
         case .folder: folder.art
+        case .folderCover: logo ? folder.panel.insetBy(dx: folder.panel.width * 0.16, dy: folder.panel.height * 0.16) : folder.panel
+        case .folderSymbol: folder.symbol
+        case .document: document.art
         }
     }
 
     /// The area the picture is clipped to (nil: not clipped).
-    public static func clipRect(for shape: IconShape, folder: FolderLayout = .standard) -> CGRect? {
+    public static func clipRect(for shape: IconShape, folder: FolderLayout = .standard, document: DocumentLayout = .standard) -> CGRect? {
         switch shape {
         case .macOSApp: tileRect
-        case .square, .circle: canvas
+        case .rounded, .square, .circle: canvas
         case .asIs: nil
-        case .folder: folder.panel
+        case .folder, .folderCover, .folderSymbol: folder.panel
+        case .document: document.page
+        }
+    }
+
+    /// Where text goes (its line is centred in here, or put at the top or bottom).
+    public static func textRect(for shape: IconShape, folder: FolderLayout = .standard, document: DocumentLayout = .standard) -> CGRect {
+        switch shape {
+        case .macOSApp: tileRect.insetBy(dx: tileRect.width * 0.1, dy: tileRect.height * 0.1)
+        case .rounded, .square: canvas.insetBy(dx: 0.1, dy: 0.1)
+        case .circle: canvas.insetBy(dx: 0.17, dy: 0.17)
+        case .asIs: canvas.insetBy(dx: 0.05, dy: 0.05)
+        case .folder, .folderCover, .folderSymbol:
+            folder.panel.insetBy(dx: folder.panel.width * 0.08, dy: folder.panel.height * 0.12)
+        case .document: document.page.insetBy(dx: document.page.width * 0.12, dy: document.page.height * 0.12)
         }
     }
 
@@ -67,14 +86,18 @@ public enum IconGeometry {
     }
 
     /// The clip outline of a shape in pixel space.
-    public static func clipPath(for shape: IconShape, pixels: CGFloat, folder: FolderLayout = .standard) -> CGPath? {
-        guard let unit = clipRect(for: shape, folder: folder) else { return nil }
+    public static func clipPath(for shape: IconShape, pixels: CGFloat, folder: FolderLayout = .standard,
+                                document: DocumentLayout = .standard) -> CGPath? {
+        guard let unit = clipRect(for: shape, folder: folder, document: document) else { return nil }
         let rect = unit.scaled(by: pixels)
         switch shape {
-        case .macOSApp: return superellipse(in: rect, steps: pixels <= 64 ? 120 : 360)
+        case .macOSApp, .rounded: return superellipse(in: rect, steps: pixels <= 64 ? 120 : 360)
         case .circle: return CGPath(ellipseIn: rect, transform: nil)
-        case .folder:
+        case .folder, .folderCover, .folderSymbol:
             let radius = rect.height * 0.08
+            return CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        case .document:
+            let radius = rect.width * 0.03
             return CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
         case .square, .asIs: return CGPath(rect: rect, transform: nil)
         }
@@ -93,6 +116,9 @@ public struct FolderLayout: Equatable, Sendable {
         self.panel = panel
         self.art = art
     }
+
+    /// A symbol pressed into the folder: a little smaller than a picture, so it reads as a mark.
+    public var symbol: CGRect { art.insetBy(dx: art.width * 0.08, dy: art.height * 0.08) }
 
     /// Measured from the macOS 26 folder icon. Used when measuring fails.
     public static let standard = FolderLayout(bounds: CGRect(x: 0.039, y: 0.129, width: 0.922, height: 0.742))
@@ -125,8 +151,59 @@ public struct FolderLayout: Equatable, Sendable {
     }
 }
 
+/// Where the picture sits on the system's blank document icon.
+public struct DocumentLayout: Equatable, Sendable {
+    /// The page (the picture is clipped to it, a little inside its edge).
+    public var page: CGRect
+    /// The picture's area at 100% size.
+    public var art: CGRect
+
+    public init(page: CGRect, art: CGRect) {
+        self.page = page
+        self.art = art
+    }
+
+    /// Typical blank document proportions. Used when measuring fails.
+    public static let standard = DocumentLayout(bounds: CGRect(x: 0.19, y: 0.06, width: 0.62, height: 0.88))
+
+    /// Derives the layout from the document icon's opaque bounds: the page inset from its
+    /// edge, and a square picture area a little below the middle (clear of the folded corner).
+    public init(bounds: CGRect) {
+        let page = bounds.insetBy(dx: bounds.width * 0.07, dy: bounds.height * 0.05)
+        let side = min(page.width * 0.84, page.height * 0.62)
+        self.page = page
+        self.art = CGRect(x: page.midX - side / 2, y: page.minY + page.height * 0.44 - side / 2, width: side, height: side)
+    }
+}
+
 extension CGRect {
     func scaled(by factor: CGFloat) -> CGRect {
         CGRect(x: minX * factor, y: minY * factor, width: width * factor, height: height * factor)
+    }
+}
+
+/// The selection ring around a template's thumbnail: a band `gap` points outside the
+/// template's own outline (tile, circle, square…) and `width` points wide, so it stays
+/// concentric with the shape. Templates without an outline (As Is, folders, documents) get
+/// a ring around an icon-tile square (corner radius 0.2237 × side, like `Radius.iconTile`).
+public enum TemplateRingGeometry {
+    /// `frame`: the thumbnail's square, in the same coordinates as the result.
+    public static func ring(for shape: IconShape, in frame: CGRect, gap: CGFloat, width: CGFloat) -> CGPath {
+        let side = min(frame.width, frame.height)
+        let base: CGPath
+        if shape.hasOutline, let clip = IconGeometry.clipPath(for: shape, pixels: side) {
+            // The outlines are symmetric top to bottom, so y-up and y-down agree.
+            var move = CGAffineTransform(translationX: frame.midX - side / 2, y: frame.midY - side / 2)
+            base = clip.copy(using: &move) ?? clip
+        } else {
+            let tile = side * 0.2237
+            base = CGPath(roundedRect: CGRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side),
+                          cornerWidth: tile, cornerHeight: tile, transform: nil)
+        }
+        // The outline grown by `gap` and by `gap + width`; the ring is what lies between.
+        // Round joins keep the offset of a sharp corner (Square) a true arc.
+        let outer = base.union(base.copy(strokingWithWidth: 2 * (gap + width), lineCap: .round, lineJoin: .round, miterLimit: 1))
+        let inner = base.union(base.copy(strokingWithWidth: 2 * gap, lineCap: .round, lineJoin: .round, miterLimit: 1))
+        return outer.subtracting(inner)
     }
 }

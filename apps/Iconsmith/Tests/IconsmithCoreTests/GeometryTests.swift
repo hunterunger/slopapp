@@ -67,6 +67,28 @@ import Testing
         #expect(RGBA.black.hex == "#000000")
     }
 
+    @Test func swatchMatchingToleratesOneStep() {
+        let picked = RGBA(0.2, 0.5, 0.9)
+        #expect(picked.isClose(to: RGBA(0.2 + 0.5 / 255, 0.5, 0.9)))
+        #expect(!picked.isClose(to: RGBA(0.2 + 2.0 / 255, 0.5, 0.9)))
+        #expect(!picked.isClose(to: RGBA(0.2, 0.5, 0.9, 0.5)))
+    }
+
+    @Test func templateRingIsConcentricWithTheOutline() {
+        // The ring sits `gap` outside the outline and is `width` wide, on every template.
+        for shape in IconShape.allCases {
+            let ring = TemplateRingGeometry.ring(for: shape, in: CGRect(x: 0, y: 0, width: 64, height: 64), gap: 2.5, width: 2.5)
+            let box = ring.boundingBoxOfPath
+            let expected = shape == .macOSApp ? IconGeometry.tileRect.scaled(by: 64).insetBy(dx: -5, dy: -5)
+                : CGRect(x: 0, y: 0, width: 64, height: 64).insetBy(dx: -5, dy: -5)
+            #expect(abs(box.minX - expected.minX) < 0.1 && abs(box.width - expected.width) < 0.1, "\(shape)")
+            // Just outside the outline (inside the gap) is empty; inside the ring band is filled.
+            let mid = expected.midY
+            #expect(!ring.contains(CGPoint(x: expected.minX + 5 - 1.2, y: mid)), "\(shape) gap")
+            #expect(ring.contains(CGPoint(x: expected.minX + 1.2, y: mid)), "\(shape) band")
+        }
+    }
+
     @Test func styleClampsOutOfRangeValues() {
         let style = IconStyle(scale: 9, offset: CGPoint(x: 5, y: -5)).clamped()
         #expect(style.scale == IconStyle.scaleRange.upperBound)

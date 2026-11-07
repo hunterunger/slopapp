@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
         default: break
         }
+        DebugHarness.startIfRequested()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

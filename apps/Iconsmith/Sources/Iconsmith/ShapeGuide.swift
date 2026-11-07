@@ -16,7 +16,7 @@ struct ShapeGuide: Shape {
 
     /// Whether to draw the guide: the shape has an outline but nothing fills it.
     @MainActor static func isVisible(for shape: IconShape, model: AppModel) -> Bool {
-        guard [.macOSApp, .square, .circle].contains(shape), let renderer = model.renderer else { return false }
+        guard shape.hasOutline, let renderer = model.renderer else { return false }
         var style = model.style
         style.shape = shape
         return renderer.background(for: style) == nil
@@ -27,9 +27,12 @@ extension View {
     /// Draws the shape guide behind this view when the shape would otherwise be invisible.
     /// `outlineAlways`: also draw a faint solid hairline when the shape is filled, so a white
     /// tile still reads as a tile on a light background (thumbnails).
-    @MainActor func shapeGuide(_ shape: IconShape, model: AppModel, lineWidth: CGFloat = 1, outlineAlways: Bool = false) -> some View {
+    /// `fillsGuide`: tint the inside of the dashed guide (thumbnails; the big preview shows
+    /// a checkerboard there instead).
+    @MainActor func shapeGuide(_ shape: IconShape, model: AppModel, lineWidth: CGFloat = 1, outlineAlways: Bool = false,
+                               fillsGuide: Bool = true) -> some View {
         overlay {
-            if outlineAlways, [.macOSApp, .square, .circle].contains(shape), !ShapeGuide.isVisible(for: shape, model: model) {
+            if outlineAlways, shape.hasOutline, !ShapeGuide.isVisible(for: shape, model: model) {
                 ShapeGuide(shape: shape)
                     .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
                     .accessibilityHidden(true)
@@ -38,7 +41,7 @@ extension View {
         .background {
             if ShapeGuide.isVisible(for: shape, model: model) {
                 ShapeGuide(shape: shape)
-                    .fill(Color.primary.opacity(0.05))
+                    .fill(Color.primary.opacity(fillsGuide ? 0.05 : 0))
                     .overlay {
                         ShapeGuide(shape: shape)
                             .stroke(Color.secondary.opacity(0.6), style: StrokeStyle(lineWidth: lineWidth, dash: [4, 3]))
