@@ -55,3 +55,31 @@ time, a peek of the next), title and caption under it, arrows and page dots, ←
 click for a full-size viewer. It shows the light or dark set to match the system. Images
 load lazily from the feed and are cached in `~/Library/Caches`; a quiet placeholder shows
 while loading, and nothing at all when an app has no set.
+
+## Running it
+
+```sh
+scripts/shots.sh Switchboard              # the whole set, light and dark
+scripts/shots.sh Snapper --only hero      # retake one shot (the rest of the set stays)
+scripts/shots.sh Snapper --compose-only   # re-compose the last captures (composer changes)
+```
+
+- **Adding a set to an app**: write `apps/<Name>/showcase.json` (`version`, `env` with the
+  app's test-data variables, `{data}` = the scene's scratch folder; `shots` with `id`, `title`,
+  `caption`, `scene`, optional `size` "1160x720", `zoom`, `menuBar`, `callout`), put any fixture
+  files in `apps/<Name>/showcase/` (copied into `{data}`), and handle `Showcase.scene` at launch:
+  load synthetic data, open the window, call `Showcase.ready { [window] }` (SlopKit). Windows up
+  to about 1160 × 720 pt are drawn pixel for pixel; small panels and Settings windows use `zoom`.
+- **What the script does**: bundles the app, waits for 60 s without keyboard or mouse input,
+  copies `build/<Name>.app` to `/tmp/<slug>-showcase` with the bundle id `<id>.showcase` (no URL
+  schemes, no document types: it can never receive the owner's links or files, and has its own
+  settings), shows our backdrop window (`tools/Shots backdrop`), launches each scene with
+  `SLOP_SHOWCASE`, `SLOP_APPEARANCE` and the `env`, captures the windows the ready file lists
+  with `screencapture -l<id> -o`, then composes with `tools/Shots compose` and encodes with
+  `cwebp`. If anyone touches the Mac mid-run, it stops without writing anything.
+- **Composition** (tools/Shots, `ShotsCore`): the category's candy colour as a soft wash (light:
+  over ice; dark: deep, over graphite), the windows centred with a rendered two-layer shadow
+  (the same for every window, so the set matches), a frosted menu bar strip with the app's own
+  status item (tinted for the strip) for menu bar apps, and an optional magnified callout.
+- **Review** every image in `web/public/shots/<slug>/` light and dark before committing; raw
+  captures and logs stay in `/tmp/<slug>-showcase`.

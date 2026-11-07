@@ -21,6 +21,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { copyShotSet, shotSet } from "./shots-feed.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const readJSON = (p) => JSON.parse(readFileSync(p, "utf8"));
@@ -125,6 +126,14 @@ const sha256 = (file) => createHash("sha256").update(readFileSync(file)).digest(
 const releaseAsset = (slug, version, file) =>
   `${brand.repoUrl}/releases/download/${slug}-v${version}/${file}`;
 
+/** The app's store screenshots (docs/screenshots.md), copied next to a local test feed. */
+function shotsFields(app, dir) {
+  const set = shotSet(root, app, dir);
+  if (!set) return {};
+  if (localDir) copyShotSet(root, app.slug, set, localDir);
+  return { shots: set.shots, shotsVersion: set.version };
+}
+
 function builtEntry(app, dir) {
   const zip = join(zipsDir, `${app.name}.zip`);
   if (!existsSync(zip)) {
@@ -176,10 +185,11 @@ function builtEntry(app, dir) {
     size: statSync(zip).size,
     installedSize: installedSize(zip),
     releaseNotes: releaseNotes(dir, app, version),
+    ...shotsFields(app, dir),
   };
 }
 
-function plannedEntry(planned) {
+function plannedEntry(planned, dir) {
   return {
     slug: planned.slug,
     name: planned.name,
@@ -190,6 +200,8 @@ function plannedEntry(planned) {
     menuBarOnly: Boolean(planned.menuBarOnly),
     hub: Boolean(planned.hub) || undefined,
     status: "planned",
+    // A built app without a zip here (a local test feed) still has its screenshots.
+    ...(dir ? shotsFields(planned, dir) : {}),
   };
 }
 
@@ -205,7 +217,7 @@ for (const planned of roadmap) {
     if (!included(built.app.name)) continue;
     const entry = builtEntry({ ...planned, ...built.app }, built.dir);
     if (entry) apps.push(entry);
-    else if (includePlanned) apps.push(plannedEntry({ ...planned, ...built.app }));
+    else if (includePlanned) apps.push(plannedEntry({ ...planned, ...built.app }, built.dir));
   } else if (includePlanned) {
     apps.push(plannedEntry(planned));
   }

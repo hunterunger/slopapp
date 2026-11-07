@@ -103,6 +103,8 @@ final class Store {
     /// Starred apps (Favorites page, heart on app pages). Kept per feed, like Recently Updated.
     private(set) var favorites = FavoriteList()
     let icons: Icons
+    /// Store screenshots on app pages.
+    let shotImages: ShotImages
 
     @ObservationIgnored private var tasks: [String: Task<RecentUpdate?, Never>] = [:]
     @ObservationIgnored private let network = Network()
@@ -133,6 +135,9 @@ final class Store {
         let caches = (try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true))?
             .appendingPathComponent("app.slopapp.slopapp/icons", isDirectory: true)
         icons = Icons(fetcher: network, urlPolicy: config.urlPolicy, cacheDirectory: caches)
+        shotImages = ShotImages(fetcher: network, urlPolicy: config.urlPolicy,
+                                cacheDirectory: caches?.deletingLastPathComponent().appendingPathComponent("shots", isDirectory: true),
+                                allowsNetwork: config.allowsNetwork)
         lastCheck = UserDefaults.standard.object(forKey: lastCheckKey) as? Date
         if let data = UserDefaults.standard.data(forKey: recentKey),
            let saved = try? JSONDecoder().decode([RecentUpdate].self, from: data) {

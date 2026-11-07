@@ -3,18 +3,24 @@ import SlopKit
 import SwiftUI
 
 /// An app's page: big icon, name and pitch with the state button (its arrow holds the
-/// other actions), heart and share; a strip of facts; highlights; then What's New and the
-/// copies on this Mac, with more apps from the same category alongside.
+/// other actions), heart and share; its screenshots, when it has a set; a strip of facts;
+/// highlights; then What's New and the copies on this Mac, with more apps from the same
+/// category alongside.
 struct AppDetailView: View {
     let slug: String
     @Bindable var store: Store
     let navigation: Navigation
+    @State private var pageSize: CGSize = .zero
 
     var body: some View {
         if let item = store.item(slug) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.xxl) {
                     header(item)
+                    if !item.app.shots.isEmpty {
+                        ShotGallery(app: item.app, images: store.shotImages, pageSize: pageSize)
+                            .id(item.id)
+                    }
                     InfoStrip(item: item)
                     Highlights(lines: Browse.highlights(for: item.app, license: Brand.license))
                     Hairline()
@@ -41,6 +47,7 @@ struct AppDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .reportsPageScroll()
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { pageSize = $0 }
         } else {
             ContentUnavailableView("App Not Found", systemImage: "questionmark.app",
                                    description: Text("It's no longer in the catalog."))

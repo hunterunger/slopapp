@@ -22,6 +22,23 @@ export type CatalogApp = {
   status: AppStatus;
   version?: string;
   downloadUrl?: string;
+  /** Store screenshots (docs/screenshots.md), for beta+ apps that have a set. */
+  shots?: Shot[];
+  /** "<app version>-<showcase version>": changes whenever the set is retaken. */
+  shotsVersion?: string;
+};
+
+/** One store screenshot. Paths are relative to the site root (prefix the base path). */
+export type Shot = {
+  id: string;
+  title: string;
+  caption: string;
+  width: number;
+  height: number;
+  light: string;
+  dark: string;
+  light1x: string;
+  dark1x: string;
 };
 
 export type Brand = {

@@ -29,7 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async {
             LinkRouter.shared.picker.prewarm(targets: model.config.pickerTargets, size: model.config.pickerSize)
         }
-        if Diagnostics.initialSettingsTab != nil {
+        if let scene = Showcase.scene {
+            ShowcaseScenes.run(scene, model: model)
+        } else if Diagnostics.initialSettingsTab != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { SettingsWindow.open() }
         }
         if let delay = Diagnostics.appearanceFlipDelay {

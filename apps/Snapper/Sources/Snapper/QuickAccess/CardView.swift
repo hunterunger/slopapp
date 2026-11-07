@@ -14,7 +14,9 @@ struct CardView: View {
     let controller: CardController
     @State private var hoveringNow = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private var hovering: Bool { hoveringNow || Diagnostics.forceCardHover }
+    private var hovering: Bool {
+        hoveringNow || Diagnostics.forceCardHover || item.sourceName == ShowcaseScenes.hoveredCardName
+    }
 
     var body: some View {
         ZStack {

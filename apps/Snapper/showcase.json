@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "env": {
+    "SNAPPER_HISTORY_DIR": "{data}/history",
+    "SNAPPER_SAVE_DIR": "{data}/out",
+    "SNAPPER_PASTEBOARD": "app.slopapp.snapper.showcase",
+    "SNAPPER_SILENT": "1"
+  },
+  "shots": [
+    {
+      "id": "hero",
+      "scene": "annotate",
+      "title": "Mark it up, right away",
+      "caption": "Arrows, boxes, text, numbered steps and blur for anything private. Every mark stays editable.",
+      "size": "1160x720",
+      "menuBar": false
+    },
+    {
+      "id": "card",
+      "scene": "card",
+      "title": "Every capture waits in the corner",
+      "caption": "Copy, save, annotate or pin it from the thumbnail, or drag it straight into another app.",
+      "zoom": 1.5
+    },
+    {
+      "id": "background",
+      "scene": "background",
+      "title": "Ready to share",
+      "caption": "Frame a capture on a gradient with padding, rounded corners and a shadow, for slides and posts.",
+      "size": "1160x720",
+      "menuBar": false
+    },
+    {
+      "id": "history",
+      "scene": "history",
+      "title": "Find it again later",
+      "caption": "Capture History keeps a month of captures, grouped by day. Search by app, and bring any of them back.",
+      "size": "1160x720",
+      "menuBar": false
+    }
+  ]
+}

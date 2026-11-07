@@ -1,4 +1,5 @@
 import Foundation
+import SlopKit
 import os
 import QuartzCore
 
@@ -13,6 +14,8 @@ import QuartzCore
 ///   logged, never made.
 /// - `SWITCHBOARD_SETTINGS_TAB=general|browsers|rules|about`: open Settings on that tab at
 ///   launch (screenshots without Accessibility).
+/// - `SLOP_SHOWCASE=picker|browsers|rules`: a store screenshot scene with synthetic settings
+///   (`ShowcaseFixtures`; see Showcase.swift and docs/screenshots.md).
 /// - `SWITCHBOARD_FLIP_APPEARANCE_AFTER=<seconds>`: switch light ↔ dark once while running
 ///   (checks that every surface follows a live appearance change).
 ///
@@ -27,6 +30,7 @@ enum Diagnostics {
     static let assumesDefault = environment["SWITCHBOARD_ASSUME_DEFAULT"] == "1"
     static let appearanceFlipDelay = environment["SWITCHBOARD_FLIP_APPEARANCE_AFTER"].flatMap(Double.init)
     static let initialSettingsTab = environment["SWITCHBOARD_SETTINGS_TAB"].flatMap(SettingsTab.init(rawValue:))
+        ?? ShowcaseRequest.parse(environment).flatMap { SettingsTab(rawValue: $0.scene) }
     private static let logFile = environment["SWITCHBOARD_LOG"].map { URL(fileURLWithPath: $0) }
 
     /// Seconds since boot, monotonic. For latency measurements.

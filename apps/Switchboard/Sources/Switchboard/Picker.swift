@@ -65,6 +65,9 @@ final class PickerController {
 
     var isShowing: Bool { panel?.isVisible == true }
 
+    /// The panel, for store screenshot scenes.
+    var window: NSWindow? { panel }
+
     private func makePanel() -> FloatingPanel {
         let panel = FloatingPanel { [state, icons] in
             PickerView(

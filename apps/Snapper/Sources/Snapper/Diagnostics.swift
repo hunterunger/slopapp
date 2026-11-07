@@ -28,6 +28,8 @@ import QuartzCore
 ///   `editorDone`, `pinLast`, `permissionWindow`, `openSettings`, `settings.<pane>`, and
 ///   `appearanceLight` / `appearanceDark` (a live appearance change, to check that layer
 ///   colours follow it).
+/// - `SLOP_SHOWCASE=annotate|card|background|history`: a store screenshot scene with made-up
+///   captures (Showcase.swift, docs/screenshots.md).
 /// - `SNAPPER_PASTEBOARD=<name>`: Copy (images, recognized text, recordings) writes to a
 ///   private named pasteboard instead of the real clipboard, so tests can read it back
 ///   without touching the owner's clipboard.

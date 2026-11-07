@@ -37,6 +37,10 @@ public struct FeedApp: Codable, Sendable, Equatable, Identifiable, Hashable {
     public var size: Int64?
     public var installedSize: Int64?
     public var releaseNotes: String?
+    /// Store screenshots (beta and later apps with a set). Empty when there are none.
+    public var shots: [FeedShot]
+    /// Changes whenever the set is retaken ("<app version>-<showcase version>").
+    public var shotsVersion: String?
 
     public var id: String { slug }
 
@@ -45,7 +49,7 @@ public struct FeedApp: Codable, Sendable, Equatable, Identifiable, Hashable {
         menuBarOnly: Bool? = nil, hub: Bool? = nil, status: String? = nil, version: String? = nil,
         build: Int? = nil, minimumMacOS: String? = nil, bundleId: String? = nil, downloadUrl: URL? = nil,
         iconUrl: URL? = nil, sha256: String? = nil, size: Int64? = nil, installedSize: Int64? = nil,
-        releaseNotes: String? = nil
+        releaseNotes: String? = nil, shots: [FeedShot] = [], shotsVersion: String? = nil
     ) {
         self.slug = slug
         self.name = name
@@ -65,11 +69,14 @@ public struct FeedApp: Codable, Sendable, Equatable, Identifiable, Hashable {
         self.size = size
         self.installedSize = installedSize
         self.releaseNotes = releaseNotes
+        self.shots = shots
+        self.shotsVersion = shotsVersion
     }
 
     enum CodingKeys: String, CodingKey {
         case slug, name, tagline, category, replaces, menuBarOnly, hub, status, version, build
         case minimumMacOS, bundleId, downloadUrl, iconUrl, sha256, size, installedSize, releaseNotes
+        case shots, shotsVersion
     }
 
     public init(from decoder: any Decoder) throws {
@@ -93,6 +100,9 @@ public struct FeedApp: Codable, Sendable, Equatable, Identifiable, Hashable {
         size = try c.decodeIfPresent(Int64.self, forKey: .size)
         installedSize = try c.decodeIfPresent(Int64.self, forKey: .installedSize)
         releaseNotes = try c.decodeIfPresent(String.self, forKey: .releaseNotes)
+        // A bad screenshot list never costs the app its entry.
+        shots = (try? c.decodeIfPresent(LossyShots.self, forKey: .shots))?.shots ?? []
+        shotsVersion = try? c.decodeIfPresent(String.self, forKey: .shotsVersion)
     }
 
     private static func resolve(_ decoder: any Decoder) -> (String) -> URL? {

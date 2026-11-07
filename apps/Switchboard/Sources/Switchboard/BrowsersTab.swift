@@ -7,7 +7,8 @@ import UniformTypeIdentifiers
 /// The list of places links can open. Order = number keys in the picker.
 struct BrowsersTab: View {
     @Bindable var model: AppModel
-    @State private var selection: UUID?
+    // Store screenshots show one browser's options.
+    @State private var selection: UUID? = Showcase.isActive ? ShowcaseFixtures.selectedTarget : nil
     @Environment(\.undoManager) private var undoManager
     @State private var profileSheetFor: InstalledApp?
     @State private var pendingRemoval: Target?

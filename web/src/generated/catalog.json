@@ -2,8 +2,8 @@
   "generatedAt": "2026-11-07",
   "brand": {
     "name": "Slopapp",
-    "tagline": "The name is a joke. The apps aren't.",
-    "description": "Free, open-source Mac apps, built with an unreasonable amount of care. No subscription, no account, no tracking.",
+    "tagline": "Native Mac apps, made with care.",
+    "description": "A growing collection of small, native Mac apps for everyday work. Free and open source, with no subscription, no account and no tracking.",
     "bundleIdPrefix": "app.slopapp",
     "repoUrl": "https://github.com/hunterunger/slopapp",
     "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
@@ -17,8 +17,23 @@
       "ember": "#E5603D",
       "ink": "#13201A"
     },
+    "nordic": {
+      "_note": "App icons and the website: matte Nordic colours on birch, botanical prints. Spec: brand/ICONS.md.",
+      "birch": "#F5F0E8",
+      "oat": "#E4D9C6",
+      "charcoal": "#2F2D2A",
+      "night": "#24231F",
+      "pine": "#3F5E4E",
+      "sage": "#8EA58B",
+      "clay": "#C4704F",
+      "ochre": "#D2A04C",
+      "fjord": "#5D7E9A",
+      "heather": "#8C7EA0",
+      "rosewood": "#A9665C",
+      "lingonberry": "#B9473B"
+    },
     "candy": {
-      "_note": "Launcher + website palette: translucent sugar-candy plastic over frosted ice, after the 1998–2000 iMac era. Apps keep the system look.",
+      "_note": "The launcher's own palette (its icon and frame). The website and app icons use nordic.",
       "strawberry": "#F0407A",
       "tangerine": "#F28A0C",
       "lime": "#6CCB2F",
@@ -107,6 +122,42 @@
         ]
       },
       "dir": "apps/Switchboard",
+      "shots": [
+        {
+          "id": "hero",
+          "title": "Pick a browser, every time",
+          "caption": "Click a link anywhere and choose where it opens: a browser, a profile or a private window. Press 1 to 9, or click.",
+          "width": 2880,
+          "height": 1800,
+          "light": "shots/switchboard/hero-light.webp",
+          "dark": "shots/switchboard/hero-dark.webp",
+          "light1x": "shots/switchboard/hero-light@1x.webp",
+          "dark1x": "shots/switchboard/hero-dark@1x.webp"
+        },
+        {
+          "id": "rules",
+          "title": "Rules that pick for you",
+          "caption": "Send work sites to your work profile and links from Slack wherever you like. The first rule that matches wins.",
+          "width": 2880,
+          "height": 1800,
+          "light": "shots/switchboard/rules-light.webp",
+          "dark": "shots/switchboard/rules-dark.webp",
+          "light1x": "shots/switchboard/rules-light@1x.webp",
+          "dark1x": "shots/switchboard/rules-dark@1x.webp"
+        },
+        {
+          "id": "browsers",
+          "title": "Every browser and profile",
+          "caption": "Add Chrome profiles and private windows as their own choices, and put them in the order you want.",
+          "width": 2880,
+          "height": 1800,
+          "light": "shots/switchboard/browsers-light.webp",
+          "dark": "shots/switchboard/browsers-dark.webp",
+          "light1x": "shots/switchboard/browsers-light@1x.webp",
+          "dark1x": "shots/switchboard/browsers-dark@1x.webp"
+        }
+      ],
+      "shotsVersion": "0.2.0-1",
       "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/switchboard-v0.2.0/Switchboard.zip"
     },
     {
@@ -146,8 +197,22 @@
       "status": "alpha",
       "version": "0.1.0",
       "build": 1,
-      "minimumMacOS": "14.0",
+      "minimumMacOS": "26.4",
       "bundleId": "app.slopapp.dictate",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Dictate listens while you hold the dictation key and turns your speech into text on this Mac. Audio is never saved or uploaded.",
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Audio or video file",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.audio",
+              "public.movie"
+            ]
+          }
+        ]
+      },
       "dir": "apps/Dictate",
       "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/dictate-v0.1.0/Dictate.zip"
     },
@@ -239,6 +304,53 @@
         ]
       },
       "dir": "apps/Snapper",
+      "shots": [
+        {
+          "id": "hero",
+          "title": "Mark it up, right away",
+          "caption": "Arrows, boxes, text, numbered steps and blur for anything private. Every mark stays editable.",
+          "width": 2880,
+          "height": 1800,
+          "light": "shots/snapper/hero-light.webp",
+          "dark": "shots/snapper/hero-dark.webp",
+          "light1x": "shots/snapper/hero-light@1x.webp",
+          "dark1x": "shots/snapper/hero-dark@1x.webp"
+        },
+        {
+          "id": "card",
+          "title": "Every capture waits in the corner",
+          "caption": "Copy, save, annotate or pin it from the thumbnail, or drag it straight into another app.",
+          "width": 2880,
+          "height": 1800,
+          "light": "shots/snapper/card-light.webp",
+          "dark": "shots/snapper/card-dark.webp",
+          "light1x": "shots/snapper/card-light@1x.webp",
+          "dark1x": "shots/snapper/card-dark@1x.webp"
+        },
+        {
+          "id": "background",
+          "title": "Ready to share",
+          "caption": "Frame a capture on a gradient with padding, rounded corners and a shadow, for slides and posts.",
+          "width": 2880,
+          "height": 1800,
+          "light": "shots/snapper/background-light.webp",
+          "dark": "shots/snapper/background-dark.webp",
+          "light1x": "shots/snapper/background-light@1x.webp",
+          "dark1x": "shots/snapper/background-dark@1x.webp"
+        },
+        {
+          "id": "history",
+          "title": "Find it again later",
+          "caption": "Capture History keeps a month of captures, grouped by day. Search by app, and bring any of them back.",
+          "width": 2880,
+          "height": 1800,
+          "light": "shots/snapper/history-light.webp",
+          "dark": "shots/snapper/history-dark.webp",
+          "light1x": "shots/snapper/history-light@1x.webp",
+          "dark1x": "shots/snapper/history-dark@1x.webp"
+        }
+      ],
+      "shotsVersion": "0.2.0-1",
       "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/snapper-v0.2.0/Snapper.zip"
     },
     {
@@ -722,6 +834,20 @@
       "build": 1,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.commit",
+      "infoPlist": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Folder",
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.folder"
+            ]
+          }
+        ],
+        "NSSupportsAutomaticTermination": false,
+        "NSSupportsSuddenTermination": false
+      },
       "dir": "apps/Commit",
       "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/commit-v0.1.0/Commit.zip"
     },

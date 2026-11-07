@@ -90,3 +90,9 @@ open -a "$APP" "switchboard://open?url=https%3A%2F%2Fexample.com&pick=1"   # for
 Bundling registers the app with LaunchServices as a *candidate* browser (it never becomes the
 default by itself). To unregister a build:
 `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u build/Switchboard.app`
+
+### Store screenshots
+
+`scripts/shots.sh Switchboard` takes the set listed in `showcase.json` (scenes in
+`Sources/Switchboard/Showcase.swift`, all made-up content) and writes `web/public/shots/switchboard/`. See
+[docs/screenshots.md](../../docs/screenshots.md).

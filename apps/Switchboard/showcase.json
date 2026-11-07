@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "env": {
+    "SWITCHBOARD_CONFIG": "{data}/config.json",
+    "SWITCHBOARD_DRY_RUN": "1",
+    "SWITCHBOARD_LOG": "{data}/switchboard.log"
+  },
+  "shots": [
+    {
+      "id": "hero",
+      "scene": "picker",
+      "title": "Pick a browser, every time",
+      "caption": "Click a link anywhere and choose where it opens: a browser, a profile or a private window. Press 1 to 9, or click.",
+      "zoom": 1.8
+    },
+    {
+      "id": "rules",
+      "scene": "rules",
+      "title": "Rules that pick for you",
+      "caption": "Send work sites to your work profile and links from Slack wherever you like. The first rule that matches wins.",
+      "zoom": 1.45,
+      "menuBar": false
+    },
+    {
+      "id": "browsers",
+      "scene": "browsers",
+      "title": "Every browser and profile",
+      "caption": "Add Chrome profiles and private windows as their own choices, and put them in the order you want.",
+      "zoom": 1.45,
+      "menuBar": false
+    }
+  ]
+}

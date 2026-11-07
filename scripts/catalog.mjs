@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { shotSet } from "./shots-feed.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const readJSON = (p) => JSON.parse(readFileSync(p, "utf8"));
@@ -20,7 +21,9 @@ for (const dir of existsSync(appsDir) ? readdirSync(appsDir, { withFileTypes: tr
   const manifest = join(appsDir, dir.name, "app.json");
   if (!dir.isDirectory() || !existsSync(manifest)) continue;
   const app = readJSON(manifest);
-  built.set(app.slug, { ...app, dir: `apps/${dir.name}` });
+  // Store screenshots (docs/screenshots.md), for apps that have a set.
+  const set = shotSet(root, app, join(appsDir, dir.name));
+  built.set(app.slug, { ...app, dir: `apps/${dir.name}`, ...(set && { shots: set.shots, shotsVersion: set.version }) });
 }
 
 // Each app is released under its own tag, <slug>-v<version> (see .github/workflows/release.yml),

@@ -42,6 +42,18 @@ final class AppModel {
             ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Application Support/app.slopapp.switchboard")
         let file = Diagnostics.configOverride ?? support.appending(path: "config.json")
         store = ConfigStore(fileURL: file)
+        if Showcase.isActive {
+            // Store screenshots: synthetic settings, never the person's own.
+            func path(_ id: String, _ fallback: String) -> String {
+                NSWorkspace.shared.urlForApplication(withBundleIdentifier: id)?.path ?? fallback
+            }
+            config = ShowcaseFixtures.config(
+                safariPath: path(ShowcaseFixtures.safariID, "/Applications/Safari.app"),
+                chromePath: path(ShowcaseFixtures.chromeID, "/Applications/Google Chrome.app"))
+            refreshInstalledApps()
+            isDefaultBrowser = true
+            return
+        }
         switch store.load() {
         case .loaded(let config):
             self.config = config
@@ -81,7 +93,7 @@ final class AppModel {
     // MARK: - Default browser
 
     func refreshDefaultStatus() {
-        if Diagnostics.assumesDefault {
+        if Diagnostics.assumesDefault || Showcase.isActive {
             isDefaultBrowser = true
             return
         }

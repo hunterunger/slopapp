@@ -235,6 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         KeyboardShortcuts.onKeyDown(for: .openHistory) { HistoryWindowController.show() }
         if Diagnostics.testHooks { installTestHooks(model) }
         TestScene.showIfRequested()
+        if let scene = Showcase.scene { ShowcaseScenes.run(scene, model: model) }
         Diagnostics.record("launched permission=\(model.hasPermission)")
     }
 

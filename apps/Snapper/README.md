@@ -133,3 +133,9 @@ so nothing else on screen can end up in a test capture),
 Test mode covers every capture kind: self-timer and scrolling captures use the same filtered,
 masked snapshots; recordings stream only the test scene window, clipped to the selection
 inside it, and refuse anything else. See `Sources/Snapper/Diagnostics.swift`.
+
+### Store screenshots
+
+`scripts/shots.sh Snapper` takes the set listed in `showcase.json` (scenes in
+`Sources/Snapper/Showcase.swift`, all made-up content) and writes `web/public/shots/snapper/`. See
+[docs/screenshots.md](../../docs/screenshots.md).
