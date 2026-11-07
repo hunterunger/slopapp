@@ -103,6 +103,7 @@ public struct Squisher: Sendable {
             url = try write(encoded, for: input, previousOutput: previousOutput)
         }
         files.markAsOutput(url)
+        if settings.keepFileDates { files.copyDates(from: source, to: url) }
         progress(1)
         return .saved(url, bytes: after)
     }
@@ -170,9 +171,12 @@ public struct Squisher: Sendable {
                 }
             }
             throw OutputError.tooManyNames(input.lastPathComponent)
-        case .alongside, .folder:
+        case .alongside, .folder, .subfolder:
             if case .folder(let folder) = settings.destination, !files.isDirectory(folder) {
                 throw OutputError.noFolder(folder.lastPathComponent)
+            }
+            if case .subfolder = settings.destination {
+                try files.createFolder(preferred.deletingLastPathComponent())
             }
             // Processing the same file again replaces our own earlier output.
             if let previous = previousOutput,

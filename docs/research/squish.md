@@ -524,3 +524,267 @@ Also: if macOS won't let Squish read an original in the real Trash (TCC can prot
 ~/.Trash), Put Back and Compress Again now say so and point to Finder's Put Back. They no
 longer misreport it as "not the original anymore", and they never fall back to the
 compressed copy. Not testable here without putting a file in the owner's Trash.
+
+## Parity pass (2026-11-03)
+
+Per `docs/parity-pass.md`: look and work much more like the originals, and don't miss
+features. Studied again read-only: **Squash 3.3** (installed: launched with three test images
+from `/tmp/squish-parity/`, main window, presets sidebar, Resize mode list; sidebar toggled
+back, nothing exported, quit), **PDF Squeezer 4.9** (installed: two test PDFs, profile popup,
+Info and profile inspectors, Compare mode; all toggled back, Open Recent cleared, quit), and
+the official **Squash 4** docs and main-window screenshot (Main Window, Presets pages).
+
+### What the originals look like now
+
+Both converge on one shape: **file list on the left · the selected file in the middle ·
+settings on the right, with the preset/profile picker on top.**
+
+- *Squash 4*: list rows (thumbnail, output name, "2 MB → 61 KB"); a before/after **split
+  slider** over the selected image with "Before · 2.1 MB" / "After · 57 KB" badges and a
+  floating zoom/compare bar; a settings sidebar of collapsible sections (Format, Location,
+  Rename, Resize, Crop, Rotate…) with the **preset popup at its top** and **Export Images
+  pinned at its bottom**.
+- *Squash 3.3* (installed): grid of large cards (format + size badge) and a stack of on/off
+  nodes (Resize, Adjustments, Effects, Borders, Watermark, Format + quality + Progressive,
+  Metadata, Rename, Retain Dates, Export) above a full-width Export button; presets sidebar
+  on the left ("Add Preset").
+- *PDF Squeezer 4.9*: sidebar list ("56.4 MB → 151 KB, 99%"); a big page thumbnail with
+  "14 KB → 13 KB" / "Size reduced by 7.55%" and a share button; toolbar **profile popup**
+  whose items cache each profile's result ("Medium Compression (13 KB, 7.55%)"); right
+  inspector: profile settings (Images tab: optimize, quality, max dpi, Color Profile, four
+  image toggles; Fonts/Annotations; Metadata; Advanced) or file info (name, size, page /
+  image / annotation counts, title, producer, dates; Extract Images / Text, Convert to
+  Bitmap); **Compare**: side-by-side split with a source picker on each half, zoom ±.
+
+### Gap table
+
+| Item (original) | Status | Notes |
+|---|---|---|
+| **Design** | | |
+| Three columns: list · preview · settings (both) | done | `NavigationSplitView` sidebar (SlopKit `FileQueueView`) + detail preview + `.inspector` options. Sidebar appears with the first file, hides when the list is cleared (PDF Squeezer "Show Sidebar: Automatically"). |
+| Preset/profile picker on top of the settings (Squash 4) / in the toolbar (PDF Squeezer) | done | Sits in the toolbar above the options column; when the options are hidden SwiftUI moves it into the main toolbar, so it's always one click away. |
+| Export button pinned under the settings (Squash) | done (adapted) | "Apply to N Files" + batch total. Squish writes on drop, so this button re-applies changed settings instead of exporting. |
+| Before/after split compare with size badges (Squash 4) / Compare mode (PDF Squeezer) | done | AppKit scroll view with two image layers and a mask; drag the handle (or VoiceOver adjust); the split stays put while zooming/scrolling. ⌘K toggles; off shows the result alone. Badges "Before · 3.3 MB" / "After · 1.9 MB" / "Original · 14 KB". |
+| Zoom in/out/fit/actual, pinch, double-tap (both) | done | ⌘+ / ⌘− / ⌘9 / ⌥⌘0, floating capsule bar like Squash 4's. Previews are capped at 4096 px (memory), so "actual size" of bigger photos is slightly scaled. |
+| PDF page navigation in compare (PDF Squeezer) | done | Page stepper in the floating bar, ⌥⌘↑/↓. Pages rendered at 2400 px. |
+| Big "X → Y" + "Size reduced by N%" readout (PDF Squeezer) | done | Footer under the preview, plus "Saved as …", pixel size / format change ("JPEG · 3840 × 2160 → JPEG · 1280 × 720") or "PDF · 6 pages · 6 images". |
+| File info inspector (PDF Squeezer: pages, images, annotations, title, producer, dates) | partial | Pages, images, size, dimensions shown. Title/producer/dates: deferred (S, 1 h), low everyday value. |
+| Share button (PDF Squeezer) | done | Toolbar + footer `ShareLink`. |
+| Drag the result out (both) | done | Drag the file icon in the footer. Dragging a *row* needs SlopKit's `FileQueueRow` to be a drag source: deferred (S, SlopKit). |
+| Sort the list by name/size/ratio/date/status (PDF Squeezer) | deferred | SlopKit's `FileQueue.items` order is read-only; needs a `sort(by:)` API (S, SlopKit). |
+| Squash 3 large-card grid | not adopted | Squash 4 itself replaced it with a list; a list scales to 500-file batches and keeps the preview big. |
+| Sounds, Zen music, confetti, themes, alternate Dock icons (Squash) | skip | Design system: quiet and native. |
+| **Presets / profiles** | | |
+| Named presets: save, apply, update, revert, rename, delete (Squash 4 presets, PDF Squeezer profiles) | done | `PresetLibrary` in SquishCore (tested). Built-ins (High Quality / Balanced / Smallest File) can't change, like Squash's Default. "(Edited)" when options differ. ⌘1–⌘9 in the Compression menu. Presets hold quality, PNG colors, progressive, resize, format, metadata and PDF options, **not** the destination (so a preset can never switch on Replace Originals). |
+| Reorder / import / export presets (PDF Squeezer) | deferred | Reorder is in the library (tested) but has no UI yet: needs a Presets settings pane (S, 2 h). Import/export files (S). |
+| Per-profile result cached in the picker (PDF Squeezer) | deferred | Means compressing each file once per preset in the background (M, half a day; memory budget). |
+| "Try up to N stronger profiles if it doesn't shrink" (PDF Squeezer) | deferred | (S, 2 h). Never-bigger already keeps the original and says so. |
+| **Images** | | |
+| Resize modes: Max Size, Width, Height, Max Width/Height, Percent (Squash) | done | Longest Edge, Width, Height, Fit Within, Percentage, each with a common-sizes menu. All keep the aspect ratio and never enlarge (Squash's Width/Height can; for a compressor that only makes files bigger). Width/height mean the displayed (rotated) size. |
+| Free size / stretch (Squash) | skip | Distorts images; not a compression job. |
+| Format per preset, quality slider (Squash) | done | One quality for JPEG/HEIC/AVIF, PNG: Lossless / 256 / 128 / 64 colors. |
+| Progressive JPEG (Squash) | done | Toggle; tested via the JFIF flag. |
+| Metadata: Squash 4's five Remove checkboxes | partial | Remove All / Remove Location Only (GPS and IPTC place names) / Keep All. Five separate switches: deferred (S, 2 h). |
+| Retain Dates (Squash) | done | "Keep file dates" (options column + Settings). |
+| Watermark (Squash) | deferred | Text/image watermark with position and opacity (M, 1 day). Editing, not compressing; low everyday value for this job. |
+| Adjustments, effects, borders, crop, rotate, highlighter (Squash) | skip | Image-editor territory. |
+| Rename templates / AI names (Squash 4) | deferred | Token template (name, number, date, size) (M, half a day). Suffix + subfolder cover the everyday case. AI naming: skip. |
+| PNG optimisers oxipng/zopfli (Squash) | deferred | Needs a vetted MIT/BSD library (M). Palette quantizer already gives −70% on screenshots. |
+| WebP / JPEG XL output (Squash) | blocked / deferred | ImageIO can't write WebP on macOS 27. JPEG XL: add when `CGImageDestinationCopyTypeIdentifiers` lists it (S). |
+| Watched folders (Squash 4) | deferred | Needs a background agent / login item (L). |
+| Copy Squashed ⌥⌘C (Squash) | done | "Copy Compressed File" ⌥⌘C and in the row menu. Copy Original: skip. |
+| **Output** | | |
+| Same folder / subfolder of original / chosen folder + recents / replace (Squash 4 Location) | done | Added "Subfolder of Originals" (default name "Compressed", editable, cleaned of `/`, `:` and leading dots, created on demand). |
+| Overwrite warnings / never overwrite (Squash) | kept | Unchanged: numbered names, tagged own outputs replaced. |
+| **PDFs** | | |
+| Image quality + maximum resolution per profile (PDF Squeezer) | done | Separate from the image quality now (was one shared value). dpi stops 72–600. |
+| Color Profile: Grayscale (PDF Squeezer) | done | Uses macOS's own Gray Tone profile, read from `/System/Library/Filters/Gray Tone.qfilter` at run time, merged into our filter. Pages turn gray (tested by rendering); the file stays RGB, so it's only a little smaller. True one-channel gray: deferred (needs a PDF engine). RGB/CMYK conversion: skip. |
+| Fonts subsetting/merging, flatten annotations/forms, remove alternates/thumbnails, clip invisible image parts, monochrome scans, metadata editing (PDF Squeezer) | skip | Quartz filters can't; needs a full PDF engine (L). |
+| Password-protected PDFs: ask and re-apply (PDF Squeezer) | deferred | (M, half a day). Still skipped with a clear message, so protection is never silently dropped. |
+| Extract images/text, convert to bitmap, PDF/A (PDF Squeezer) | skip | Not "make it smaller". |
+| **System** | | |
+| Shortcuts actions (both) | deferred | App Intents need the `appintentsmetadataprocessor` step that `scripts/bundle.sh` (off limits) doesn't run; a SwiftPM-only build gives Shortcuts nothing to show (M, pipeline change). |
+| Notifications when done (PDF Squeezer, off by default) | deferred | Needs notification permission; the Dock bounce covers long batches (S). |
+| Finder Quick Action, Open With, Dock drop | kept | Unchanged. |
+| Write only on Export/Save (both) | deviation kept | Squish still writes safe copies on drop (the job's one interaction); Apply to All replaces them when settings change. |
+
+### Deviations from the design system (and why)
+
+- **Window**: default 1080×660, minimum 760×480 instead of the drop-in archetype's ~520×420,
+  to fit the originals' three columns. A remembered 0.1 window (560 pt) is widened once on
+  the first launch (`WindowLayout.upgradeIfNeeded`).
+- **Options in an inspector column**, not a bottom bar.
+- **Split handle colours**: white line and knob with a dark shadow (`.white`, `.black`
+  opacity), so the divider is visible on any image in light and dark mode. Everything else
+  uses system colours (`underPageBackgroundColor`, materials, accent).
+
+### Build and gates
+
+- New core: `CompressionOptions` / `CompressionPreset` / `PresetLibrary`, `ResizeMode`,
+  `MetadataPolicy`, `Destination.subfolder`, `keepFileDates`, `progressiveJPEG`,
+  `pdfGrayscale`, separate PDF quality, `FileFacts`. Settings from 0.1 migrate (tested).
+- New UI: `MainView` (three columns), `PreviewPane` + `CompareView` (AppKit compare),
+  `OptionsInspector` (sections, preset menu, naming sheet, Apply footer).
+- SlopKit untouched; used its existing `fileQueueShowsOutputName(false)` (the narrow list
+  showed truncated "→ name"; the footer now says "Saved as …") and
+  `fileQueueFollowsNewFiles()` (fixes a bug found here: the Quality field took focus at
+  launch, so arrow keys and typing changed settings; text fields no longer get initial
+  focus).
+- In-app components worth moving to SlopKit later: `CompareImageView` + `PreviewController`
+  (before/after compare for any converter), `PresetLibrary` (named presets for any app),
+  `WindowLayout` (one-time window resize after a layout change).
+- Tests: 71 Squish tests in 15 suites (was 47), all green; never-bigger, never-overwrite and
+  byte-identical Put Back tests unchanged and passing. New: resize modes, presets library,
+  migration, width-of-rotated-photos, remove-location-only, progressive JPEG, subfolder,
+  kept dates, grayscale PDF (rendered pixels), PDF/image facts.
+- `scripts/check.sh Squish --perf`: green. Final run: launch 174 ms, first window 505 ms
+  (load 3.3; budget 600, was ~300 ms with the one-column window: the inspector form costs
+  ~200 ms on first layout), idle CPU 0.04%, footprint 62 MB (budget 120).
+- Walkthrough on the release build (AX actions and pid-posted keys only; light and dark):
+  empty state; `open -a` with 7 fixtures; arrow keys move through the list and the preview
+  follows; image and PDF split compare; zoom in ×3 with the split fixed in the viewport;
+  page 2 of 6; compare off; kept-original and skipped rows; Save as New Preset sheet →
+  "Web Photos"; editing options shows "(Edited)" and "Apply to 7 Files"; Width 1280 from
+  the common-sizes menu + JPEG + Grayscale → Apply (outputs 1280 px wide, earlier
+  `-small.png/.heic` copies removed, PDF gray); Update, ⌘2/⌘4 switching, Rename → "Blog",
+  Delete (alert); Save To ▸ Subfolder (`Compressed/…`, tagged); Replace Originals → Edit ▸
+  Undo: all four originals **md5-identical**, compressed copies in the test trash as
+  "(compressed copy)"; Copy Compressed File into a private pasteboard (`SQUISH_PASTEBOARD`);
+  options hidden (preset moves to the toolbar); Settings; View ▸ Show Sidebar (⌃⌘S, via
+  `SidebarCommands`). Real-mouse drag of the split handle (owner idle ≥ 60 s, Squish in
+  front): the divider follows the pointer. During the first try an Open panel also
+  appeared in Squish; another agent was driving Snapper at that moment, and the panel never
+  came back in a repeat drag or a mouse-free replay, so it was most likely their global
+  ⌘O landing in the frontmost app. `scripts/drive tree`: no `[unlabeled]` controls.
+
+### Screenshots (not committed)
+
+- Originals: `/tmp/squish-parity/squash-main.png`, `squash-presets.png`, `pdfs-main.png`,
+  `pdfs-info.png`, `pdfs-profile.png`, `pdfs-compare.png`, `web/squash4-main-small.png`.
+- Squish: `/tmp/squish-parity/s2-batch-light.png` (first build), `s4-pdf-dark.png`,
+  `s5-zoom-page2.png`, `s6-nocompare.png`, `s7-zoomed.png`, `s8-save-preset-1.png`,
+  `s9-applied-dark.png` (grayscale PDF compare), `s10-pdf-light.png`, `s11-kept-light.png`,
+  `s12-no-options-dark.png`, `s13-settings-dark.png`, `s14-empty-light.png`,
+  `s15-dragged-light-1.png` (split handle dragged with the mouse).
+
+## Polish pass (2026-11-05)
+
+Per `docs/polish-pass.md`. Release build stamped with SDK 27.0 (full-size 16×16 window
+buttons). Every surface shot in light and dark with `SLOP_APPEARANCE`, test data only from
+`/tmp/squish-test/` (`SQUISH_TRASH_DIR=/tmp/squish-test/trash`, so nothing reached the
+owner's Trash; `SQUISH_PASTEBOARD` for copies). The owner's Squish defaults were exported
+before and imported back after; the Put Back registry was left empty (`[]`).
+
+### Defects found and fixed (before → after)
+
+| # | Surface | Defect (measured) | Fix |
+|---|---|---|---|
+| 1 | Lint | 2 corner literals (spinner backdrop `12`, badge `6`) | `Radius.l`, `Radius.s`; lint clean |
+| 2 | Preview footer | Height changed with the row's state: divider at y 1045 px (kept original) vs 1018 (compressed) vs 1016 (failed), so the image and zoom bar jumped up to 14 pt when the selection changed | Fixed-height footer (hidden tallest layout holds it); divider at 1018 px for every state |
+| 3 | Preview footer | Text's leading edge moved 16 pt → 61 pt when the file icon appeared (only rows with a result had one) | Icon slot always present: draggable for a result (compressed copy or the kept original), dimmed otherwise |
+| 4 | Preview footer | Failed message in plain `.orange`: 2.2:1 on white (stroke-core sample #EE9A48) | `.textOrange`: 4.5:1 (#A4682D) light; dark unchanged |
+| 5 | Preview footer | "Saved as …" was its own line (5 lines for compressed files) | Joined to the facts line: "JPEG · 3840 × 2160 · Saved as photo-small.jpg"; facts never truncate, the name gives way in the middle |
+| 6 | Preview footer | Canceled files had no Try Again (rows did) | Try Again for failed and canceled |
+| 7 | Compare | Split line and knob ran the full pane height (off the picture, through the badges and zoom bar); split measured across the pane, so on a portrait page a split near an edge could miss the image | Line spans the visible image only; split measured across the visible image, mask and handle from the same rect (`PreviewController.imageRect`) |
+| 8 | Compare | Fitted PDF page overlapped the Before badge (page top 145 px vs badge bottom 160 px) and touched the zoom bar (≈1 pt) | Badge band (12 + 24 + 8 pt) and zoom-bar band (12 + 32 + 8 pt) as scroll insets: page now exactly 8.0 pt below the badges and 8.0 pt above the bar |
+| 9 | Compare | Fitted image 2.5–2.7 pt low (clip view mixed point insets with document units) | Insets scaled by zoom: photo centre 296.25 pt vs expected 296.5 |
+| 10 | Compare | Wide image 15 pt from the pane edge vs badges 12.5 pt | Fit side margin = badge inset: image and badges share both edges (12.5 pt) |
+| 11 | Compare | Zoom bar shown (and enabled) over "No preview" | Hidden without a picture |
+| 12 | Badges / zoom bar | Heights from padding (badge 10/4 pt padding; bar 6 pt + content) | Fixed 24 pt badge, 32 pt bar (`PreviewMetrics`) |
+| 13 | Hairlines | SwiftUI `Divider` 2 px (1 pt) under the preview and above Apply; 1 pt vertical rules in the zoom bar | In-app `Hairline` (1 device px, `separatorColor`): 1 px measured |
+| 14 | Options footer | Apply button 12 pt from the column edge vs section cards 10 pt (edges 2 pt off); total 13 pt vs row labels 20 pt | Button edges = card edges (10 pt), total = label edge (20 pt) |
+| 15 | Options footer | Disabled "Apply to All" drawn `.borderedProminent`: in dark mode it read as an enabled accent button | Prominent only when there's something to apply; otherwise plain bordered |
+| 16 | Options | Notes under Size, Metadata and Save To were extra form rows with separators | Native section footers (`FormNote`) |
+| 17 | Options ▸ Size | Scale field 56 pt with no menu, pixel fields 64 pt + menu: columns didn't line up; common-sizes chevron centre 4 pt right of the pop-up indicators (1050.5 vs 1046.5 pt) | One field component for every resize row (64 pt field, fixed unit slot, menu incl. 75/50/33/25 %); chevron centred at 1046.5 pt |
+| 18 | Options ▸ Size | VoiceOver "Common scale scales" | "Common scales" |
+| 19 | Sidebar (empty) | Show Sidebar with no files drew a second drop zone next to the first | `ContentUnavailableView` "No Files / Files you add appear here." (still a drop target) |
+| 20 | Title bar | Subtitle truncated at 1080 pt: "Saved 169.1 MB (−96%) · 13 files · 3 fai…" | "Saved 169.1 MB · 3 failed" (count and % live in the options footer) |
+| 21 | Toolbar / View menu | Compare toggle enabled with an empty list | Disabled until there are files |
+| 22 | Rows (errors) | Messages repeated the file name and truncated at 3 lines ("…Try openin…", "…and expo…") | Nameless, ≤ 80 characters (tested): "Couldn't read this file. It may be damaged. Try opening it in Preview." etc.; all fit |
+| 23 | Rows (errors) | Try Again on files that fail the same way every time (empty, unreadable, locked PDF) | `SquishError.isWorthRetrying` → SlopKit's `FileQueueRetryHint`: no Try Again, left out of ⌘R |
+| 24 | Preset sheet | Content inset 16 pt | 20 pt (`Spacing.windowMargin`), measured |
+| 25 | Settings | Explanations were separate rows with separators | Subtitles under their own labels (Toggle/LabeledContent two-text labels) |
+| 26 | Replace Originals alert | Destructive choice not marked | `role: .destructive` |
+| 27 | Put Back all / Delete preset | App-modal floating alerts (they also brought Squish to the front) | Sheets on the main window (`AppModel.ask`), modal fallback without one |
+
+Checked and fine as is: drop zone 20.0 pt from the toolbar, sides and bottom; window
+buttons 16×16; list strip and selection insets (SlopKit); preset menu; Location menu;
+Save To subfolder/replace states; zoomed view (content scrolls under badges and bar);
+compare off (After badge only); multi-selection summary; canceled rows; selected rows'
+text on the accent fill; dark mode throughout.
+
+### Gates
+
+- `scripts/check.sh Squish --perf`: all pass. Launch 128–170 ms, first window 541 ms (load
+  4.0) / 580 ms (load 4.8, busy machine; budget 600), idle CPU 0.03–0.06 %, footprint
+  67.8–70.1 MB.
+- Tests: 73 in 16 suites (new `ErrorWordingTests`: no names, says what to do, ≤ 80 chars;
+  only encode failures are worth retrying).
+- `scripts/drive tree`: 0 `[unlabeled]`; close button 16×16.
+- Replace Originals → File ▸ Put Back Originals… on `/tmp/squish-test/replace`: all three
+  originals md5-identical afterwards; compressed copies in the test trash.
+
+### Not done, and why
+
+- Hover states (row buttons, drop strip, zoom bar): needs the real mouse; the owner was
+  active part of the time and the screen was locked for ~20 minutes, so not exercised.
+  They're SlopKit's/AppKit's own styles.
+- Edit ▸ Undo after Replace Originals wasn't re-run (the window wasn't key while driving, so
+  Undo was disabled); Put Back from the File menu covers the same code path and passed.
+- The footer centres its content in the fixed height, so the name sits about 8 pt higher
+  for a two-line message than a one-line one. Kept: top-aligning would leave a lopsided
+  empty band under the common one-line case.
+- `InspectorMetrics.formInset` (10 pt) is measured on macOS 26's grouped `Form`; older
+  systems use their own inset, so the Apply footer may be a few points off there.
+
+### Golden Gate + light/dark (2026-11-06)
+
+Follow-up for the owner's "optimized for dark/light mode AND fit in with macOS Golden Gate"
+(`docs/design-system.md` §4 "Fitting in on macOS 27 Golden Gate", §10 items 25–26). Shot in
+both appearances, active and inactive: `/tmp/slopapp-polish/squish/gg/`
+(`empty-`, `compare-inactive-`, `failed-`, `pdf-`, `settings-` × `light`/`dark`; `pdf-light` is
+the active-window sample). Defaults backed up and restored; test files only in `/tmp`.
+
+| Check | Before → after |
+|---|---|
+| Menus (menu bar, row context menu, preset pull-down, Resize/Format/PNG/dpi/Location pickers, common-sizes menus) | Already text only (state checkmarks and preset details are information). No change. Toolbar items keep their symbols, as standard toolbars do. |
+| Toolbar | Standard `.toolbar`; nothing drawn behind items; preset picker legible over the scrolled options (system scroll-edge effect). No change. |
+| Sidebar | System `NavigationSplitView` sidebar, edge to edge; rows are thumbnails (no symbols to tint). No change. |
+| Inactive windows | The zoom bar's Compare toggle stayed accent blue in a background window → `Color.windowAccent(controlActiveState)`: blue active, grey inactive (both shot). Queue selection, sliders, toolbar toggles and the prominent Apply button already go grey (SlopKit / system). |
+| Glass | Badges, zoom bar and the working spinner use `.regularMaterial` (system); no hand-made translucency. No change. |
+| Drawn pure white/black | The before/after divider and knob were `.white` with `.black` shadows and edge → SlopKit's `OverlayPalette` (`ring` ≈ 85 % white, `ringShadow` from the dark window colour, knob edge via `hairlineBorder`): chrome over arbitrary pictures, the same in both modes. The compare mask's black is a mask (never drawn). PDF pages render on white paper (content). |
+| Status colours | Savings `−N%` (`.textGreen`) and failure text (`.textOrange`) read in both modes; footer text secondary. No change. |
+| Live appearance change | Can't flip the owner's system appearance, so checked by code: no stored CGColors depend on the appearance (the document layer's shadow is black in both modes by design, the mask is alpha only); everything else is SwiftUI semantic colours that re-resolve. |
+| Hairlines (SlopKit now lays out 1 pt) | My in-app `Hairline` is gone; SlopKit's is used. Re-measured: preview divider 1 px at y 1098 px (was 1099), zoom bar still exactly 24 px (12 pt) above it, options divider 1 px; zoom-bar rules crisp. |
+| FileQueue (SlopKit changes) | Rows, selection and drop strip checked light/dark, active/inactive: no regressions. |
+
+Gates: `scripts/check.sh Squish --perf` all pass (launch 131 ms, first window 569 ms at load
+7.5, idle CPU 0.03 %, 67.3 MB); one earlier run missed first window at load 9.8 while other
+builders were busy and passed on re-run. 73 tests; `drive tree`: 0 `[unlabeled]`, close
+button 16×16.
+
+Not done: a live light↔dark switch while running (would need changing the owner's system
+appearance); hover states (real pointer, owner active). Note: opening Settings with ⌘, brings
+Squish forward, and one shot did that while the owner was active; I stopped using it after.
+
+### SlopKit notes (not edited)
+
+- `FileQueueView` multi-selection: separators still draw inside a block of selected rows.
+- `AboutView`: the tagline wraps with a two-word last line ("files out.") at the Settings
+  width.
+- `Hairline` exists in three apps now (Switchboard, Snapper, Squish): worth moving to SlopKit.
+- `FileQueueItem.State.isFailedOrCancelled` is internal; apps re-implement it.
+
+### Screenshots (`/tmp/slopapp-polish/squish/`)
+
+Before: `b01-empty-light`, `b02-empty-sidebar-light` (two drop zones), `b03-working-light`,
+`b04-done-light`, `b05-compare-light`, `b06-failed-light`, `b07-pdf-light`,
+`b08-settings-light`, `b09-about-light`, `b10-inspector-bottom-light`,
+`b11-preset-menu-light-1`, `b12-sheet-light-1`, `b13-failed-dark`.
+After: `a01-empty-{light,dark}`, `a02-empty-sidebar-{light,dark}`, `a04-done-{light,dark}`,
+`a05-compare-{light,dark}`, `a06-failed-{light,dark}`, `a07-pdf-{light,dark}`,
+`a08-stopped-dark-2`, `a11-settings-{light,dark}-1`, `a12-resize-percent-light`,
+`a13-resize-fit-light`, `a14-location-menu-light-1`, `a15-subfolder-light`,
+`a16-replace-alert-light-1`, `a17-replaced-light`, `a19-putback-alert-light-1`,
+`a20-putback-done-light`, `a21-sheet-light-1`, `a22-multi-light`, `a23-zoomed-light`,
+`a24-compare-off-light`, `a25-putback-sheet-light-1`.

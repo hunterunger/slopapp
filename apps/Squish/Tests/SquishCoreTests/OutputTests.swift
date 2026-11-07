@@ -79,38 +79,55 @@ import Testing
 @Suite struct SettingsTests {
     @Test func presetsGetSmaller() {
         var s = SquishSettings()
-        let qualities = [QualityPreset.high, .balanced, .small].map { p -> Double in s.preset = p; return s.imageQuality }
+        let presets = [CompressionPreset.high, .balanced, .small]
+        let qualities = presets.map { p -> Double in s.apply(p); return s.imageQuality }
         #expect(qualities == qualities.sorted(by: >))
-        let dpis = [QualityPreset.high, .balanced, .small].map { p -> Int in s.preset = p; return s.pdf.resolution }
+        let dpis = presets.map { p -> Int in s.apply(p); return s.pdf.resolution }
         #expect(dpis == dpis.sorted(by: >))
-        s.preset = .high
+        s.apply(.high)
         #expect(s.pngMode == .lossless)
-        s.preset = .balanced
+        s.apply(.balanced)
         #expect(s.pngMode == .palette(colors: 256))
+        #expect(s.presetID == "balanced")
     }
 
-    @Test func customIsClamped() {
+    @Test func valuesAreClamped() {
         var s = SquishSettings()
-        s.preset = .custom
-        s.customQuality = 5
-        s.customPDFResolution = 10
+        s.quality = 5
+        s.pdfResolution = 10
+        s.pdfQuality = 0
         #expect(s.imageQuality == 1)
         #expect(s.pdf.resolution == 50)
-        #expect(s.pngMode == .lossless)
+        #expect(s.pdf.quality == 0.1)
     }
 
     @Test func roundTripsAndToleratesMissingKeys() throws {
         var s = SquishSettings()
-        s.preset = .small
-        s.maxDimension = 1600
-        s.destination = .folder(URL(fileURLWithPath: "/tmp/x"))
+        s.apply(.small)
+        s.resize = .fit(width: 1600, height: 900)
+        s.destination = .subfolder("Web")
         s.format = .heic
+        s.metadata = .removeLocation
+        s.pdfGrayscale = true
+        s.keepFileDates = true
+        s.pngColors = nil
         let data = try JSONEncoder().encode(s)
         #expect(try JSONDecoder().decode(SquishSettings.self, from: data) == s)
-        let partial = try JSONDecoder().decode(SquishSettings.self, from: Data(#"{"preset":"high","format":"nonsense"}"#.utf8))
-        #expect(partial.preset == .high)
+        let partial = try JSONDecoder().decode(SquishSettings.self, from: Data(#"{"quality":0.9,"format":"nonsense"}"#.utf8))
+        #expect(partial.quality == 0.9)
         #expect(partial.format == .original)
         #expect(partial.stripMetadata)
+    }
+
+    @Test func settingsFromVersion01Migrate() throws {
+        let old = #"{"preset":"small","maxDimension":1920,"stripMetadata":false,"format":"jpeg","suffix":"-web","destination":{"alongside":{}}}"#
+        let s = try JSONDecoder().decode(SquishSettings.self, from: Data(old.utf8))
+        #expect(s.options == CompressionOptions(quality: 0.55, pngColors: 128, resize: .longestEdge(1920), format: .jpeg,
+                                                metadata: .keepAll, pdfResolution: 96, pdfQuality: 0.5))
+        #expect(s.presetID == "small")
+        #expect(s.suffix == "-web")
+        let custom = try JSONDecoder().decode(SquishSettings.self, from: Data(#"{"preset":"custom","customQuality":0.95,"customPDFResolution":300}"#.utf8))
+        #expect(custom.quality == 0.95 && custom.pdfResolution == 300 && custom.pngColors == nil)
     }
 
     @Test func formatChoicesFollowTheEncoder() {

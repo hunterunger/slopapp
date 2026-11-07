@@ -56,9 +56,8 @@ public actor MemoryBudget {
                   let height = props[kCGImagePropertyPixelHeight] as? Int
             else { return 16 << 20 }
             var pixels = Double(width) * Double(height)
-            if let maxDimension = settings.maxDimension, max(width, height) > maxDimension {
-                let scale = Double(maxDimension) / Double(max(width, height))
-                pixels *= scale * scale
+            if let target = settings.resize.targetSize(for: CGSize(width: width, height: height)) {
+                pixels = Double(target.width) * Double(target.height)
             }
             let output = settings.format.type ?? inputType
             let perPixel: Double

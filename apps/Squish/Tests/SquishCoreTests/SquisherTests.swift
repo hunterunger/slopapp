@@ -129,14 +129,14 @@ import UniformTypeIdentifiers
 
         let first = try #require(try await Squisher(settings: settings, files: store, replacements: registry).run(input).savedURL)
         let firstMD5 = try md5(first)
-        settings.preset = .small
+        settings.apply(.small)
         let second = try #require(try await Squisher(settings: settings, files: store, replacements: registry)
             .run(first, previousOutput: first).savedURL)
         #expect(second == input)
         #expect(try md5(second) != firstMD5)          // re-encoded…
         #expect(store.isMarkedAsOutput(second))
         let secondSize = fileSize(second)
-        settings.preset = .high
+        settings.apply(.high)
         let third = try #require(try await Squisher(settings: settings, files: store, replacements: registry)
             .run(second, previousOutput: second).savedURL)
         // …from the original, not from the previous copy: High from the original is
@@ -345,7 +345,7 @@ import UniformTypeIdentifiers
 
     @Test func filterUsesPresetResolution() {
         var s = SquishSettings()
-        s.preset = .small
+        s.apply(.small)
         let props = PDFCompressor.filterProperties(s.pdf)
         let image = ((props["FilterData"] as? [String: Any])?["ColorSettings"] as? [String: Any])?["ImageSettings"] as? [String: Any]
         let scale = image?["ImageScaleSettings"] as? [String: Any]
@@ -366,6 +366,24 @@ final class ReplacementLog: @unchecked Sendable {
     private var items: [Replacement] = []
     var all: [Replacement] { lock.withLock { items } }
     func add(_ r: Replacement) { lock.withLock { items.append(r) } }
+}
+
+@Suite struct ErrorWordingTests {
+    static let all: [SquishError] = [.unreadable("Holiday.jpg"), .empty("Holiday.jpg"),
+                                     .encodeFailed("Holiday.jpg"), .lockedPDF("Holiday.jpg")]
+
+    /// Rows show the name already; the message shouldn't repeat it, and should say what to do.
+    @Test(arguments: all) func messageLeavesOutTheNameAndSaysWhatToDo(_ error: SquishError) {
+        let text = [error.errorDescription, error.recoverySuggestion].compactMap { $0 }.joined(separator: " ")
+        #expect(!text.contains("Holiday"))
+        #expect(error.recoverySuggestion?.isEmpty == false)
+        // Fits a 300 pt list row in three caption lines.
+        #expect(text.count <= 80)
+    }
+
+    @Test func onlyEncodeFailuresAreWorthRetrying() {
+        #expect(Self.all.filter(\.isWorthRetrying) == [.encodeFailed("Holiday.jpg")])
+    }
 }
 
 @Suite struct MemoryBudgetTests {

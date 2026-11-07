@@ -21,3 +21,7 @@ struct SquishProcessor: FileProcessor {
         }
     }
 }
+
+/// Unreadable, empty and locked files fail the same way every time: their rows get no
+/// Try Again, and Compress Again (⌘R) leaves them out.
+extension SquishError: FileQueueRetryHint {}

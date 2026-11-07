@@ -20,21 +20,32 @@ public enum SquishError: LocalizedError, Equatable {
     case encodeFailed(String)
     case lockedPDF(String)
 
+    // The queue shows these next to the file's name, so they don't repeat it, and they're
+    // short enough to fit a narrow list row in three lines.
     public var errorDescription: String? {
         switch self {
-        case .unreadable(let name): "Couldn't read \(name)."
-        case .empty(let name): "\(name) is empty."
-        case .encodeFailed(let name): "Couldn't compress \(name)."
-        case .lockedPDF(let name): "\(name) is locked with a password."
+        case .unreadable: "Couldn't read this file."
+        case .empty: "This file is empty."
+        case .encodeFailed: "Couldn't compress this file."
+        case .lockedPDF: "This PDF has a password."
         }
     }
 
     public var recoverySuggestion: String? {
         switch self {
-        case .unreadable: "It may be damaged or not really an image or PDF. Try opening it in Preview."
+        case .unreadable: "It may be damaged. Try opening it in Preview."
         case .empty: "There's nothing in it to compress."
-        case .encodeFailed: "Try another format or quality, or open it in Preview and export a copy."
-        case .lockedPDF: "Open it in Preview, enter the password and export a copy, then try that."
+        case .encodeFailed: "Try another format or quality."
+        case .lockedPDF: "Export an unlocked copy in Preview, then add that."
+        }
+    }
+
+    /// Whether compressing the same file again could work. An unreadable, empty or locked
+    /// file fails the same way every time, so the app offers no Try Again for it.
+    public var isWorthRetrying: Bool {
+        switch self {
+        case .encodeFailed: true
+        case .unreadable, .empty, .lockedPDF: false
         }
     }
 }
@@ -67,12 +78,16 @@ public enum ImageCompressor {
         let orientation = properties[kCGImagePropertyOrientation] as? UInt32 ?? 1
 
         // Decode, downscaling while decoding when we resize (much faster and lighter).
-        let resizing = settings.maxDimension.map { max(width, height) > $0 } ?? false
+        // Every resize mode keeps the aspect ratio, so the target's longer side is all the
+        // thumbnail API needs. Sizes are as displayed (rotated photos swap width and height).
+        let upright = orientation >= 5 ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
+        let target = settings.resize.targetSize(for: upright)
+        let resizing = target != nil
         let image: CGImage?
-        if resizing, let maxDimension = settings.maxDimension {
+        if let target {
             image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceThumbnailMaxPixelSize: maxDimension,
+                kCGImageSourceThumbnailMaxPixelSize: Int(max(target.width, target.height)),
                 kCGImageSourceCreateThumbnailWithTransform: true,
                 kCGImageSourceShouldCacheImmediately: true,
             ] as CFDictionary)
@@ -103,10 +118,20 @@ public enum ImageCompressor {
         if isLossy(outputType) {
             options[kCGImageDestinationLossyCompressionQuality] = settings.imageQuality
         }
-        if !settings.stripMetadata {
+        if settings.metadata != .removeAll {
+            let keepLocation = settings.metadata == .keepAll
             for key in [kCGImagePropertyExifDictionary, kCGImagePropertyGPSDictionary, kCGImagePropertyIPTCDictionary,
                         kCGImagePropertyTIFFDictionary, kCGImagePropertyMakerAppleDictionary] {
+                if key == kCGImagePropertyGPSDictionary, !keepLocation { continue }
                 if let value = properties[key] { options[key] = value }
+            }
+            if !keepLocation, var iptc = options[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
+                // Place names are location too.
+                for key in [kCGImagePropertyIPTCCity, kCGImagePropertyIPTCProvinceState, kCGImagePropertyIPTCSubLocation,
+                            kCGImagePropertyIPTCCountryPrimaryLocationName, kCGImagePropertyIPTCCountryPrimaryLocationCode] {
+                    iptc.removeValue(forKey: key)
+                }
+                options[kCGImagePropertyIPTCDictionary] = iptc
             }
             if var tiff = options[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
                 tiff[kCGImagePropertyTIFFOrientation] = outOrientation
@@ -122,6 +147,9 @@ public enum ImageCompressor {
             for key in [kCGImagePropertyDPIWidth, kCGImagePropertyDPIHeight] {
                 if let value = properties[key] { options[key] = value }
             }
+        }
+        if settings.progressiveJPEG, outputType.conforms(to: .jpeg) {
+            options[kCGImagePropertyJFIFDictionary] = [kCGImagePropertyJFIFIsProgressive: true]
         }
         if outputType.conforms(to: .tiff) {
             // LZW: lossless, and what makes a TIFF smaller at all.

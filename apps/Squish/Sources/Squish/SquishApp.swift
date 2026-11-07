@@ -12,13 +12,14 @@ struct SquishApp: App {
     private let info = AppInfo.current(fallbackName: "Squish")
 
     var body: some Scene {
-        // One window. Closing it quits the app.
+        // One window, in three columns. Closing it quits the app.
         Window("Squish", id: "main") {
             MainView(model: model)
         }
-        .defaultSize(width: 560, height: 440)
+        .defaultSize(width: 1080, height: 660)
         .commands {
             SquishCommands(model: model, info: info)
+            SidebarCommands()
             MainWindowCommands(title: "Squish")
         }
 
@@ -48,8 +49,11 @@ struct SquishCommands: Commands {
             Button("Quick Look") { model.toggleQuickLook() }
                 .keyboardShortcut("y")
                 .disabled(model.queue.items.isEmpty)
+            Button("Copy Compressed File") { model.copyCompressed() }
+                .keyboardShortcut("c", modifiers: [.command, .option])
+                .disabled(!model.queue.items.contains { $0.output != nil })
             Divider()
-            Button("Redo All with New Settings") { model.redoOutdated() }
+            Button("Apply Settings to All") { model.redoOutdated() }
                 .keyboardShortcut("r", modifiers: [.command, .option])
                 .disabled(model.queue.isBusy || model.outdatedItems.isEmpty)
             Button("Compress Again") { model.processAgain() }
@@ -67,12 +71,36 @@ struct SquishCommands: Commands {
                 .keyboardShortcut(.delete, modifiers: [.command, .shift])
                 .disabled(model.queue.items.isEmpty)
         }
-        CommandMenu("Compression") {
-            QualityMenuItems(model: model, withShortcuts: true)
+        CommandGroup(before: .sidebar) {
+            Toggle("Compare Before and After", isOn: $model.comparing)
+                .keyboardShortcut("k")
+                .disabled(model.queue.items.isEmpty)
             Divider()
-            Menu("Size") { SizeMenuItems(model: model) }
-            Menu("Format") { FormatMenuItems(model: model) }
-            Menu("Save To") { DestinationMenuItems(model: model) }
+            Button("Zoom In") { model.preview.zoomIn() }
+                .keyboardShortcut("+")
+                .disabled(!model.preview.canZoom)
+            Button("Zoom Out") { model.preview.zoomOut() }
+                .keyboardShortcut("-")
+                .disabled(!model.preview.canZoom)
+            Button("Zoom to Fit") { model.preview.zoomToFit() }
+                .keyboardShortcut("9")
+                .disabled(!model.preview.canZoom)
+            Button("Actual Size") { model.preview.actualSize() }
+                .keyboardShortcut("0", modifiers: [.command, .option])
+                .disabled(!model.preview.canZoom)
+            Divider()
+            Button("Previous Page") { NotificationCenter.default.post(name: .squishPreviewPage, object: -1) }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+            Button("Next Page") { NotificationCenter.default.post(name: .squishPreviewPage, object: 1) }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+            Divider()
+        }
+        CommandGroup(after: .sidebar) {
+            Toggle("Show Options", isOn: $model.showsOptions)
+                .keyboardShortcut("i", modifiers: [.command, .option])
+        }
+        CommandMenu("Compression") {
+            PresetMenuItems(model: model, withShortcuts: true)
         }
         CommandGroup(replacing: .saveItem) {
             // Closes the frontmost of our windows (main, Settings, About), even when

@@ -108,7 +108,11 @@ final class FakeFileStore: FileStore, @unchecked Sendable {
     }
 
     func isDirectory(_ url: URL) -> Bool {
-        folders.contains(url.path) || SystemFileStore().isDirectory(url)
+        lock.withLock { folders.contains(url.path) } || SystemFileStore().isDirectory(url)
+    }
+
+    func createFolder(_ url: URL) throws {
+        lock.withLock { _ = folders.insert(url.path) }
     }
 
     func create(_ data: Data, at url: URL) throws {
@@ -146,7 +150,11 @@ final class FakeFileStore: FileStore, @unchecked Sendable {
         return URL(fileURLWithPath: "/Trash/" + url.lastPathComponent)
     }
 
-    func copyDates(from source: URL, to target: URL) {}
+    private var _datesCopied: [URL] = []
+    var datesCopied: [URL] { lock.withLock { _datesCopied } }
+    func copyDates(from source: URL, to target: URL) {
+        lock.withLock { _datesCopied.append(target) }
+    }
 
     func sha256(of url: URL) throws -> String {
         if let data = lock.withLock({ _written[url.path] }) {

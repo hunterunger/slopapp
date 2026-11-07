@@ -2,6 +2,20 @@ import AppKit
 import Observation
 import SlopKit
 import SquishCore
+import SwiftUI
+
+/// Naming a preset.
+enum PresetSheet: Identifiable {
+    case saveNew
+    case rename(CompressionPreset)
+
+    var id: String {
+        switch self {
+        case .saveNew: "new"
+        case .rename(let preset): preset.id
+        }
+    }
+}
 
 /// App state: the settings (persisted) and the queue that uses them.
 @MainActor
@@ -20,32 +34,156 @@ final class AppModel {
             guard settings != oldValue else { return }
             save()
             queue.processor = processor(for: settings)
-            if settings.preset == .custom, oldValue.preset != .custom { editingQuality = true }
+            if case .subfolder(let name) = settings.destination, name != subfolderName {
+                subfolderName = name
+                UserDefaults.standard.set(name, forKey: Self.subfolderKey)
+            }
         }
     }
     /// The settings each file was last compressed with, by input path.
     private var settingsUsed: [String: SquishSettings] = [:]
     /// Folders picked under Save To, most recent first.
     private(set) var recentFolders: [URL]
-    /// The custom quality and size popovers in the options bar.
-    var editingQuality = false
-    var editingSize = false
+    /// The last subfolder name used, so switching Save To away and back keeps it.
+    private(set) var subfolderName: String
     /// Shown once, the first time the user turns on Replace Originals.
     var confirmingReplace = false
 
+    /// Built-in and saved presets.
+    private(set) var presets: PresetLibrary {
+        didSet { savePresets() }
+    }
+    /// The Save Preset / Rename Preset sheet.
+    var presetSheet: PresetSheet?
+
+    /// The file list (sidebar) and the options column (inspector).
+    var columns: NavigationSplitViewVisibility = .detailOnly
+    var showsOptions: Bool {
+        didSet { UserDefaults.standard.set(showsOptions, forKey: Self.showsOptionsKey) }
+    }
+    /// Before/after split in the preview (off: the result alone).
+    var comparing: Bool {
+        didSet { UserDefaults.standard.set(comparing, forKey: Self.comparingKey) }
+    }
+    /// Zoom and scrolling of the preview.
+    let preview = PreviewController()
+
     private static let settingsKey = "settings"
+    private static let presetsKey = "presets"
     private static let recentFoldersKey = "recentFolders"
+    private static let subfolderKey = "subfolderName"
     private static let replaceConfirmedKey = "replaceConfirmed"
+    private static let showsOptionsKey = "showsOptions"
+    private static let comparingKey = "comparing"
 
     private init() {
         let defaults = UserDefaults.standard
         let loaded = defaults.data(forKey: Self.settingsKey)
             .flatMap { try? JSONDecoder().decode(SquishSettings.self, from: $0) } ?? SquishSettings()
         settings = loaded
+        presets = defaults.data(forKey: Self.presetsKey)
+            .flatMap { try? JSONDecoder().decode(PresetLibrary.self, from: $0) } ?? PresetLibrary()
         recentFolders = (defaults.stringArray(forKey: Self.recentFoldersKey) ?? []).map { URL(fileURLWithPath: $0) }
+        subfolderName = defaults.string(forKey: Self.subfolderKey) ?? SquishSettings.defaultSubfolder
+        showsOptions = defaults.object(forKey: Self.showsOptionsKey) as? Bool ?? true
+        comparing = defaults.object(forKey: Self.comparingKey) as? Bool ?? true
         queue = FileQueue(processor: SquishProcessor.placeholder, acceptedTypes: SquishTypes.accepted)
         queue.processor = processor(for: loaded)
         queue.onIdle = { [weak self] in self?.batchFinished() }
+    }
+
+    // MARK: Presets
+
+    /// The preset the current options came from, if it still exists.
+    var currentPreset: CompressionPreset? {
+        presets.preset(id: settings.presetID)
+    }
+
+    /// Options changed since the preset was picked.
+    var presetIsEdited: Bool {
+        currentPreset.map { $0.options != settings.options } ?? true
+    }
+
+    /// "Balanced", "Web (Edited)", "Custom".
+    var presetTitle: String {
+        guard let preset = currentPreset else { return "Custom" }
+        return presetIsEdited ? "\(preset.name) (Edited)" : preset.name
+    }
+
+    func apply(_ preset: CompressionPreset) {
+        settings.apply(preset)
+    }
+
+    func saveNewPreset(named name: String) {
+        let preset = presets.add(name: name, options: settings.options)
+        settings.presetID = preset.id
+        HUD.show("Saved “\(preset.name)”", systemImage: "checkmark")
+    }
+
+    /// Saves the current options into the selected (user) preset.
+    func updateCurrentPreset() {
+        guard let preset = currentPreset, !preset.isBuiltIn else { return }
+        presets.update(id: preset.id, options: settings.options)
+        HUD.show("Updated “\(preset.name)”", systemImage: "checkmark")
+    }
+
+    func renamePreset(id: String, to name: String) {
+        presets.rename(id: id, to: name)
+    }
+
+    func deletePreset(id: String) {
+        guard let preset = presets.preset(id: id), !preset.isBuiltIn else { return }
+        let alert = NSAlert()
+        alert.messageText = "Delete the preset “\(preset.name)”?"
+        alert.informativeText = "Files you already compressed with it aren't affected."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons[0].hasDestructiveAction = true
+        Self.ask(alert) { [weak self] confirmed in
+            if confirmed { self?.presets.delete(id: id) }
+        }
+    }
+
+    /// Shows `alert` as a sheet on the main window (or on its own without one) and reports
+    /// whether the first button was chosen.
+    static func ask(_ alert: NSAlert, then done: @escaping @MainActor (Bool) -> Void) {
+        guard let window = MainWindow.window, window.isVisible, window.attachedSheet == nil else {
+            done(alert.runModal() == .alertFirstButtonReturn)
+            return
+        }
+        alert.beginSheetModal(for: window) { response in
+            MainActor.assumeIsolated { done(response == .alertFirstButtonReturn) }
+        }
+    }
+
+    func movePresets(fromOffsets source: IndexSet, toOffset destination: Int) {
+        presets.move(fromOffsets: source, toOffset: destination)
+    }
+
+    private func savePresets() {
+        if let data = try? JSONEncoder().encode(presets) {
+            UserDefaults.standard.set(data, forKey: Self.presetsKey)
+        }
+    }
+
+    // MARK: Preview
+
+    /// The row the preview shows: the selected one, or the first.
+    var focusedItem: FileQueueItem? {
+        if selection.count > 1 { return nil }
+        if let id = selection.first, let item = queue.items.first(where: { $0.id == id }) { return item }
+        return selection.isEmpty ? queue.items.first : nil
+    }
+
+    /// File ▸ Copy Compressed File: puts the selected outputs on the pasteboard.
+    /// `SQUISH_PASTEBOARD` names a private pasteboard for scripted tests.
+    func copyCompressed() {
+        let urls = targetItems.compactMap(\.output)
+        guard !urls.isEmpty else { NSSound.beep(); return }
+        let board = ProcessInfo.processInfo.environment["SQUISH_PASTEBOARD"].map { NSPasteboard(name: .init($0)) } ?? .general
+        board.clearContents()
+        board.writeObjects(urls as [NSURL])
+        HUD.show(urls.count == 1 ? "Copied" : "Copied \(urls.count) files", systemImage: "doc.on.doc")
     }
 
     private func processor(for settings: SquishSettings) -> SquishProcessor {
@@ -117,8 +255,9 @@ final class AppModel {
         alert.informativeText = "Squish replaced these earlier. Each original goes back where it was, and its compressed copy goes to the Trash."
         alert.addButton(withTitle: "Put Back")
         alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        putBack(replacements: all)
+        Self.ask(alert) { [weak self] confirmed in
+            if confirmed { self?.putBack(replacements: all) }
+        }
     }
 
     /// Puts originals back where they were (the compressed files go to the Trash).
@@ -196,6 +335,11 @@ final class AppModel {
                 return (split.keep, split.skipped, Unsupported.files(in: urls))
             }.value
             let added = files.isEmpty ? [] : await queue.add(files)
+            if !queue.items.isEmpty, columns == .detailOnly { columns = .all }
+            // Show the first new file in the preview, like opening a document.
+            if selection.isEmpty || !queue.items.contains(where: { selection.contains($0.id) }), let first = added.first {
+                selection = [first.id]
+            }
             if let message = Unsupported.message(unsupported), added.isEmpty {
                 HUD.show(message, systemImage: "nosign")
             } else if skipped > 0 {
@@ -228,18 +372,6 @@ final class AppModel {
         FileQueueActions.reveal(items.isEmpty ? targetItems : items)
     }
 
-    /// Custom… starts from the current preset's values, so nothing jumps.
-    func editCustomQuality() {
-        if settings.preset != .custom {
-            var custom = settings
-            custom.customQuality = settings.imageQuality
-            custom.customPDFResolution = settings.pdf.resolution
-            custom.preset = .custom
-            settings = custom
-        }
-        editingQuality = true
-    }
-
     /// ⌘R: the selected rows, or all of them.
     func processAgain() {
         targetItems.forEach(queue.retry)
@@ -248,6 +380,7 @@ final class AppModel {
     func clearList() {
         removeRows(queue.items, actionName: "Clear List")
         selection = []
+        columns = .detailOnly
     }
 
     /// Removes rows (never files), with Undo.
@@ -255,8 +388,12 @@ final class AppModel {
         guard !rows.isEmpty else { return }
         let offsets = rows.compactMap { row in queue.items.firstIndex { $0.id == row.id } }
         queue.remove(rows)
+        if queue.items.isEmpty { columns = .detailOnly }
         undoManager?.registerUndo(withTarget: self) { model in
-            MainActor.assumeIsolated { model.queue.restore(rows, at: offsets) }
+            MainActor.assumeIsolated {
+                model.queue.restore(rows, at: offsets)
+                if model.columns == .detailOnly { model.columns = .all }
+            }
         }
         undoManager?.setActionName(actionName)
     }
@@ -301,6 +438,10 @@ final class AppModel {
         }
     }
 
+    func useSubfolder() {
+        settings.destination = .subfolder(subfolderName)
+    }
+
     func useFolder(_ url: URL) {
         settings.destination = .folder(url)
         recentFolders.removeAll { $0.standardizedFileURL == url.standardizedFileURL }
@@ -324,6 +465,22 @@ final class AppModel {
 
     // MARK: Labels
 
+    /// The compressed files Share sends: the selected rows', or the one shown.
+    var shareURLs: [URL] {
+        let rows = selectedItems.isEmpty ? (focusedItem.map { [$0] } ?? []) : selectedItems
+        return rows.compactMap(\.output)
+    }
+
+    /// The options column's footer: the batch total.
+    var footerText: String {
+        let s = queue.summary
+        guard s.total > 0 else { return "New files use these settings." }
+        if s.remaining > 0 { return "Compressing \(min(s.done + 1, s.total)) of \(s.total)…" }
+        let files = s.total == 1 ? "1 file" : "\(s.total) files"
+        guard s.savedBytes > 0, let fraction = s.savedFraction else { return files }
+        return "\(files) · saved \(FileQueueText.bytes(s.savedBytes)) (\(FileQueueText.percent(saved: fraction)))"
+    }
+
     var summaryText: String {
         let s = queue.summary
         guard s.total > 0 else {
@@ -336,11 +493,14 @@ final class AppModel {
         if s.remaining > 0 {
             return "Compressing \(s.done + 1 > s.total ? s.total : s.done + 1) of \(s.total)…"
         }
+        // Short enough for the title bar at the smallest window width. The file count and
+        // the percentage are in the options column's footer.
         var parts: [String] = []
-        if s.savedBytes > 0, let fraction = s.savedFraction {
-            parts.append("Saved \(FileQueueText.bytes(s.savedBytes)) (\(FileQueueText.percent(saved: fraction)))")
+        if s.savedBytes > 0 {
+            parts.append("Saved \(FileQueueText.bytes(s.savedBytes))")
+        } else {
+            parts.append(s.total == 1 ? "1 file" : "\(s.total) files")
         }
-        parts.append(s.total == 1 ? "1 file" : "\(s.total) files")
         if s.failed > 0 { parts.append("\(s.failed) failed") }
         return parts.joined(separator: " · ")
     }

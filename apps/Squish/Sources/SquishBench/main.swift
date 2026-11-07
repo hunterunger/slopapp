@@ -28,7 +28,7 @@ var args = Array(CommandLine.arguments.dropFirst())
 }
 let concurrency = option("--concurrency").flatMap(Int.init) ?? FileQueue.defaultConcurrency
 var settings = SquishSettings()
-settings.preset = option("--preset").flatMap(QualityPreset.init(rawValue:)) ?? .balanced
+settings.apply(option("--preset").flatMap { id in CompressionPreset.builtIns.first { $0.id == id } } ?? .balanced)
 settings.format = option("--format").flatMap(OutputFormat.init(rawValue:)) ?? .original
 settings.maxDimension = option("--max").flatMap(Int.init)
 let outOption = option("--out")

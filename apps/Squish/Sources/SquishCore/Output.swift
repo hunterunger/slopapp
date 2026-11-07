@@ -7,6 +7,8 @@ public protocol FileStore: Sendable {
     func size(of url: URL) throws -> Int64
     func fileExists(_ url: URL) -> Bool
     func isDirectory(_ url: URL) -> Bool
+    /// Creates a folder (and its parents) if it isn't there yet.
+    func createFolder(_ url: URL) throws
     /// Writes `data` to `url` only if nothing is there yet (atomic, no clobbering).
     /// Throws `OutputError.exists` when the name is taken.
     func create(_ data: Data, at url: URL) throws
@@ -74,6 +76,7 @@ public enum OutputError: LocalizedError, Equatable {
 public enum OutputPlanner {
     /// The preferred output URL for `input`, written as `ext`.
     /// - alongside: same folder, name + suffix ("photo-small.jpg").
+    /// - subfolder: a folder of that name next to the input, same name ("Compressed/photo.jpg").
     /// - folder: that folder, same name; adds the suffix if it's the input's own folder.
     /// - replace: the input's own path (with the new extension if the format changed).
     public static func preferredURL(for input: URL, ext: String, settings: SquishSettings) -> URL {
@@ -82,6 +85,9 @@ public enum OutputPlanner {
         switch settings.destination {
         case .alongside:
             return inputFolder.appendingPathComponent(base + settings.effectiveSuffix).appendingPathExtension(ext)
+        case .subfolder(let name):
+            return inputFolder.appendingPathComponent(Destination.cleanSubfolderName(name), isDirectory: true)
+                .appendingPathComponent(base).appendingPathExtension(ext)
         case .folder(let folder):
             let sameFolder = folder.standardizedFileURL.resolvingSymlinksInPath().path
                 == inputFolder.standardizedFileURL.resolvingSymlinksInPath().path
@@ -134,6 +140,15 @@ public struct SystemFileStore: FileStore {
     public func isDirectory(_ url: URL) -> Bool {
         var isDir: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    public func createFolder(_ url: URL) throws {
+        guard !isDirectory(url) else { return }
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        } catch {
+            throw OutputError.cantWrite(folder: url.deletingLastPathComponent().lastPathComponent)
+        }
     }
 
     public func create(_ data: Data, at url: URL) throws {

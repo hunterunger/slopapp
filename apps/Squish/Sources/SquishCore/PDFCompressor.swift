@@ -15,7 +15,7 @@ public enum PDFCompressor {
         }
         guard document.pageCount > 0 else { throw SquishError.empty(name) }
 
-        if settings.stripMetadata {
+        if settings.metadata == .removeAll {
             var attributes = document.documentAttributes ?? [:]
             for key in [PDFDocumentAttribute.authorAttribute, .creatorAttribute, .producerAttribute,
                         .keywordsAttribute, .subjectAttribute] {
@@ -37,25 +37,45 @@ public enum PDFCompressor {
     /// A Quartz filter that re-encodes every image as JPEG at `quality`, downsampled to
     /// `resolution` dpi. Images already below that resolution aren't scaled up.
     static func filterProperties(_ pdf: PDFSettings) -> [String: Any] {
-        [
-            "Domains": ["Applications": true],
-            "FilterType": 1,
-            "Name": "Squish",
-            "FilterData": [
-                "ColorSettings": [
-                    "ImageSettings": [
-                        "Compression Quality": pdf.quality,
-                        "ImageCompression": "ImageJPEGCompress",
-                        "ImageScaleSettings": [
-                            "ImageResolution": pdf.resolution,
-                            "ImageScaleInterpolate": true,
-                            "ImageSizeMax": 0,
-                            "ImageSizeMin": 0,
-                        ],
-                    ],
+        var colorSettings: [String: Any] = [
+            "ImageSettings": [
+                "Compression Quality": pdf.quality,
+                "ImageCompression": "ImageJPEGCompress",
+                "ImageScaleSettings": [
+                    "ImageResolution": pdf.resolution,
+                    "ImageScaleInterpolate": true,
+                    "ImageSizeMax": 0,
+                    "ImageSizeMin": 0,
                 ],
             ],
         ]
+        var filterData: [String: Any] = [:]
+        if pdf.grayscale, let profiles = grayProfiles {
+            // macOS's own gray tone conversion (an abstract color profile), applied to
+            // everything on the page: images, text and drawings.
+            colorSettings["DocumentColorSettings"] = ["IntermediateColorSpace": 0]
+            filterData["FilterProfileArray"] = profiles
+        }
+        filterData["ColorSettings"] = colorSettings
+        return [
+            "Domains": ["Applications": true],
+            "FilterType": 1,
+            "Name": "Squish",
+            "FilterData": filterData,
+        ]
     }
+
+    /// The color profile behind macOS's "Gray Tone" Quartz filter, read from the system at
+    /// run time. Nil if this macOS doesn't have it (then Grayscale is unavailable).
+    static let grayProfiles: [Data]? = {
+        let url = URL(fileURLWithPath: "/System/Library/Filters/Gray Tone.qfilter")
+        guard let filter = NSDictionary(contentsOf: url) as? [String: Any],
+              let data = filter["FilterData"] as? [String: Any],
+              let profiles = data["FilterProfileArray"] as? [Data], !profiles.isEmpty else { return nil }
+        return profiles
+    }()
+
+    /// Whether this Mac can turn PDFs gray.
+    public static var canGrayscale: Bool { grayProfiles != nil }
 }
 
