@@ -6,30 +6,49 @@ import SwitchboardCore
 
 /// Settings: General, Browsers, Rules, About. Built from SlopKit's pieces; Switchboard needs
 /// two custom tabs, so it composes them instead of using `SlopSettings`.
+enum SettingsTab: String, Hashable {
+    case general, browsers, rules, about
+}
+
 struct SettingsView: View {
     @Bindable var model: AppModel
     let info: AppInfo
+    @State private var tab = Diagnostics.initialSettingsTab ?? .general
 
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
             GeneralSettingsTab(isMenuBarApp: true, appName: info.name) {
                 DefaultBrowserRow(model: model)
+                Picker("Picker size", selection: $model.config.pickerSize) {
+                    ForEach(PickerSize.allCases, id: \.self) { size in
+                        Text(size.title).tag(size)
+                    }
+                }
+                Toggle(isOn: $model.config.stripsTrackingParameters) {
+                    Text("Remove tracking from links")
+                    Text("Drops ad and newsletter tags like utm_source and fbclid before a link opens. The page is the same.")
+                }
                 if let notice = model.recoveryNotice {
-                    Text(notice)
+                    Label(notice, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.textOrange)
                         .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .tag(SettingsTab.general)
             .tabItem { Label("General", systemImage: "gearshape") }
 
             BrowsersTab(model: model)
+                .tag(SettingsTab.browsers)
                 .tabItem { Label("Browsers", systemImage: "safari") }
 
             RulesTab(model: model)
+                .tag(SettingsTab.rules)
                 .tabItem { Label("Rules", systemImage: "arrow.triangle.branch") }
 
             AboutSettingsTab(info: info)
+                .tag(SettingsTab.about)
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: Metrics.settingsWidth)
@@ -44,26 +63,32 @@ struct DefaultBrowserRow: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        LabeledContent("Default browser") {
+        // The explanation is the row's subtitle, not a row of its own.
+        LabeledContent {
             if model.isDefaultBrowser {
-                Label("Switchboard", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .labelStyle(.titleAndIcon)
+                Label {
+                    Text("Switchboard")
+                } icon: {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                }
+                .foregroundStyle(.secondary)
             } else {
                 Button("Make Default Browser…") { model.makeDefaultBrowser() }
             }
+        } label: {
+            Text("Default browser")
+            Text(subtitle)
         }
-        Text(model.isDefaultBrowser
-             ? "Links you click in other apps come to Switchboard first."
-             : "Switchboard only sees links once it's the default browser. macOS will ask you to confirm.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        if model.isDefaultBrowser, model.launchAtLoginWasTurnedOn, SMAppService.mainApp.status == .enabled {
-            Text("Becoming the default browser turned on Launch at login, so links never wait for Switchboard to start. You can turn it off above.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var subtitle: String {
+        guard model.isDefaultBrowser else {
+            return "Switchboard only sees links once it's the default browser. macOS will ask you to confirm."
         }
+        let base = "Links you click in other apps come to Switchboard first."
+        guard model.launchAtLoginWasTurnedOn, SMAppService.mainApp.status == .enabled else { return base }
+        return base + " Becoming the default browser turned on Launch at login, so links never wait for Switchboard to start. You can turn it off above."
     }
 }
 

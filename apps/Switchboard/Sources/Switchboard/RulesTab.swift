@@ -25,11 +25,12 @@ struct RulesTab: View {
                 ContentUnavailableView {
                     Label("No Rules", systemImage: "arrow.triangle.branch")
                 } description: {
-                    Text("Every link shows the picker. Add a rule to send a website straight to a browser, or hold ⌘ when you pick.")
+                    Text("Every link shows the picker. Add a rule, or hold ⌘ as you pick a browser to make one.")
+                        .frame(maxWidth: 360)
                 } actions: {
                     Button("Add Rule…") { startNewRule() }
                 }
-                .frame(height: 180)
+                .frame(minHeight: 240)
             } else {
                 let unused = RuleAnalysis.unused(in: model.config.rules, askModifiers: model.config.askModifiers)
                 List(selection: $selection) {
@@ -85,7 +86,7 @@ struct RulesTab: View {
                 if let (number, reason) = unused.enumerated().compactMap({ i, u in u.map { (i + 1, $0) } }).first {
                     Label(Self.explain(rule: number, reason, ask: model.config.askModifiers), systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.textOrange)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
@@ -119,7 +120,12 @@ struct RulesTab: View {
             .formStyle(.grouped)
             .scrollDisabled(true)
             .fixedSize(horizontal: false, vertical: true)
+            // A grouped form brings its own 20 pt margins. Sideways they line its sections up
+            // with the list; vertically they'd double the tab's own, so take them back.
             .padding(.horizontal, -Spacing.xl)
+            .padding(.vertical, -Spacing.xl)
+            // Its (now overlapping) margins mustn't paint over the caption above.
+            .scrollContentBackground(.hidden)
         }
         .padding(Spacing.xl)
         .sheet(item: $editing) { rule in
@@ -151,7 +157,7 @@ struct RulesTab: View {
             // Always one line tall, so the window doesn't jump as you type.
             Label(testResult?.text ?? "Shows which rule a link matches.", systemImage: testResult?.symbol ?? "info.circle")
                 .font(.callout)
-                .foregroundStyle(testResult == nil ? .tertiary : .secondary)
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
@@ -239,27 +245,42 @@ private struct RuleRow: View {
         }
     }
 
+    /// Width of the "→ destination" column, so the arrows line up down the list.
+    static let destinationWidth: CGFloat = 180
+
     var body: some View {
         HStack(spacing: Spacing.s) {
             Toggle("Rule \(number) on", isOn: $isEnabled)
                 .labelsHidden()
                 .toggleStyle(.checkbox)
-            if let unusedNote {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .help("Rule \(number) is \(unusedNote).")
+            // The warning follows the condition, so conditions keep one leading edge.
+            HStack(spacing: Spacing.xs) {
+                Text(rule.conditionSummary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(rule.isEnabled && unused == nil ? .primary : .secondary)
+                if let unusedNote {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.textOrange)
+                        .help("Rule \(number) is \(unusedNote).")
+                }
             }
-            Text(rule.conditionSummary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(rule.isEnabled && unused == nil ? .primary : .secondary)
-            Spacer(minLength: Spacing.s)
-            Image(systemName: "arrow.right")
-                .foregroundStyle(.tertiary)
-            Text(isMissing ? "\(destination) (missing)" : destination)
-                .lineLimit(1)
-                .foregroundStyle(isMissing ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                .help(isMissing ? "This browser was removed or uninstalled. These links show the picker until it's back." : "")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: Spacing.s) {
+                Image(systemName: "arrow.right")
+                    .foregroundStyle(.secondary)
+                    .imageScale(.small)
+                Text(destination)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(isMissing ? AnyShapeStyle(.textOrange) : AnyShapeStyle(.secondary))
+                if isMissing {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.textOrange)
+                }
+            }
+            .frame(width: Self.destinationWidth, alignment: .leading)
+            .help(isMissing ? "\(destination) was removed or uninstalled. These links show the picker until it's back." : destination)
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .contain)
@@ -313,8 +334,11 @@ struct RuleEditor: View {
                         Text("Only while holding")
                         Spacer()
                         ForEach([Modifiers.control, .option, .shift, .command], id: \.rawValue) { key in
-                            Toggle(key.symbol, isOn: modifierBinding(key))
-                                .toggleStyle(.button)
+                            // Same width for every key, whatever its symbol's width.
+                            Toggle(isOn: modifierBinding(key)) {
+                                Text(key.symbol).frame(width: PickerMetrics.keySlot)
+                            }
+                            .toggleStyle(.button)
                                 .accessibilityLabel(key.name)
                         }
                     }
@@ -349,7 +373,7 @@ struct RuleEditor: View {
                 // What will actually be saved, or why it can't be.
                 Label(feedback.text, systemImage: feedback.symbol)
                     .font(.caption)
-                    .foregroundStyle(feedback.isProblem ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(feedback.isProblem ? AnyShapeStyle(.textOrange) : AnyShapeStyle(.secondary))
                     .lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 260, alignment: .leading)

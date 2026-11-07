@@ -12,9 +12,15 @@ An open alternative to OpenIn.
 Switchboard stands in as your default browser. When you click a link anywhere:
 
 - If a rule knows where it goes, it opens there. No UI, about 10 ms of overhead.
-- Otherwise a small picker appears at the pointer. Press **1–9** (or click, or arrows + Return).
+- Otherwise a list of your browsers appears at the pointer, with the link's website and path
+  on top. Press **1–9**, or move with **↑/↓** (or Tab) and press **Return**, or click.
   - Hold **⌘** while picking to always open that website there (creates a rule).
-  - Hold **⇧** to open it in the background. **⌘C** copies the link. **Esc** cancels.
+  - Hold **⇧** to open it in the background. **⌘C** (or the copy button) copies the link.
+    **Esc** cancels.
+  - Right-click a row, or use its **…** button, for Open / Open in Background / Always Open
+    Here.
+  - Many browsers? The list scrolls so it always fits on screen. Settings → General → Picker
+    size makes rows smaller or larger.
 - Hold **⌥** while clicking a link to always get the picker. The browser your rules would have
   chosen is already highlighted, so Return opens it there.
 - **Open Link from Clipboard** finds the first link in whatever you copied (even inside a
@@ -27,6 +33,10 @@ the "always show the picker" key, which wins) are flagged. Removing a browser ke
 that use it: they show the picker until you add it back, then reconnect. Deleting rules or
 browsers can be undone (Undo button next to the list, or ⌘Z). Chrome, Edge, Brave and other Chromium browsers can be targeted per
 profile; Chromium and Firefox can open private windows.
+
+Optional: **Remove tracking from links** (General) drops ad and newsletter tags such as
+`utm_source`, `fbclid` and `gclid` before a link opens or is matched. Off by default; it uses a
+fixed offline list and never changes other parameters.
 
 No network access, no accounts, no tracking. Settings live in
 `~/Library/Application Support/app.slopapp.switchboard/config.json`.
@@ -69,10 +79,13 @@ open -a "$APP" "switchboard://open?url=https%3A%2F%2Fexample.com&pick=1"   # for
 
 | Variable | Effect |
 |---|---|
-| `SWITCHBOARD_DRY_RUN=1` | Decide and log, don't open anything |
+| `SWITCHBOARD_DRY_RUN=1` | Decide and log, don't open anything (and never change the default browser) |
 | `SWITCHBOARD_LOG=<file>` | Append routing decisions and timings |
 | `SWITCHBOARD_CONFIG=<file>` | Use this settings file |
 | `SWITCHBOARD_APPEARANCE=light\|dark` | Force an appearance (screenshots) |
+| `SWITCHBOARD_ASSUME_DEFAULT=1` | Show the "is the default browser" state without being it (screenshots of a test copy) |
+| `SWITCHBOARD_SETTINGS_TAB=general\|browsers\|rules\|about` | Open Settings on that tab at launch (screenshots without Accessibility) |
+| `SWITCHBOARD_FLIP_APPEARANCE_AFTER=<seconds>` | Switch light ↔ dark once while running (checks live appearance changes) |
 
 Bundling registers the app with LaunchServices as a *candidate* browser (it never becomes the
 default by itself). To unregister a build:

@@ -61,6 +61,16 @@ public struct Target: Codable, Identifiable, Hashable, Sendable {
         return privateWindow ? "Private" : appName
     }
 
+    /// The second line of a picker row: "Work", "Private", "Work · Private · Background",
+    /// or "" when there's nothing to add to the app name.
+    public var pickerSubtitle: String {
+        var parts: [String] = []
+        if let profile { parts.append(profile.name) }
+        if privateWindow { parts.append("Private") }
+        if opensInBackground { parts.append("Background") }
+        return parts.joined(separator: " · ")
+    }
+
     /// Which browser, profile and window kind this is, ignoring id and options. Used to bring
     /// back a removed target's identity when the same browser is added again.
     public var destinationKey: String {

@@ -7,38 +7,28 @@ import SwiftUI
 /// to the app you're in (usually the browser the link just opened in).
 @MainActor
 enum UndoToast {
-    private static var panel: ToastPanel?
+    private static var panel: FloatingPanel?
     private static var hideTask: Task<Void, Never>?
 
     static func show(_ message: String, duration: Duration = .seconds(6), undo: @escaping @MainActor () -> Void) {
-        let panel = self.panel ?? ToastPanel()
-        self.panel = panel
+        panel?.orderOut(nil)
         let content = ToastView(message: message) {
             undo()
             hide()
         }
-        let hosting = NSHostingView(rootView: content)
-        let effect = NSVisualEffectView()
-        effect.material = .hudWindow
-        effect.blendingMode = .behindWindow
-        effect.state = .active
-        effect.wantsLayer = true
-        effect.layer?.cornerRadius = 14
-        effect.layer?.cornerCurve = .continuous
-        effect.layer?.masksToBounds = true
-        hosting.translatesAutoresizingMaskIntoConstraints = false
-        effect.addSubview(hosting)
-        NSLayoutConstraint.activate([
-            hosting.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
-            hosting.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
-            hosting.topAnchor.constraint(equalTo: effect.topAnchor),
-            hosting.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
-        ])
-        panel.contentView = effect
-        let size = hosting.fittingSize
+        // A capsule like SlopKit's HUD: measure first, since the radius is half the height.
+        let size = NSHostingView(rootView: content).fittingSize
+        let panel = FloatingPanel(cornerRadius: (size.height / 2).rounded(.down)) { content }
+        panel.level = .statusBar
+        panel.dismissesOnResignKey = false
+        // Only become key if a control needs typing; buttons don't, so focus stays put.
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.setAccessibilityLabel("Rule added")
+        self.panel = panel
+
         let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main
         let visible = screen?.visibleFrame ?? .zero
-        panel.setFrame(CGRect(x: visible.midX - size.width / 2, y: visible.minY + visible.height * 0.12,
+        panel.setFrame(CGRect(x: (visible.midX - size.width / 2).rounded(), y: (visible.minY + visible.height * 0.12).rounded(),
                               width: size.width, height: size.height), display: true)
         panel.orderFrontRegardless()
         NSAccessibility.post(element: panel, notification: .announcementRequested, userInfo: [
@@ -55,28 +45,16 @@ enum UndoToast {
 
     static func hide() {
         hideTask?.cancel()
-        panel?.orderOut(nil)
+        guard let panel, panel.isVisible else { return }
+        // Fade like the HUD (a fade is fine under Reduce Motion: nothing moves).
+        hideTask = Task { @MainActor in
+            await NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                panel.animator().alphaValue = 0
+            }
+            panel.orderOut(nil)
+        }
     }
-}
-
-private final class ToastPanel: NSPanel {
-    init() {
-        super.init(contentRect: .zero, styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: true)
-        isFloatingPanel = true
-        level = .statusBar
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        backgroundColor = .clear
-        isOpaque = false
-        hasShadow = true
-        hidesOnDeactivate = false
-        isReleasedWhenClosed = false
-        // Only become key if a control needs typing; buttons don't, so focus stays put.
-        becomesKeyOnlyIfNeeded = true
-        setAccessibilityLabel("Rule added")
-    }
-
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
 }
 
 private struct ToastView: View {
@@ -85,16 +63,20 @@ private struct ToastView: View {
 
     var body: some View {
         HStack(spacing: Spacing.m) {
-            Image(systemName: "checkmark.circle")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            Text(message)
+            Label(message, systemImage: "checkmark.circle")
+                .symbolRenderingMode(.hierarchical)
+                .font(.headline)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 320, alignment: .leading)
             Button("Undo", action: undo)
+                .buttonBorderShape(.capsule)
         }
-        .padding(.horizontal, Spacing.l)
+        // HUD-like: more room on the leading side so the text clears the round end; the
+        // button sits as far from the trailing end as from the top and bottom, so its
+        // capsule follows the panel's.
+        .padding(.leading, Spacing.xl)
+        .padding(.trailing, Spacing.m)
         .padding(.vertical, Spacing.m)
     }
 }

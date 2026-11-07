@@ -20,8 +20,8 @@ app, instead of always landing in one browser. People with a work profile and a 
 profile, or a "real" browser plus a dev browser, reach for it dozens of times a day without
 thinking about it; "done" is the link appearing in the right window as fast as if there
 were no middleman. The one interaction that matters: **click a link → if a rule knows
-where it goes, it just opens there; otherwise a small row of browser icons appears at the
-cursor, press 1–9 (or click), and it opens.** Any added latency is felt on every click.
+where it goes, it just opens there; otherwise a short list of browsers appears at the
+cursor, press 1–9 (or ↑/↓ + Return, or click), and it opens.** Any added latency is felt on every click.
 
 ## Who and when
 
@@ -471,3 +471,235 @@ Switchboard code. Re-measure on a quiet machine. `perf.sh` also intermittently f
 "no running app matches" (on Awake too): a tooling race in its quit/relaunch loop.
 Status → beta, version 0.2.0 (build 2).
 
+
+## Parity pass (2026-11-03)
+
+Owner request: "Switchboard should show the browser options in a vertical list rather than a
+horizontal one." Plus a parity check against OpenIn (see `docs/parity-pass.md`).
+
+### How OpenIn presents choices (studied read-only)
+
+From its official website screenshots (downloaded to `/tmp/switchboard-parity/`, not
+committed): a tall rounded panel with **one row per target**: large app icon, app name with a
+smaller profile/"Private" line under it, the **number key at the right**, a **"…" button per
+row**, a rounded grey highlight on the selected row, and the **URL along the bottom** with a
+share button. ↑/↓ move, Return opens, or press the number. The installed copy wasn't triggered
+(it would need a link routed through it) and its settings weren't touched.
+
+### What we built
+
+- **Vertical list picker.** Each row: app icon, app name, a second line for profile / Private /
+  Background, the number key (1–9) as a small key cap on the right. The selected row uses the
+  system selection colour (follows the accent colour, like a menu item). The host and the path
+  line sit at the top (the owner asked for it there; OpenIn has the URL at the bottom), with a
+  copy button (⌘C). Hint line at the bottom.
+- **Keyboard:** ↑/↓, Tab/⇧Tab (wrap around), Home/End, Return/Space/Enter, 1–9, Esc, ⌘C; ⌘ =
+  always open here, ⇧ = background, as before. ←/→ no longer move (vertical list).
+- **Row actions** (OpenIn's "…" and right-click): the highlighted row shows a "…" menu; every
+  row has the same context menu: Open, Open in Background, Always Open <host> Here. Also exposed
+  to VoiceOver as named actions.
+- **Matched row highlighted:** when the picker shows anyway (⌥ held, clipboard, `pick=1`), the
+  row the rules would choose is preselected (unchanged logic, verified in the new list).
+- **Fits any screen:** the list is sized for the pointer's screen; with many browsers it
+  scrolls (half a row peeks out at the bottom) and the keyboard selection stays scrolled into
+  view. The panel is placed under the pointer and clamped to the visible frame (SlopKit
+  `PanelPlacement`). Geometry is pure and unit-tested (`PickerLayout`).
+- **Hover only selects after the pointer moves,** so a panel that opens under a resting pointer
+  keeps the rules' preselection.
+- **Picker size** (General → Picker size: Small / Medium / Large): parity with OpenIn's icon
+  size setting (it has five steps; three cover it).
+- **Remove tracking from links** (General, off by default): drops `utm_*`, `fbclid`, `gclid`,
+  `msclkid`, `mc_eid` and similar before matching/opening; other parameters keep their order
+  and encoding. OpenIn ships this as a sample script; ours is an offline list.
+
+### Gap table vs OpenIn
+
+| OpenIn feature | Status | Notes |
+|---|---|---|
+| Vertical app-selection list, number keys, ↑/↓ + Return | Done | This pass |
+| Per-row "…" / right-click actions | Done | This pass. Open / Background / Always Open Here |
+| URL shown in the picker + share/copy | Done | Top of the panel (owner's choice); copy button + ⌘C |
+| Icon size setting | Done | Small / Medium / Large |
+| Reduce animation setting | Done differently | The list has no animation at all (menu-like) |
+| "Always show even with one app" | Rejected | Rules decide; holding ⌥ forces the picker |
+| Rebindable picker keys (letters) | Deferred (S–M) | Needs a key editor per target and collision checks; 1–9 cover nine targets |
+| Default browser, warm/cold links, rules, source app, modifiers, profiles, private (Chromium/Firefox), background, ⌘-learn, copy, `.html`, own URL scheme, watchdog, menu bar icon | Done | Earlier rounds |
+| Tracking-parameter removal | Done | This pass, off by default |
+| Firefox profiles | Deferred (S) | `profiles.ini` + `-P`; Firefox isn't installed here, so it couldn't be verified |
+| Safari profiles / Safari private | Deferred (L) | Needs Accessibility scripting of Safari's menus |
+| Mail links (`mailto:`) handler | Deferred (M) | Second handler, app list and rules UI; becoming the default mail app can't be tested on the owner's Mac |
+| Link history window | Deferred (M) | "Reopen <host>" covers the last dismissed link; a history needs a retention setting and search UI |
+| Services menu / Share extension | Deferred (S / L) | Services entry is small but needs `pbs` refresh and another app's Services menu to test (real mouse); Share extension is a separate target SwiftPM can't build |
+| Shortcuts / App Intents | Deferred (M) | SwiftPM doesn't run the App Intents metadata processor, so intents wouldn't register without Xcode build steps |
+| Handoff | Deferred (S) | Can't be verified without a second device |
+| URL rewrite per target | Deferred (M) | Regex editor per target |
+| Backups (export/import) | Deferred (S) | Not everyday; config is one JSON file |
+| Focus hint, JS scripts, zsh targets, redirect resolving, browser extensions, phishing check, tel: | Skip | As decided in the inventory (network, power-user, or separate products) |
+
+### Design-system deviations
+
+- Picker rows use the **system selection colour** (`selectedContentBackgroundColor` +
+  `selectedMenuItemTextColor`) rather than a tinted accent wash, to read like a menu item.
+  System colours only, no hex.
+- None otherwise: SF Symbols in UI, system type, glass/material panel from SlopKit.
+
+### Gates (2026-11-03)
+
+- Unit tests: 91 tests in 21 suites pass (17 new: list layout, keyboard selection, row
+  subtitles, tracking parameters, config compatibility).
+- `scripts/check.sh Switchboard --perf`: all PASS. Launch 150 ms, first menu bar icon 333 ms,
+  idle CPU 0.008 % (lowest) / 0.027 % (median), footprint 29.0 MB (busy machine, load 4.6).
+- Picker latency (event → visible, release build, warm): 6 browsers 7–13 ms; 30 browsers
+  (Large, scrolling) 14–20 ms. Prewarm now also measures the header/footer and builds the
+  scrolling layout, which took the first long-list show from 42 ms to 20 ms. One 60 ms show
+  happened right after changing the size with Settings open (one-time re-layout).
+- Scripted walkthrough on an isolated copy (bundle id `app.slopapp.switchboard.paritytest`, no
+  URL/document type claims, `SWITCHBOARD_CONFIG` + `SWITCHBOARD_DRY_RUN`), links sent with
+  `open -a`: ↓↓ Tab ⇧Tab ↑ moved the selection as expected; Return opened the selection; 3
+  opened Chrome Work with `--profile-directory`; ⇧4 opened with `activates=false`; Esc
+  dismissed; ⌘2 created a learned rule; a forced picker preselected the rule's Chrome Work row;
+  the "…" menu opened over the panel without dismissing it and "Open in Background" worked;
+  30 targets scrolled with the selection kept in view; Small size and tracking removal were
+  set in Settings and took effect (`?id=5&utm_source=…&fbclid=…` → `?id=5`). Real-mouse click
+  on a row opened that row's profile.
+- **Not tested: owner active.** Right-click context menu with the real mouse (the owner was
+  using the Mac in every window over ~15 minutes; the same actions were verified through the
+  "…" menu, which shares the code). Hover selection wasn't exercised separately (SlopDrive has
+  no pointer-move without a click). ⌘C wasn't pressed (it writes the real clipboard; the code
+  path is unchanged from earlier rounds).
+- `drive tree`: no `[unlabeled]` controls in the picker (rows "1, Safari", "More for Safari",
+  "Copy Link"); each row is its own accessibility group so the "…" menu follows its row.
+- Live build: the test copy was quit, unregistered (`lsregister -u`) and deleted. Then
+  `build/Switchboard.app` was rebuilt by `check.sh`, relaunched, and confirmed running and
+  still the default for http, https and `.html`. Every existing setting is unchanged; the
+  settings file gained the two new keys at their defaults (`pickerSize: medium`,
+  `stripsTrackingParameters: false`).
+
+Screenshots (`/tmp/switchboard-test/`, not committed): `picker-light.png`,
+`picker-dark.png`, `picker-preselect-2.png`, `picker-30-scrolled.png`,
+`picker-small-dark-1.png`, `picker-row-menu-1.png`, `settings-general-dark.png`.
+
+## Polish pass (2026-11-05)
+
+Brief: `docs/polish-pass.md`. All work on an isolated test copy (bundle id
+`app.slopapp.switchboard.polishtest`, no http/https/html claims, `SWITCHBOARD_CONFIG` +
+`SWITCHBOARD_DRY_RUN` fixtures under `/tmp/switchboard-test/`), built with the same SDK stamp as
+`bundle.sh`. The test copy was quit, unregistered and deleted at the end. The live build was
+only rebuilt once, by `check.sh`, then reopened right away.
+
+### Defects (before → after, measured with `scripts/measure` on @2x shots)
+
+| Surface | Defect | Before | After |
+|---|---|---|---|
+| Picker | Panel radius literal | `FloatingPanel(cornerRadius: 16)` | default `Radius.xl`, read back as `floatingPanelCornerRadius` |
+| Picker | Selection not concentric with the panel | radius 8 at 6 pt inset in a 16 pt panel | inset `Spacing.s` (8), radius `Radius.nested(in: 16, padding: 8)` = 8; pill 8 pt from both sides |
+| Picker | Separators heavy | `Divider` 1.0 pt | `Hairline` 0.5 pt (one device pixel), `separatorColor` |
+| Picker | Header text column off the name column | host at x 36, names at x 57 | both at x 56 (AX: 72 = panel 16 + 56) |
+| Picker | Header symbol not on the icon column | link glyph at x 15, icons at 14–16.5 | glyph centred in the icon column (centre 32 = 16 + 32/2) |
+| Picker | Icon inset uneven inside the highlight | 6 pt above/below, 8 pt beside | 8 pt on every side (row = icon + 2 × 8; Small 40, Medium 48, Large 60; unit test) |
+| Picker | Off-grid padding | list 6, header 10, row gap 10 | 8, 12, 8 |
+| Picker | Copy button and key caps not on one column | copy centre 277, key centre 276; key cap radius 5 literal | both in a 20 pt slot 16 pt from the edge (AX 280–300); key cap `Radius.xs` |
+| Picker | Rows past 9 put "…" in the wrong place (no key cap to offset from) | "…" 38 pt from the row edge, empty slot at 8 | key and menu slots always reserved; "…" 8 pt before the key column on every row |
+| Picker | Long name re-truncated when its row was highlighted, and cut mid-word | "Safari Technol…tended Edition" | tail truncation, constant width: "Safari Technology Preview…" |
+| Picker | File names cut from the front (rule for hosts) | "…for the picker test page.html" | middle: "A very long fil…test page.html" |
+| Picker | Footer text inset | 12 pt | 16 pt, same edge as the icons |
+| Toast (⌘-pick) | Radius literal 14, `.hudWindow` material, different from the HUD | 14 pt rounded rect | SlopKit `FloatingPanel` glass capsule (48 pt tall, radius 24); Undo is a capsule 12 pt from the top, bottom and trailing end, so concentric; fades out like the HUD |
+| General | Explanations were their own form rows (orphan rows with separators) | 7 rows, 422 pt window | subtitles of Default browser and Remove tracking: 5 rows, 397 pt |
+| General | Default state "Switchboard" in plain green text | `.green` text | secondary text, green check symbol |
+| General | Recovery notice in `.orange` | ~2.2:1 | `.textOrange` + warning symbol |
+| Rules | Warning caption and missing browser in `.orange` | 2.25:1 | `.textOrange` 4.57:1 |
+| Rules | Tester hint in `.tertiary` | 1.64:1 | `.secondary` 3.11:1 (antialiased sample; the system floor) |
+| Rules | Arrows ragged, right-aligned destinations | arrows at x 290–440 | fixed 180 pt destination column, arrows in one column at x 274 |
+| Rules | Warning icon pushed the condition text right | conditions at x 51 and 75 | icon after the text, conditions all at x 51 |
+| Rules | Yellow multicolour triangles next to orange text | mixed | all `.textOrange` |
+| Rules | Grouped form doubled the margins | caption → section 35 pt, bottom margin 41 pt | 12 pt and 21 pt (form margins taken back; its background hidden so it can't cover the caption) |
+| Rules | "(missing)" pushed long names out | "Firefox Developer Edition (missing)" | orange name + warning symbol, with the full name in the tooltip and VoiceOver label |
+| Rule editor | Modifier keys different widths, uneven gaps | 35/37/37/36 pt, gaps 16–17 | 44 pt each, gaps 8 |
+| Rules, empty | Symbol pushed out of a 180 pt frame; description wrapped to 3 lines with an orphan word | no symbol | symbol back, two-line description, `minHeight` 240 |
+| Browsers, empty | Bare "+" as the only action, plus the irrelevant reorder caption; removing the last browser hid its Undo | "+" | "Add Browser" menu button, Undo Remove next to it, no caption |
+| Browsers | "Not installed" and missing-folder note in `.orange` | ~2.2:1 | `.textOrange` |
+| Browsers | Removal message named the app, not the profile | "until you add Google Chrome back" | "until you add Google Chrome (Work) back" |
+
+Checked and fine as is: About (SlopKit), menu bar menu (system menu, follows the system
+appearance), profile sheet layout, 30-target scrolling (selection stays in view; rows past 9
+keep their columns), the waiting-links footer, light and dark everywhere.
+
+### Test hooks added
+
+- `SWITCHBOARD_ASSUME_DEFAULT=1`: shows the "is the default browser" state (General, menu)
+  without being it.
+- `SWITCHBOARD_SETTINGS_TAB=general|browsers|rules|about`: opens Settings on that tab at launch,
+  through the app menu's Settings… item. Added because the screen was locked for about 25 minutes
+  mid-pass, and window captures still work then but Accessibility doesn't.
+- `SWITCHBOARD_DRY_RUN=1` now also logs default-browser changes instead of making them, so a
+  test copy can never change the real default.
+
+### Gates
+
+- `scripts/lint.sh Switchboard`: pass (5 radius literals before, 0 after).
+- 92 unit tests in 21 suites pass (new: the icon inset is even in every size).
+- `scripts/check.sh Switchboard --perf`: all PASS. Launch 163 ms, first status item 379 ms,
+  idle CPU 0.004 % (lowest) / 0.010 % (median), footprint 29.2 MB (busy machine, load 4.8).
+  Picker event → visible 13–20 ms warm (6 targets), 30 ms for 30 targets (Large, scrolling).
+- `drive tree`: 0 `[unlabeled]` in Settings, the rule sheet and the picker. Close button 16×16.
+- Live build: running, and the default for http, https and `.html`
+  (`NSWorkspace.urlForApplication(toOpen:)` → `build/Switchboard.app`).
+
+### Not done
+
+- **Hover and right-click with the real mouse: not tested (owner active / screen locked).**
+  Hover selection is the same code as before; selection and keyboard focus were checked.
+- Profile sheet in its loaded state: not shot. It would show the owner's real Chrome profile
+  names. Only colours changed there.
+- Curly apostrophes: Switchboard's UI uses straight `'` like the rest of the suite and SlopKit.
+  Changing one app alone would make it inconsistent, so that's a suite-wide decision.
+- Browsers list: the height estimate (34 pt per row) can end the list exactly on a row edge,
+  so it's not obvious that it scrolls. Cosmetic; left for a later pass.
+
+Screenshots (`/tmp/slopapp-polish/switchboard/`): `before/` (picker-light, picker-rich-light,
+picker-rich-dark, general-light, browsers-light, browsers-selected-dark, rules-light,
+about-light, rule-editor-new-light-1, menu-light) and `after/` (picker-rich-light/-dark,
+picker-small-light, picker-large-light, picker-30-end-dark, picker-waiting-dark,
+picker-file-light/-dark, toast-light, general-light/-dark, general-default-light/-dark,
+browsers-light/-dark, rules-light/-dark, about-light/-dark, empty-browsers-light/-dark,
+empty-rules-light/-dark, rule-editor-new-light-1, remove-confirm-light-1, menu-default).
+
+### Golden Gate + light/dark (2026-11-06)
+
+Follow-up for the owner's "optimized for dark/light mode and fit in with macOS Golden Gate"
+(design system §4 "Fitting in on macOS 27 Golden Gate", §10 items 25–26). Same isolated test
+copy as above, deleted again at the end.
+
+| Check | Finding | Change |
+|---|---|---|
+| Menus text-only | Status menu, picker row "…" pull-down and right-click menu, Add menu, rule context menu: all plain text already. The browser icons in the picker are information, so they stay. | None needed |
+| Sidebars | Switchboard has none (Settings uses the standard tab toolbar) | n/a |
+| Toolbar | Standard SwiftUI Settings toolbar, system glass | None |
+| Inactive windows | Settings lists, checkboxes and the selected tab grey out when another of our windows (About) is key, light and dark (`gg/browsers-inactive-*.png`). The picker's highlight was always `selectedContentBackgroundColor`. | The picker highlight now follows `appearsActive`: unemphasized grey and primary text when not key. It's normally key whenever it's visible; seen once while it was being dismissed (`gg/picker-dark-resigning-key.png`). |
+| "…" button colour | On the blue highlight, light mode drew the dots dark (#0C2852, 3.47:1). A borderless menu takes the tint, not the foreground style. | `.tint(selectedText)`: white in both modes (#FFFEFF) |
+| Glass | Picker and Undo toast use SlopKit `FloatingPanel` (regular glass, follows the clear/tinted setting); no hand-made translucency | None |
+| Hairline | Now SlopKit's (1 pt layout, pixel on its top edge); my in-app copy is gone. Panel 398 → 399 pt. Gaps: row → drawn line 8.5 pt above the list, 8.0 pt below (only at 2×). | Left as is: fixing it means reading the display scale during layout, which SlopKit avoids on purpose |
+| Menu footer | Switchboard's own footer (activation workaround) is now in SlopKit | Uses SlopKit `MenuFooter` |
+| Reopen opens Settings | Checked on the test copy: a rule-matched link, a picker link, a forced `switchboard://` link and an `.html` file never opened Settings, and a link that cold-launches the app shows only the picker. Opening the app again (`open -a` with no link) opened Settings. | Kept `opensSettingsOnReopen` on: links arrive as GetURL/open-document events, never as reopen. Reopening the app is the way back in when the menu bar icon is hidden. |
+| Live appearance change | New hook `SWITCHBOARD_FLIP_APPEARANCE_AFTER`: started light, flipped to dark while running. The pre-drawn picker, Settings (incl. `.textOrange`) and the toast all follow (`gg/flip-*`). | Hook added (README) |
+| Drawn black/white, shadows, layers | None in the code (grep: no `.black`/`.white`, `cgColor`, layer colours or custom shadows) | None |
+
+Contrast, light | dark (window captures): warning/missing text 4.57 | 6.85:1, tester hint 3.11
+(antialiased `.secondary`) | 5.68:1, white on the picker highlight 4.19 | 4.84:1.
+
+**Open (SlopKit): the regular glass lightens opaque fills inside it.** The system
+selection colour is #0064E1 (5.37:1 with white), but inside the picker it draws as #347AE0
+(4.19:1 in light). Last pass it drew #406EDD (4.67:1) under the earlier glass style.
+`compositingGroup()` doesn't change it. A window capture shows the glass over flat grey rather
+than the real backdrop, and an on-screen capture would include the owner's content blurred
+behind the panel, so on-screen contrast and the clearest glass setting (would need changing
+System Settings) weren't measured.
+
+Gates: lint pass; 92 tests pass; `scripts/check.sh Switchboard --perf` all PASS (launch
+148 ms, first status item 338 ms, idle CPU 0.006 % lowest, footprint 32.3 MB, load 7.6).
+Live build running and default for http/https/`.html`; its config file and defaults are
+identical to the pre-gate backup.
+
+Light | dark side by side: `/tmp/slopapp-polish/switchboard/gg/sbs/` (picker, general,
+browsers, browsers-inactive, rules, about, empty-browsers, empty-rules, toast). Singles,
+flip shots, menus: `/tmp/slopapp-polish/switchboard/gg/`.

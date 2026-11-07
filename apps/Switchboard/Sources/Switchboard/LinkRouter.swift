@@ -41,8 +41,10 @@ final class LinkRouter {
             giveFocusBackIfIdle()
         case .route(let link, let forced):
             Diagnostics.record("received pid=\(senderPID.map(String.init) ?? "none")")
+            let cleaned = model.config.stripsTrackingParameters ? TrackingParameters.strip(link) : link
+            if cleaned != link { Diagnostics.record("removed tracking parameters") }
             let incoming = IncomingLink(
-                url: link,
+                url: cleaned,
                 sourceBundleID: Self.sourceBundleID(pid: senderPID),
                 modifiers: modifiers,
                 forcePicker: forced || forcePicker
@@ -71,7 +73,8 @@ final class LinkRouter {
             Diagnostics.record("route decision=pick count=\(targets.count) reason=\(reason) source=\(source) modifiers=\(link.modifiers.rawValue) decide_ms=\(decideMs)")
             // Shown anyway (asked for, or a key held): highlight what the rules would pick.
             let preferred = Router.preferredTarget(for: link, config: model.config, isInstalled: model.isInstalled)
-            picker.show(link, targets: targets, receivedAt: receivedAt, waitingCount: waiting.count, preselect: preferred?.id)
+            picker.show(link, targets: targets, size: model.config.pickerSize, receivedAt: receivedAt,
+                        waitingCount: waiting.count, preselect: preferred?.id)
         case .noTargets:
             Diagnostics.record("route decision=none")
             model.lastDismissedLink = link.url

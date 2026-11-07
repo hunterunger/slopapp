@@ -65,7 +65,7 @@ struct SwitchboardMenu: View {
             }
         }
 
-        SwitchboardMenuFooter(info: info)
+        MenuFooter(info: info)
     }
 
     private func openFromClipboard() {
@@ -79,38 +79,5 @@ struct SwitchboardMenu: View {
         }
         // Always ask: the user chose this on purpose, so let them pick.
         LinkRouter.shared.receive(url, forcePicker: true)
-    }
-}
-
-/// Settings…, About, Quit. Like SlopKit's `MenuFooter`, but Settings… really comes to the
-/// front: a menu bar app isn't active, and macOS 14's cooperative `NSApp.activate()` can be
-/// declined, leaving the window inactive behind other apps. (Worth moving into SlopKit.)
-struct SwitchboardMenuFooter: View {
-    let info: AppInfo
-    @Environment(\.openSettings) private var openSettings
-
-    var body: some View {
-        Divider()
-        Button("Settings…") { showSettings() }
-            .keyboardShortcut(",")
-        Button("About \(info.name)") {
-            NSApp.activate(ignoringOtherApps: true)
-            AboutWindow.show(info: info)
-        }
-        Divider()
-        Button("Quit \(info.name)") { NSApp.terminate(nil) }
-            .keyboardShortcut("q")
-    }
-
-    private func showSettings() {
-        NSApp.activate(ignoringOtherApps: true)
-        openSettings()
-        // The window may not exist until the next turn of the run loop.
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-            if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.contains("Settings") == true }) {
-                window.makeKeyAndOrderFront(nil)
-            }
-        }
     }
 }

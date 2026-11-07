@@ -81,6 +81,10 @@ final class AppModel {
     // MARK: - Default browser
 
     func refreshDefaultStatus() {
+        if Diagnostics.assumesDefault {
+            isDefaultBrowser = true
+            return
+        }
         guard let probe = URL(string: "https://example.com"),
               let handler = NSWorkspace.shared.urlForApplication(toOpen: probe) else {
             isDefaultBrowser = false
@@ -116,6 +120,11 @@ final class AppModel {
 
     private func setDefault(to appURL: URL, completion: @escaping @MainActor () -> Void) {
         let schemes = ["http", "https"]
+        if Diagnostics.isDryRun {
+            Diagnostics.record("dry-run set default browser app=\(appURL.path)")
+            completion()
+            return
+        }
         Task { @MainActor in
             for scheme in schemes {
                 try? await NSWorkspace.shared.setDefaultApplication(at: appURL, toOpenURLsWithScheme: scheme)

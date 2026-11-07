@@ -27,7 +27,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LinkRouter.shared.startTrackingActiveApp()
         // Draw the picker once off-screen so the first link doesn't pay for it.
         DispatchQueue.main.async {
-            LinkRouter.shared.picker.prewarm(targets: model.config.pickerTargets)
+            LinkRouter.shared.picker.prewarm(targets: model.config.pickerTargets, size: model.config.pickerSize)
+        }
+        if Diagnostics.initialSettingsTab != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { SettingsWindow.open() }
+        }
+        if let delay = Diagnostics.appearanceFlipDelay {
+            // Test hook: switch light ↔ dark while running, to check every surface follows.
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                let isDark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                NSApp.appearance = NSAppearance(named: isDark ? .aqua : .darkAqua)
+                Diagnostics.record("appearance flipped to \(isDark ? "light" : "dark")")
+            }
         }
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in

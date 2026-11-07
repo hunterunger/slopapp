@@ -25,7 +25,9 @@ struct BrowsersTab: View {
                 } description: {
                     Text("Add a browser so links have somewhere to go.")
                 } actions: {
-                    addMenu.fixedSize()
+                    addMenu(title: true)
+                    // Removing the last browser lands here: keep its Undo in reach.
+                    UndoRemovalButton(label: "Undo Remove", isVisible: $showUndo)
                 }
                 .frame(height: 220)
             } else {
@@ -51,23 +53,14 @@ struct BrowsersTab: View {
                     remove: removeSelected,
                     moveUp: { move(by: -1) },
                     moveDown: { move(by: 1) }
-                ) { addMenu } trailing: {
+                ) { addMenu(title: false) } trailing: {
                     UndoRemovalButton(label: "Undo Remove", isVisible: $showUndo)
                 }
             }
 
-            Group {
-                if let index = selectedIndex {
-                    TargetOptions(target: $model.config.targets[index])
-                } else {
-                    Text("The order here is the order of the number keys in the picker. Drag to reorder, or select a browser for its options.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            if !model.config.targets.isEmpty {
+                optionsArea
             }
-            // Same height with or without a selection, so the window doesn't jump.
-            .frame(maxWidth: .infinity, minHeight: 132, maxHeight: 132, alignment: .topLeading)
         }
         .padding(Spacing.xl)
         .confirmationDialog(
@@ -87,6 +80,22 @@ struct BrowsersTab: View {
         }
     }
 
+    /// The selected browser's options, or a hint. Same height either way, so the window
+    /// doesn't jump when the selection changes.
+    private var optionsArea: some View {
+        Group {
+            if let index = selectedIndex {
+                TargetOptions(target: $model.config.targets[index])
+            } else {
+                Text("The order here is the order of the number keys in the picker. Drag to reorder, or select a browser for its options.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 132, maxHeight: 132, alignment: .topLeading)
+    }
+
     private func pickerNumber(of target: Target) -> Int? {
         guard !target.isHidden, let index = model.config.pickerTargets.firstIndex(where: { $0.id == target.id }), index < 9 else {
             return nil
@@ -94,7 +103,8 @@ struct BrowsersTab: View {
         return index + 1
     }
 
-    private var addMenu: some View {
+    /// - Parameter title: a labelled button (empty state) instead of the list bar's "+".
+    private func addMenu(title: Bool) -> some View {
         Menu {
             Section("Browsers") {
                 ForEach(model.installedBrowsers, id: \.bundleID) { app in
@@ -131,11 +141,15 @@ struct BrowsersTab: View {
             Divider()
             Button("Refresh List") { model.refreshInstalledApps() }
         } label: {
-            Label("Add", systemImage: "plus")
-                .labelStyle(.iconOnly)
-                .frame(width: 20, height: 20)
+            if title {
+                Text("Add Browser")
+            } else {
+                Label("Add", systemImage: "plus")
+                    .labelStyle(.iconOnly)
+                    .frame(width: 20, height: 20)
+            }
         }
-        .menuIndicator(.hidden)
+        .menuIndicator(title ? .visible : .hidden)
         .fixedSize()
         .help("Add a browser, profile or app")
         .accessibilityLabel("Add")
@@ -196,7 +210,7 @@ struct BrowsersTab: View {
         }
         let verb = rules == 1 ? "shows" : "show"
         let pronoun = rules == 1 ? "it" : "them"
-        return "\(subject) \(verb) the picker until you add \(target.appName) back. Adding it back reconnects \(pronoun)."
+        return "\(subject) \(verb) the picker until you add \(target.displayName) back. Adding it back reconnects \(pronoun)."
     }
 
     private func remove(_ target: Target) {
@@ -247,7 +261,7 @@ private struct TargetRow: View {
                 if !isInstalled {
                     Text("Not installed")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.textOrange)
                 } else if target.isHidden {
                     Text("Hidden from the picker")
                         .font(.caption)
@@ -418,7 +432,7 @@ private struct ProfileSheet: View {
                 Label("\(app.name) has no profile folder named “\(folder)”. Opening links there would create a new, empty profile.",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.textOrange)
                     .fixedSize(horizontal: false, vertical: true)
             case .unknown:
                 EmptyView()

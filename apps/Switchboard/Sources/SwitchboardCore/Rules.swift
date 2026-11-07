@@ -197,6 +197,10 @@ public struct Config: Codable, Equatable, Sendable {
     /// Browsers the user removed. Rules keep pointing at them (and show the picker meanwhile),
     /// so adding the same browser back reconnects those rules.
     public var removedTargets: [Target]
+    /// Row size in the picker.
+    public var pickerSize: PickerSize
+    /// Remove ad/campaign tracking parameters (utm_…, fbclid, …) before routing. Off by default.
+    public var stripsTrackingParameters: Bool
 
     public init(
         targets: [Target] = [],
@@ -204,7 +208,9 @@ public struct Config: Codable, Equatable, Sendable {
         fallback: Fallback = .ask,
         askModifiers: Modifiers = .option,
         didSeedTargets: Bool = false,
-        removedTargets: [Target] = []
+        removedTargets: [Target] = [],
+        pickerSize: PickerSize = .medium,
+        stripsTrackingParameters: Bool = false
     ) {
         self.version = Self.currentVersion
         self.targets = targets
@@ -213,10 +219,13 @@ public struct Config: Codable, Equatable, Sendable {
         self.askModifiers = askModifiers
         self.didSeedTargets = didSeedTargets
         self.removedTargets = removedTargets
+        self.pickerSize = pickerSize
+        self.stripsTrackingParameters = stripsTrackingParameters
     }
 
     private enum CodingKeys: String, CodingKey {
         case version, targets, rules, fallback, askModifiers, didSeedTargets, removedTargets
+        case pickerSize, stripsTrackingParameters
     }
 
     /// Fields added after 0.1.0 are optional, so older settings files still load.
@@ -229,6 +238,9 @@ public struct Config: Codable, Equatable, Sendable {
         askModifiers = try c.decodeIfPresent(Modifiers.self, forKey: .askModifiers) ?? .option
         didSeedTargets = try c.decodeIfPresent(Bool.self, forKey: .didSeedTargets) ?? true
         removedTargets = try c.decodeIfPresent([Target].self, forKey: .removedTargets) ?? []
+        // An unknown size (from a newer version) falls back to the default instead of failing.
+        pickerSize = (try? c.decodeIfPresent(PickerSize.self, forKey: .pickerSize)) ?? .medium
+        stripsTrackingParameters = try c.decodeIfPresent(Bool.self, forKey: .stripsTrackingParameters) ?? false
     }
 
     public func target(id: UUID) -> Target? {
