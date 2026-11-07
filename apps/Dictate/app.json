@@ -1,0 +1,31 @@
+{
+  "slug": "dictate",
+  "name": "Dictate",
+  "tagline": "Talk, and your words appear wherever you're typing.",
+  "replaces": [
+    "Superwhisper",
+    "Wispr Flow"
+  ],
+  "category": "Productivity",
+  "icon": "audio-lines",
+  "menuBarOnly": true,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "26.4",
+  "bundleId": "app.slopapp.dictate",
+  "infoPlist": {
+    "NSMicrophoneUsageDescription": "Dictate listens while you hold the dictation key and turns your speech into text on this Mac. Audio is never saved or uploaded.",
+    "CFBundleDocumentTypes": [
+      {
+        "CFBundleTypeName": "Audio or video file",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "public.audio",
+          "public.movie"
+        ]
+      }
+    ]
+  }
+}

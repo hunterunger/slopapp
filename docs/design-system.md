@@ -277,6 +277,8 @@ version. Approved so far:
 |---|---|---|
 | [sindresorhus/KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) | 1.10.0 (exact) | Global hotkeys + recorder UI, sandbox-safe, used by hundreds of Mac apps. Re-exported by SlopKit. |
 | [jpsim/Yams](https://github.com/jpsim/Yams) | 6.2.2 (exact) | YAML parsing for Devkit (MIT; wraps libyaml, MIT). The de facto Swift YAML library; a correct YAML parser is too much to hand-roll. Devkit only. |
+| [argmaxinc/argmax-oss-swift](https://github.com/argmaxinc/argmax-oss-swift) (WhisperKit) | 0.18.0 (exact) | On-device Whisper speech recognition on CoreML (MIT). Dictate only. Brings swift-transformers 1.1.9, swift-jinja 2.5.2 (both Apache-2.0, Hugging Face), swift-crypto 4.5.2, swift-asn1 1.7.4, swift-collections 1.7.5, swift-argument-parser 1.8.2 (all Apache-2.0, Apple) and yyjson 0.12.0 (MIT), pinned in Dictate's Package.resolved. |
+| [FluidInference/FluidAudio](https://github.com/FluidInference/FluidAudio) | 0.14.8 (exact) | On-device Parakeet speech recognition on the Neural Engine (Apache-2.0). Dictate only. Same versions as the app Dictate replaces, so its downloaded models are reused as is. |
 
 Add new ones to this table with the reason.
 
