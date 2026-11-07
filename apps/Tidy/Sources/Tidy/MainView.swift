@@ -15,16 +15,20 @@ struct MainView: View {
         } detail: {
             Group {
                 switch model.section {
+                case .smartScan: SmartScanView(model: model)
+                case .junk: CleanupModuleView(model: model)
+                case .maintenance: MaintenanceModuleView(model: model)
                 case .uninstall: UninstallView(model: model)
                 case .leftovers: LeftoversView(model: model)
-                case .junk: JunkView(model: model)
-                case .large: LargeFilesView(model: model)
+                case .large: LargeModuleView(model: model)
+                case .spaceLens: SpaceMapModuleView(model: model)
                 }
             }
-            .frame(minWidth: 560, minHeight: 380)
+            .frame(minWidth: 640, minHeight: 440)
+            .toolbar { ModuleToolbar(model: model) }
         }
         .searchable(text: $model.query, placement: .toolbar, prompt: model.section.searchPrompt)
-        .navigationTitle("Tidy")
+        .navigationTitle(model.section.sidebarRow.title)
         .navigationSubtitle(model.environment.testModeSummary ?? "")
         .onChange(of: model.section) {
             model.query = ""
@@ -51,6 +55,25 @@ struct MainView: View {
         } message: { plan in
             Text(plan.message)
         }
+        .alert(model.pendingErase?.title ?? "", isPresented: Binding(
+            get: { model.pendingErase != nil }, set: { if !$0 { model.pendingErase = nil } }
+        ), presenting: model.pendingErase) { plan in
+            Button(plan.buttonTitle, role: .destructive) { model.finishErase(plan) }
+            Button("Cancel", role: .cancel) { model.pendingErase = nil }
+        } message: { plan in
+            Text(plan.message)
+        }
+        .alert(model.pendingSpaceMove?.title ?? "", isPresented: Binding(
+            get: { model.pendingSpaceMove != nil }, set: { if !$0 { model.pendingSpaceMove = nil } }
+        ), presenting: model.pendingSpaceMove) { plan in
+            Button("Move to Trash") {
+                model.pendingSpaceMove = nil
+                model.move(plan.urls, section: .spaceLens)
+            }
+            Button("Cancel", role: .cancel) { model.pendingSpaceMove = nil }
+        } message: { plan in
+            Text(plan.message)
+        }
         .alert(model.failureReport?.title ?? "", isPresented: Binding(
             get: { model.failureReport != nil }, set: { if !$0 { model.failureReport = nil } }
         ), presenting: model.failureReport) { report in
@@ -74,34 +97,80 @@ struct Sidebar: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        List(selection: Binding(get: { model.section }, set: { if let value = $0 { model.section = value } })) {
-            Section("Apps") {
-                row(.uninstall, badge: model.appsLoaded ? model.apps.count : nil)
-                row(.leftovers, badge: model.orphanPhase == .done ? model.orphanGroups.count : model.cachedOrphanCount)
-            }
-            Section("Files") {
-                row(.junk, badge: nil)
-                row(.large, badge: nil)
+        List(selection: Binding(get: { model.section.sidebarRow }, set: { if let value = $0 { model.section = value } })) {
+            ForEach(SidebarSection.sidebar) { section in
+                Label(section.title, systemImage: section.systemImage)
+                    .badge(badge(section))
+                    .tag(section)
             }
             if !model.hasFullDiskAccess {
                 Section {
                     Button {
                         model.showingAccessSheet = true
                     } label: {
-                        Label("Full Disk Access…", systemImage: "lock.shield")
+                        // The sidebar tints the icon like every other row (Golden Gate sidebars
+                        // are coloured); the title is secondary because it's a link, not a module.
+                        Label {
+                            Text("Full Disk Access…").foregroundStyle(.secondary)
+                        } icon: {
+                            Image(systemName: "lock.shield")
+                        }
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Some app data can only be measured and moved with Full Disk Access.")
+                    .help("Some app data, Mail downloads and the Trash can only be seen with Full Disk Access.")
                 }
             }
         }
     }
 
-    private func row(_ section: SidebarSection, badge: Int?) -> some View {
-        Label(section.title, systemImage: section.systemImage)
-            .badge(badge ?? 0)
-            .tag(section)
+    /// Apps count on Applications; leftovers count on the Leftovers tab.
+    private func badge(_ section: SidebarSection) -> Int {
+        switch section {
+        case .uninstall: model.appsLoaded ? model.apps.count : 0
+        default: 0
+        }
+    }
+}
+
+/// Start Over / Back, the Applications tabs, and per-module buttons.
+struct ModuleToolbar: ToolbarContent {
+    @Bindable var model: AppModel
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            // Always there (disabled when there's nowhere to go back to), so the window title
+            // doesn't slide sideways when a scan finishes or you switch modules.
+            let section = model.section
+            let stage = model.stage(section)
+            let backToResults = [.junk, .maintenance].contains(section) && stage == .review
+            let startOver = [.smartScan, .junk, .maintenance, .large, .spaceLens].contains(section)
+                && [.results, .review, .done].contains(stage)
+            Button {
+                model.query = ""
+                model.setStage(backToResults ? .results : .intro, for: section)
+            } label: {
+                Label(backToResults ? "Back" : "Start Over", systemImage: "chevron.left")
+            }
+            .disabled(!backToResults && !startOver)
+            .help(backToResults ? "Back to the results" : startOver ? "Back to the start of \(section.title)" : "Back")
+        }
+        if model.section == .uninstall || model.section == .leftovers {
+            ToolbarItem(placement: .principal) {
+                Picker("Show", selection: Binding(get: { model.section }, set: { model.section = $0 })) {
+                    Text("Uninstaller").tag(SidebarSection.uninstall)
+                    Text(leftoversTitle).tag(SidebarSection.leftovers)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .help("Apps on this Mac, or files left behind by apps that are gone")
+            }
+        }
+    }
+
+    private var leftoversTitle: String {
+        let count = model.orphanPhase == .done ? model.orphanGroups.count : model.cachedOrphanCount
+        guard let count, count > 0 else { return "Leftovers" }
+        return "Leftovers (\(count))"
     }
 }
 
@@ -124,7 +193,7 @@ struct AccessSheet: View {
                     granted
                 }
             }
-            Divider()
+            Hairline()
             HStack {
                 Spacer()
                 Button("Done") {
@@ -226,7 +295,7 @@ struct HistorySheet: View {
             Text("Recently Moved to the Trash")
                 .font(.headline)
                 .padding(Spacing.l)
-            Divider()
+            Hairline()
             if !model.historyFailures.isEmpty {
                 Notice(systemImage: "exclamationmark.triangle",
                        text: "Some items couldn't be put back: " + model.historyFailures.prefix(4)
@@ -234,7 +303,7 @@ struct HistorySheet: View {
                         + (model.historyFailures.count > 4 ? "; and \(model.historyFailures.count - 4) more." : ""))
                     .padding(.horizontal, Spacing.l)
                     .padding(.vertical, Spacing.s)
-                Divider()
+                Hairline()
             }
             List {
                 ForEach(model.history.reversed()) { entry in
@@ -242,7 +311,7 @@ struct HistorySheet: View {
                 }
             }
             .frame(minHeight: 200)
-            Divider()
+            Hairline()
             HStack {
                 Text("Put Back works while the items are still in the Trash.")
                     .font(.caption)

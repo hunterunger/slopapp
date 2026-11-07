@@ -23,9 +23,13 @@ struct UninstallView: View {
         } isTargeted: { isDropTargeted = $0 }
         .overlay {
             if isDropTargeted {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                // Inset 4 pt from the content's edges; the bottom-right corner is the window's
+                // (about 17 pt on macOS 26), so 17 − 4 ≈ Radius.l keeps it concentric.
+                RoundedRectangle(cornerRadius: Radius.l, style: .continuous)
+                    // Stays accent in a background window: you're dragging from Finder, so Tidy
+                    // is never key while this shows.
                     .strokeBorder(Color.accentColor, lineWidth: 3)
-                    .padding(4)
+                    .padding(Spacing.xs)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -158,7 +162,7 @@ struct AppDetail: View {
         if let app = model.currentApp {
             VStack(spacing: 0) {
                 AppHeader(app: app, model: model)
-                Divider()
+                Hairline()
                 if let refusal = model.refusal(for: app) {
                     ContentUnavailableView {
                         Label("Can't Remove \(app.name)", systemImage: "lock")
@@ -216,7 +220,7 @@ struct AppDetail: View {
             }
             .padding(.horizontal, Spacing.l)
             .padding(.vertical, Spacing.s)
-            Divider()
+            Hairline()
         }
     }
 
@@ -315,7 +319,7 @@ struct AppHeader: View {
                         .foregroundStyle(total.isComplete ? .primary : .secondary)
                     Text(ItemCount.text(total: model.leftovers.count,
                                         checked: model.leftovers.filter { model.appChecked.contains($0.id) && model.isRemovable($0) }.count))
-                        .font(.caption)
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
@@ -387,6 +391,6 @@ struct LeftInPlaceList: View {
         }
         .frame(maxWidth: 420, alignment: .leading)
         .padding(Spacing.m)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
     }
 }

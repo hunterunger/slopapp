@@ -37,7 +37,7 @@ struct LeftoversView: View {
                         .padding(.horizontal, Spacing.l)
                         .padding(.bottom, Spacing.s)
                     }
-                    Divider()
+                    Hairline()
                     let sections = self.sections
                     if sections.isEmpty {
                         ContentUnavailableView.search(text: model.query)
@@ -82,101 +82,27 @@ struct SectionIntro: View {
     }
 }
 
-/// Caches, logs and developer junk, measured as soon as the section opens.
-struct JunkView: View {
+/// Large & Old as a module page: intro with Scan, the scanning screen, then the table.
+struct LargeModuleView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            JunkSummary(model: model)
-            Divider()
-            if model.junkItems.isEmpty {
-                switch model.junkPhase {
-                case .idle, .scanning:
-                    ProgressView("Looking for junk…").frame(maxWidth: .infinity, maxHeight: .infinity)
-                case .stopped:
-                    ContentUnavailableView {
-                        Label("Scan Stopped", systemImage: "stop.circle")
-                    } actions: {
-                        Button("Scan Again") { model.scanJunk() }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                case .done:
-                    ContentUnavailableView {
-                        Label("No Junk Found", systemImage: "checkmark.circle")
-                    } description: {
-                        Text("There are no caches, logs or developer files to clear right now.")
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            } else {
-                let sections = self.sections
-                if sections.isEmpty {
-                    ContentUnavailableView.search(text: model.query)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ReviewList(sections: sections, checked: $model.junkChecked, selection: $model.junkSelection,
-                               sizes: model.sizes, home: model.environment.home)
-                }
+        if model.stage(.large) == .intro {
+            ModuleIntro(systemImage: SidebarSection.large.systemImage, title: "Large & Old Files",
+                        subtitle: "Find big files you haven't opened in a while, sorted by size, kind and when you last used them.",
+                        features: [ModuleFeature(systemImage: "chart.bar.xaxis", title: "By size"),
+                                   ModuleFeature(systemImage: "clock", title: "By last used"),
+                                   ModuleFeature(systemImage: "doc.on.doc", title: "By kind, including installers")],
+                        buttonHelp: "Look for large files (⌘R)", action: model.startLargeScan) {
+                FolderMenu(title: model.largeRoot == model.environment.home ? "Home Folder" : model.largeRoot.lastPathComponent,
+                           home: { model.largeRoot = model.environment.home }, choose: model.chooseLargeFolder)
             }
-            ActionBar(model: model, section: .junk, checkedURLs: model.actionableJunk.map(\.url))
+        } else if case .scanning(let text) = model.largePhase {
+            ModuleScanning(systemImage: SidebarSection.large.systemImage, title: "Looking for large files…",
+                           detail: text, onStop: model.stopLarge)
+        } else {
+            LargeFilesView(model: model)
         }
-        .onAppear { model.sectionAppeared(.junk) }
-    }
-
-    private var sections: [ReviewSection] {
-        let home = model.environment.home
-        let grouped = Dictionary(grouping: model.visibleJunkItems, by: \.category)
-        return JunkCategory.allCases.compactMap { category in
-            guard let items = grouped[category], !items.isEmpty else { return nil }
-            return ReviewSection(id: category.rawValue, title: category.title, systemImage: category.systemImage,
-                                 detail: category.detail,
-                                 items: items.sorted { (model.sizes.size($0.url)?.bytes ?? 0) > (model.sizes.size($1.url)?.bytes ?? 0) }
-                                    .map { item in
-                                        // The real folder name, with the friendly name (app, project) after the path.
-                                        let friendly = item.name == item.url.lastPathComponent ? "" : " · \(item.name)"
-                                        return ReviewItem(url: item.url, title: item.url.lastPathComponent,
-                                                          subtitle: PathDisplay.parent(item.url, home: home) + friendly,
-                                                          note: item.note)
-                                    })
-        }
-    }
-}
-
-struct JunkSummary: View {
-    var model: AppModel
-
-    var body: some View {
-        let total = model.sizes.total(model.junkItems.map(\.url))
-        HStack(spacing: Spacing.m) {
-            VStack(alignment: .leading, spacing: 2) {
-                switch model.junkPhase {
-                case .scanning(let text):
-                    Text(model.junkItems.isEmpty ? text : "\(ByteFormat.string(total.bytes)) found so far")
-                        .font(.title2.bold().monospacedDigit())
-                    Text("Measuring \(model.junkItems.count.formatted()) items…").font(.callout).foregroundStyle(.secondary)
-                case .stopped:
-                    Text("\(ByteFormat.string(total.bytes)) found before stopping").font(.title2.bold().monospacedDigit())
-                    Text("Some sizes weren't measured.").font(.callout).foregroundStyle(.secondary)
-                default:
-                    Text("\(ByteFormat.string(total.bytes)) of junk").font(.title2.bold().monospacedDigit())
-                    Text("Apps and tools recreate these when they need them. Review, then move what you don't want to the Trash.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer()
-            if case .scanning = model.junkPhase {
-                ProgressView().controlSize(.small).accessibilityLabel("Scanning")
-                Button("Stop") { model.stopJunk() }
-            } else {
-                Button("Scan Again") { model.scanJunk() }
-                    .help("Look for junk again (⌘R)")
-            }
-        }
-        .padding(.horizontal, Spacing.l)
-        .padding(.vertical, Spacing.m)
     }
 }
 
@@ -195,7 +121,7 @@ struct LargeFilesView: View {
     var body: some View {
         VStack(spacing: 0) {
             filterBar
-            Divider()
+            Hairline()
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             let checked = model.actionableLarge
@@ -220,13 +146,14 @@ struct LargeFilesView: View {
                 Divider()
                 ForEach(FileKind.allCases) { Text($0.title).tag(FileKind?.some($0)) }
             }
-            .frame(maxWidth: 220)
+            .fixedSize()
             Spacer()
             Menu {
                 Button("Home Folder") { model.resetLargeRoot() }
                 Button("Choose Folder…") { model.chooseLargeFolder() }
             } label: {
-                Label(PathDisplay.short(model.largeRoot, home: model.environment.home), systemImage: "folder")
+                Label(model.largeRoot == model.environment.home ? "Home Folder"
+                      : PathDisplay.short(model.largeRoot, home: model.environment.home), systemImage: "folder")
             }
             .fixedSize()
             .help("Folder to look in")
@@ -290,7 +217,7 @@ struct LargeFilesView: View {
                             }
                             .padding(.horizontal, Spacing.l)
                             .padding(.vertical, Spacing.s)
-                            Divider()
+                            Hairline()
                         }
                         table(files)
                     }
@@ -328,6 +255,8 @@ struct LargeFilesView: View {
             }
             .width(min: 70, ideal: 80)
             .customizationID("size")
+            // Sizes line up on the right, header included, as in Finder.
+            .alignment(.trailing)
             TableColumn("Last Used", value: \.lastUsed) { file in
                 Text(file.lastUsed.formatted(date: .abbreviated, time: .omitted)).monospacedDigit()
                     .help(file.lastOpened == nil ? "Last modified" : "Last opened")

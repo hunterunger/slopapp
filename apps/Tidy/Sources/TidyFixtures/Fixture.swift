@@ -89,6 +89,36 @@ public struct Fixture: Sendable {
         try buildJunk()
         try buildLargeFiles(unit: unit, now: now)
         try buildSystemLibrary()
+        try buildTrash(now: now)
+        try buildMailDownloads(now: now)
+    }
+
+    /// Things already in the Trash (for Trash Bins): files and a folder, no apps (apps in the
+    /// Trash change what Leftovers finds).
+    private func buildTrash(now: Date) throws {
+        try data(trash, "Old invoice.pdf", 300_000)
+        try data(trash, "project-backup.zip", 1_500_000)
+        try data(trash, "Screenshots/Screen 1.png", 400_000)
+        try data(trash, "Screenshots/Screen 2.png", 350_000)
+        // Like Finder: a folder someone made read-only still empties.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: trash.appendingPathComponent("Screenshots").path)
+        // A Mac has a .DS_Store here; it's never listed.
+        try data(trash, ".DS_Store", 6_000)
+    }
+
+    /// Copies of opened Mail attachments: one untouched, one edited after it was saved.
+    private func buildMailDownloads(now: Date) throws {
+        let folder = library.appendingPathComponent("Containers/com.apple.mail/Data/Library/Mail Downloads")
+        let day: TimeInterval = 86_400
+        try data(folder, "6A1B2C3D-0000-4000-8000-000000000001/Invoice 2026-09.pdf", 220_000)
+        try data(folder, "6A1B2C3D-0000-4000-8000-000000000002/Contract draft.docx", 90_000)
+        let fm = FileManager.default
+        let untouched = folder.appendingPathComponent("6A1B2C3D-0000-4000-8000-000000000001/Invoice 2026-09.pdf").path
+        try fm.setAttributes([.creationDate: now.addingTimeInterval(-20 * day), .modificationDate: now.addingTimeInterval(-20 * day)],
+                             ofItemAtPath: untouched)
+        let edited = folder.appendingPathComponent("6A1B2C3D-0000-4000-8000-000000000002/Contract draft.docx").path
+        try fm.setAttributes([.creationDate: now.addingTimeInterval(-10 * day), .modificationDate: now.addingTimeInterval(-2 * day)],
+                             ofItemAtPath: edited)
     }
 
     private func buildApps() throws {
@@ -213,6 +243,8 @@ public struct Fixture: Sendable {
                      "Caches/io.retired.Snapz"] {
             try FileManager.default.setAttributes([.modificationDate: monthAgo], ofItemAtPath: L.appendingPathComponent(name).path)
         }
+        // macOS's own launch agent: never listed anywhere.
+        try launchAgent(L, "LaunchAgents/com.apple.fixture.example.plist", label: "com.apple.fixture.example", program: "/usr/libexec/example")
         // A tool's launch agent whose program is still there: not an orphan, however old.
         try launchAgent(L, "LaunchAgents/com.toolmaker.agent.plist", label: "com.toolmaker.agent", program: "/bin/sh")
         try FileManager.default.setAttributes([.modificationDate: monthAgo],

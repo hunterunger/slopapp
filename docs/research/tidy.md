@@ -872,3 +872,256 @@ starting and quitting on a busy Mac were redrawing the app list). Coordinator no
 acknowledged: tests and walkthroughs don't write the real clipboard (none of the unit tests
 touch a pasteboard; manual copy checks will use a private pasteboard).
 
+
+## Parity pass (2026-11-03)
+
+Per `docs/parity-pass.md`: look and work much more like CleanMyMac, and don't miss features.
+**How the original was studied this time:** CleanMyMac 5.7.3 is installed but its main app
+wasn't running (only its Finder Sync extension), and opening it shows the owner's scan data,
+so it was **not launched**: no window, no scan, no setting touched. Instead: the English
+`Localizable.strings` of the SmartCare, Performance, JunkCleanup, SpaceLens/SpaceLensUI and
+Menu (Health Monitor) modules (read statically), plus official screenshots from MacPaw's
+knowledge base (Smart Care, Performance, Space Lens, Trash Bins, Maintenance Tasks pages)
+and press screenshots (9to5Mac, MacStories), downloaded to `/tmp/tidy-parity/` (not
+committed). Several earlier "skip" decisions (Smart Care #52, Trash bins #38, Space Lens
+#48, login items #37, maintenance #54) are superseded by this pass where the table says so.
+
+### What the original looks like
+
+- **Sidebar of modules**, big icons: Smart Care, Cleanup, Protection, Performance,
+  Applications, My Clutter, Space Lens, Cloud Cleanup; My Tools / My Activity / Assistant at
+  the bottom.
+- **Every module has the same rhythm.** *Intro*: hero illustration on the left, module name,
+  one-line subtitle and a list of 3 sub-features on the right, one big **round "Scan"
+  button** at the bottom centre (Space Lens adds a disk popup above it). *Scanning*: the hero
+  centred, "Looking for junk…" and the current path, a round **Stop** button with a progress
+  ring. *Results*: a headline ("There are 5 GB of junk files on your Mac.") with **Review
+  All…**, then a **tile mosaic** (one tall tile on the left with a sentence and art, smaller
+  tiles two by two), each "X of Y Found" with **Review** and **Clean**; "‹ Start Over" top
+  left. Smart Care's results tiles carry **checkboxes** and the page has one round **Run**
+  button. *Manager* ("Review"): "‹ Back", centred title, search and "Sort by", categories on
+  the left, checkable list in the middle, bottom bar with "N selected" and the action button.
+  *Complete*: a card with the hero, "Cleanup complete!", what was done, and View Log /
+  Review Remaining Items / Done.
+- **Performance**: Maintenance Tasks (Flush DNS Cache, Reindex Spotlight, Repair Disk
+  Permissions, Speed Up Mail, Run Periodic Scripts, Free Up RAM, Free Up Purgeable Space,
+  Thin Time Machine Snapshots), Login Items, Background Items (launch agents, daemons,
+  helpers).
+- **Cleanup**: System Junk, AI Clutter, Mail Attachments, Trash Bins (per volume, plus mail
+  trash), each with Review / Clean.
+- **Space Lens**: pick a disk, scan, a bubble map of folders beside a sized list; drill in;
+  "Review and Remove".
+- **Menu** (separate login item): CPU, memory, disk, battery, network tiles, notifications
+  (low disk, heavy memory, hung apps).
+
+### Gap table
+
+| Item (original) | Status | Notes |
+|---|---|---|
+| **Design** | | |
+| Sidebar of modules | done | Smart Scan, Cleanup, Maintenance, Applications, Large & Old, Space Map (`⌘1`–`⌘6`), standard sidebar with SF Symbols. Leftovers moved inside Applications (a segmented Uninstaller / Leftovers (N) control in the toolbar), as in the original's Applications manager. |
+| Intro page: hero, title, subtitle, 3 sub-features, round Scan button bottom centre | done | `ModuleIntro` (ModuleKit.swift). Our hero is an SF Symbol on an accent-tinted rounded tile with a soft accent glow behind the page, not their illustrations or per-module colour themes. Return presses the round button. Space Map and Large & Old put a folder popup above it, like Space Lens's disk popup. |
+| Scanning page: hero, status, current path, round Stop | done | `ModuleScanning`; the hero pulses and the Stop button gets an arc (both still with Reduce Motion). Esc stops. |
+| Results: headline, Review All, tile mosaic with Review / Clean, Start Over | done | `ModuleResults` + `TileMosaic` (`SplitRow` layout: tall tile at 36 % width, the rest two by two). Start Over / Back in the toolbar's navigation slot. |
+| Smart Care: one scan, checkable tiles, one round Run button | done | **Smart Scan**: junk, Trash, leftovers of deleted apps, background items. Tiles for Cleanup and Trash have checkboxes (Trash off by default; remembered); Leftovers and Background Items are review-only (nothing of the user's is removed without a look). Round **Clean** button. The scan also fills in Cleanup's and Maintenance's results. |
+| Manager: Back, categories left, checkable list, bottom bar | done | Cleanup (System Junk / Mail Downloads / Trash) and Maintenance (Tasks / Login Items / Background Items) reviews; the existing review lists and action bar. Sort-by menu: not added (lists sort by size, as before). |
+| Completion card: what was done, View Log, Review Remaining, Done | done | `ModuleDone`: lines per result, "Recently Moved to Trash…" (our log, with Put Back), Review Remaining Items / Manage More Items, Done. |
+| Applications module intro + scan before the app list | **deviation** | The app list opens straight away (it loads in ~0.2 s); an extra Scan click would slow the main job. |
+| Per-module colour themes, illustrations, sounds | not copied | Trade dress. Accent colour, SF Symbols, no sounds. |
+| **Features** | | |
+| Smart scan across modules | done | See above. Clean empties the Trash first (only if its tile is checked, after a confirmation), then moves junk, so the junk stays restorable. |
+| System junk | done (before) | Unchanged categories and smart selection. |
+| Trash Bins | done | `TrashBinScanner` / `TrashBinService`: lists `~/.Trash` (fixture Trash in test mode), sizes, all checked; **Empty Trash…** (or **Erase…** for some) always confirms with count and size; `⇧⌘⌫` File ▸ Empty Trash…. Erases only items directly inside a Trash folder (checked per item); emptying prunes Put Back history. Without Full Disk Access macOS hides the Trash: tile says "Needs access" with Allow… / Open Trash. Other volumes' and Mail's trash: **deferred** (S: reading other volumes makes macOS ask about removable volumes; mail trash needs IMAP). |
+| Mail attachments | partly done | **Mail Downloads** (copies Mail saved when attachments were opened), only with Full Disk Access (otherwise macOS would ask about another app's data). Edited copies start unchecked ("Changed after it was saved"). Policy exception for exactly that folder's contents. Attachments stored inside mailboxes (`~/Library/Mail/V*/…/Attachments`): **deferred** (M), they can be the only copy for POP/local mailboxes. |
+| Large & old files | done (before) | Now a module page: intro with folder popup → scanning page → the table. |
+| Uninstaller | done (before) | Unchanged; now under Applications. |
+| Leftovers | done (before) | Under Applications ▸ Leftovers. |
+| Login items manager | done (honest subset) | Lists login items apps carry in `Contents/Library/LoginItems` with **Open Login Items Settings**. Modern login items' on/off state lives in a root-only database (`sfltool dumpbtm` needs root), and changing it needs System Settings, so Tidy links there instead of pretending. |
+| Background items (launch agents / daemons) | done | `BackgroundItemScanner`: `~/Library/LaunchAgents`, `/Library/LaunchAgents`, `/Library/LaunchDaemons` (fixture stand-ins in test mode); owner app (program inside the app, or bundle-id family), running (`launchctl list`, read-only), "Program is missing", "Starts at login", "Always running", "Turned off"; `com.apple.*` never listed. Broken user agents start checked. **Move to Trash only for user-owned agents** (trash policy; Put Back works); system ones are locked with Show in Finder. A trashed agent stops after logout (no `launchctl bootout`, so Put Back stays exact). |
+| Maintenance tasks | done (4) | Flush DNS Cache and Rebuild Spotlight Index (macOS administrator prompt via `osascript … with administrator privileges`, fixed command strings), Reset Quick Look and Clear Font Caches (no admin). Last-run dates remembered. Test mode never runs them (log file; `TIDY_TASK_FAIL` simulates failure/cancel). **Skipped, with reasons:** Free Up RAM and Purgeable Space (owner rule: no RAM/speed claims; macOS manages both itself), Repair Disk Permissions (does nothing since OS X 10.11 / SIP), Speed Up Mail (rebuilds Mail's envelope index: risk to mail data, a speed claim), Run Periodic Scripts (needs root; replaced by launchd jobs since macOS 10.15). Thin Time Machine snapshots: **deferred** (S, needs root; `tmutil` admin task). |
+| Space Lens visualisation | done | **Space Map**: `SpaceScanner` (fts walk, disk usage, hard links once, packages as one item, small items folded into "N smaller items", protected folders skipped without Full Disk Access with a notice) + `Treemap` (squarified layout). List biggest-first with size bars, checkboxes and chevrons beside the map; click selects, double-click / Return opens; breadcrumbs and `⌘↑`; Move to Trash… confirms with names and size; sizes update without rescanning, Put Back restores them. Home folder or a folder inside it (the trash policy only moves things in the home folder). Whole-disk scan: **deferred** (M: firmlinks between the system and data volumes, other users' folders). |
+| Updater | skipped | Needs the network and an app catalog; Slopapp's own app handles its updates. |
+| Privacy items (browser history, cookies) | skipped | Erases personal data in other apps' stores, needs each browser quit, and the browsers' own Clear History does it better. |
+| Malware scanning / real-time protection | skipped | Owner rule: no malware claims. macOS's XProtect does this. |
+| Menu bar memory / disk monitor | deferred | Belongs to **Gauge** (roadmap, menu bar system stats). Tidy is a single-window app with nothing in the background; a monitor would need a login item and an idle budget of its own. If the owner wants it in Tidy: M, opt-in `MenuBarExtra` showing free disk space and Trash size, no "free up memory". |
+| AI clutter, duplicates, similar images, downloads | deferred / other app | AI clutter: M, needs a per-tool allowlist (unchanged decision). Duplicates and similar images: Twins (roadmap). |
+| Cloud cleanup, email cleanup, Assistant | skipped | Accounts and network. |
+| Smart Care settings (which modules it scans) | partly done | Settings ▸ "Smart Scan empties the Trash"; tile checkboxes are remembered. Per-module scan choices: later (XS). |
+
+### Deviations from the design system
+
+- **Hero tiles and the round button** use custom shapes (accent-colour gradient squircle and
+  circle) instead of standard controls, and pages have a faint accent radial glow. Why: the
+  original's intro/scan pages are built around a hero and one big round action; a plain
+  `ContentUnavailableView` and bordered button don't read as that flow. Colours are the
+  user's accent only; text uses system styles; both appearances checked.
+- **Result tiles** are custom cards (material-like fill, separator stroke) laid out by a
+  small custom `Layout`. Why: the mosaic of tiles is the original's results structure.
+- **Treemap** is a custom view. Accessibility: each rectangle is a labelled button
+  ("Caches, 13 MB") with Open as a named action; the list beside it carries every action too.
+- **The only permanent delete** (emptying the Trash) is a deliberate exception to "nothing
+  destructive without undo": it's what the feature is, and it always confirms with what and
+  how much, with Cancel as the escape.
+- **Admin prompt** for two maintenance tasks (macOS's own, fixed commands); moving files
+  still never asks for a password.
+
+### New code and safety
+
+- Core (tested): `TrashBins.swift`, `BackgroundItems.swift`, `Maintenance.swift`,
+  `SpaceMap.swift`; `JunkScanner` Mail Downloads; `TrashPolicy.allowedAppleFolders`;
+  `TidyEnvironment.trashBins` / `maintenanceLog`.
+- UI: `ModuleKit.swift` (reusable module pages: `ModuleIntro`, `ModuleScanning`,
+  `ModuleResults`, `TileMosaic`, `SplitRow`, `RoundActionButton`, `ModuleDone`; candidates for
+  SlopKit), `SmartScanModule.swift`, `CleanupModule.swift`, `MaintenanceModule.swift`,
+  `SpaceMapModule.swift`; `AppModel.performMove` is now async so Smart Scan can sequence
+  erase → move.
+- Fixture additions: things in the Trash (incl. a read-only folder and a `.DS_Store`), two
+  Mail Downloads (one edited), an Apple launch agent decoy. Tests never touch the real home
+  or Trash: everything runs under `/tmp/tidy-test`. 24 new tests (88 total, 17 suites):
+  Trash listing/erasing/refusals/unreadable Trash, launch items (owners, broken, scopes,
+  policy), launchctl parsing, tasks (fixed commands, no speed/RAM words, test-mode
+  recording, simulated failures), Mail Downloads (FDA-gated, edited unchecked, policy
+  exception limited), space map (sums, packages, exclusions, find), treemap (areas, no
+  overlaps, aspect ratios, edge cases).
+
+### Gates (2026-11-03, parity pass)
+
+- `scripts/check.sh Tidy --perf`: **PASS** — 88 tests; launch 181 ms, first window 382 ms,
+  idle CPU 0.067 % (lowest window), footprint 54.8 MB (busy machine, load 7.9).
+- Walkthrough on `build/Tidy.app` with the fixture, light and dark: Smart Scan intro → scan
+  → tiles → check Trash → Clean → confirmation → erased the 3 Trash items (only those) and
+  moved 27 junk items → All Done; Put Back restored all 27. Cleanup tiles → Review All →
+  Trash pane → uncheck one → Erase… → only the 2 checked erased, the read-only folder kept.
+  Mail Downloads (with `TIDY_ASSUME_FULL_DISK_ACCESS=1`): edited copy unchecked, moved the
+  other through the policy exception. Unreadable Trash (fixture `chmod 000`): "Needs
+  access". Maintenance: tiles → Background Items (2 broken agents pre-checked, daemon locked,
+  "Running" via `TIDY_LOADED_LABELS`) → Move to Trash → ⌘Z restored both; Tasks: ran Flush
+  DNS + Reset Quick Look → recorded in `tidy-maintenance-log.txt`, nothing run on the Mac;
+  Login Items pane. Applications with the Uninstaller / Leftovers (2) toggle. Large & Old
+  intro → Scan → protected-folder choice → table. Space Map: home → Library → Caches, check
+  Homebrew → Move to Trash… confirmation → moved, sizes updated in place → Put Back.
+  `scripts/drive tree`: **0 `[unlabeled]`** on every module and stage checked.
+- Not verified here: the real Mac's Trash and Mail Downloads with Full Disk Access (this
+  terminal has none; the fixture override covers the UI), the two admin tasks for real (they
+  need a human to type a password; test mode records them), `launchctl list` on real agents
+  (parser unit-tested; read-only).
+
+Screenshots (not committed): `/tmp/tidy-parity/s01-smart-intro.png` …
+`s19-large-table.png` (light), `/tmp/tidy-parity/d01-smart-intro.png` …
+`d08-space-docs.png` (dark); original's official screenshots `/tmp/tidy-parity/small/*.png`,
+`9-1.png`, `9-2.png`, `ms-1.png`, `ms-2.png`.
+
+## Polish pass (2026-11-05)
+
+Per `docs/polish-pass.md`. Every surface was shot on the stamped release build
+(`build/Tidy.app`, SDK 27) in light and dark with the fixture (`TIDY_HOME=/tmp/tidy-test/home`
+and friends; nothing of the owner's was scanned or shown), then measured with
+`scripts/measure` (points; Retina shots). Window: 1040×660, macOS window radius 17.1 pt,
+window buttons 16×16.
+
+### Defects found and fixed (before → after)
+
+| # | Where | Before | After |
+|---|---|---|---|
+| 1 | Module hero tile | radius `size × 0.27` = 40.5 pt (not a token, not icon-shaped); gloss layer inset 2 pt with the same radius | `Radius.iconTile(side:)` = 33.6 pt; gloss `Radius.nested(in:padding: 2)` = 31.6 pt (concentric) |
+| 2 | Round Scan / Stop / Clean button | 78 pt + 5 pt halo (off grid); busy arc centred on the outer edge, 1.5 pt outside the halo | 80 pt + `Spacing.xs` halo (same 88 pt); arc inset 2 pt so it runs inside the 4 pt halo |
+| 3 | Result tiles | radius 14 (not a token), 1 pt separator border | `Radius.l` (12), 0.5 pt hairline |
+| 4 | Result tiles, values in one row | value baselines followed caption line count and symbol height: Cleanup row 4–12 pt apart, Smart Scan Trash vs Leftovers 5 pt | value sits right under a fixed-height header (icon box 32/40 pt), buttons on their own bottom row: same y in every tile of a row (measured equal) |
+| 5 | Smart Scan mosaic (4 tiles) | last cell empty: a 237×130 pt hole beside Background Items | an odd last tile spans both columns |
+| 6 | Results pages | mosaic pinned under the headline, 130 pt (Smart Scan) / 250 pt (Cleanup, no button) of empty page below | headline + tiles centred together in the space above the button; scrolls when it doesn't fit |
+| 7 | Review group headers (Uninstaller, Leftovers, Junk, Trash, Background Items) | `Label` put the title after the symbol's own width: titles 1–5 pt left of the rows' names (Trash 5.2, Leftovers 4.2, Launch Agents 3.1) | checkbox, fixed 20 pt icon slot, title: header title and row names start at the same x (measured 620.0 vs 620.5 pt, glyph side bearing) |
+| 8 | Group header descriptions | one line, truncated mid-word ("They rebuild them as n…", "stops i…") | second line under the title, up to 2 lines, tooltip kept |
+| 9 | Size column (headers, rows, Space Map) | `minWidth: 70`, grew with content | fixed 72 pt slot (`ReviewRow.sizeWidth`), sizes never move a row |
+| 10 | Space Map size bars | track width followed the size text: Library bar track 26 pt shorter than .npm's | fixed size slot: all tracks equal |
+| 11 | Space Map "N smaller items" row | 22 pt literal indent: icon 2 pt and name 1.5 pt off the rows, size 18 pt right of the column | invisible checkbox + the same icon, size and chevron slots: aligned |
+| 12 | Space Map treemap | partial folder labelled "48.9 MB" while the list said "48.9 MB+"; 1 pt tile border; radius 6 literal; checkmark padding 4 literal | "+" in both; 0.5 pt border; `Radius.s`; `Spacing.xs` |
+| 13 | Space Map breadcrumb | root crumb "~"; up button a squat bordered capsule 15 pt tall | "Home Folder"; borderless chevron in the same 16 pt slot as the rows' chevrons |
+| 14 | Bottom bars (Move to Trash, Trash, Tasks) | no separator above (rows cut off against the bar); 10 pt vertical padding (off grid); three copies | one `BottomBar`: 0.5 pt hairline, 16 pt sides (text on the list's leading edge), 12 pt top/bottom |
+| 15 | Separators | SwiftUI `Divider` measured 1.0 pt (2 device px) | `Hairline` (1 device px, `separatorColor`) for every layout divider; menus keep `Divider` |
+| 16 | Review category column | Cleanup 210 pt vs Maintenance 220 pt (list edge moved 10 pt between modules); a second sidebar's material inside the detail | both 220 pt; sidebar rows and selection without the material (one sidebar per window) |
+| 17 | Toolbar title | jumped 36 pt sideways when Back / Start Over appeared (after every scan, and between modules) | the back button is always there, disabled when there's nowhere to go: the title never moves |
+| 18 | Large & Old | Size column left-aligned; Kind popup stretched to 220 pt; folder menu labelled "~" | sizes and header right-aligned (`.alignment(.trailing)`); popup fits its content; "Home Folder", as on the intro |
+| 19 | Mail Downloads without Full Disk Access | a dead "Nothing checked · Move to Trash" bar under the permission prompt | no bar |
+| 20 | Completion card | hero + text centred, 68 pt in from the buttons' left edge | hero starts at the card padding, like the buttons below it |
+| 21 | Settings ▸ General | explanations were rows of their own, detached from their control by a separator; "On" in plain `.green` (≈2:1 on white) | explanations are the rows' subtitles; `.textGreen` |
+| 22 | Sidebar "Full Disk Access…" | accent-tinted icon with grey text | both secondary: it's a link, not a module |
+| 23 | Uninstaller drop ring / left-in-place card | radius 10 and 8 literals, padding 4 literal | `Radius.l` (17 − 4 inset ≈ concentric with the window corner) / `Radius.m`; `Spacing.xs` |
+| 24 | Numbers that change | headline totals, tile captions, header counts, the task count and the app header count weren't all `.monospacedDigit()` | all are |
+| 25 | Dark mode group headers | header background `.background` (#2D3131) showed as a band over the list (#292A2C) | no fill (the list draws its own): #292A2A |
+
+`scripts/lint.sh Tidy`: 8 corner-radius failures and 5 spacing warnings → clean.
+
+### Checked and left alone
+
+- The lighter band behind the window title in the toolbar is macOS 26's glass group for the
+  navigation items; it's as wide as the title, so it looks wide only because test mode adds
+  the "Test mode: /tmp/tidy-test/home" subtitle.
+- The toolbar search field's inset (7.5 pt top vs 14 pt side, `measure corners` top-right) is
+  the system's placement.
+- List row separators (1 pt) and alternating rows in the Large & Old table are the system's
+  list and table drawing.
+- The scanning line ("110,592 items · /path") is centred and middle-truncated, so it re-centres
+  as the path changes; it never moves anything else.
+- Alerts (Empty the Trash?, Move to Trash?) are system alerts; the destructive button isn't the
+  default, Esc cancels.
+
+### Not done
+
+- **Hover and focus rings** weren't triggered (they need the real pointer; the owner was at the
+  Mac for part of the pass and the screen locked twice). They're system controls (bordered
+  buttons, checkboxes, list rows) apart from the round button (pressed: 75 % opacity; disabled:
+  40 %) and treemap tiles (selected: 2.5 pt accent border), both checked in code.
+- **1,000-item lists**: no fixture that big for the review lists (they're `List`s, which
+  recycle rows); Space Map was mapped over 120,000 fixture files (scan screen checked).
+- **Active-window colours**: most shots are of the inactive window (the app wasn't brought to
+  the front while the owner might be using the Mac), so selections show grey; one active shot
+  at the start showed the accent selection.
+
+### Gates (2026-11-05, polish pass)
+
+- `scripts/check.sh Tidy --perf`: **PASS** — 88 tests; launch 165 ms, first window 418 ms, idle
+  CPU 0.017 % (lowest window), footprint 59.5 MB (busy machine, load 4.5).
+- `scripts/drive tree`: 0 `[unlabeled]`; window buttons 16×16.
+
+### Golden Gate + light/dark (2026-11-06)
+
+Per the "Added mid-pass" part of `docs/polish-pass.md` and design system §4 "Fitting in on
+macOS 27 Golden Gate" / §10 items 25–26, on macOS 27.2.
+
+Checked and changed:
+
+| Area | Before | After |
+|---|---|---|
+| Sidebar | system edge-to-edge sidebar (`NavigationSplitView`), accent icons, except "Full Disk Access…", whose icon the first pass had forced grey | all icons tinted by the sidebar; that row's title stays secondary (it's a link, not a module) |
+| Menus | already text only: File/View/Window commands, every context menu, the Sort and folder pull-downs (checkmarks only where they're state) | unchanged |
+| Toolbar | standard `.toolbar` (Back, Applications' segmented control, Sort, Choose App, search); nothing drawn behind items | unchanged |
+| Inactive windows | hero tile, round Scan/Stop/Clean button, busy arc, page glow, intro feature icons, tile icons, completion icons, maintenance task icons, treemap folder fills, treemap selection border and check badge stayed accent-blue in a background window | all go grey through SlopKit's `windowAccent` / `selectionFill` / `selectionRing` (`controlActiveState`); the round button turns grey with label-coloured text like a default button. The Uninstaller's drop ring stays accent on purpose (Tidy is never key while you drag from Finder) |
+| Glass | none of our own; tiles and the completion card are opaque-ish semantic cards (`.background` at 60 % over the page glow), not fake glass | unchanged |
+| White we drew | hero symbol, round-button title, sheen and rims in `.white` | `alternateSelectedControlTextColor` (the system's text-on-accent); sheen only on the active accent tile |
+| Shadows in dark | hero and round button cast an accent-coloured glow (a light halo in dark mode); tile shadow `black 8 %` was invisible on dark | `DepthShadow` / `CardShadow`: accent glow only in light + active, black 45 % tighter in dark, neutral grey when inactive; cards 35 % / 3 pt in dark |
+| Hairlines | Tidy's own `Hairline`, removed in favour of SlopKit's (1 pt layout, 1 device px drawn) | re-measured: bottom bars 1 px line at the top, 12 pt above and below the 24 pt buttons; pane header and category divider 1 px |
+| Live appearance change | all colours are SwiftUI semantic styles or `NSColor` system colours resolved at draw time; no `CGColor`, layers or cached images (file icons come from `NSWorkspace` and aren't appearance-specific) | nothing to change; not exercised live (that needs changing the system appearance, which we don't do) |
+| FileQueue | not used by Tidy | — |
+
+Screenshots, light and dark side by side (inactive window):
+`/tmp/slopapp-polish/tidy/gg/sbs-inactive-*.png` (smart-intro, smart-results, cleanup-review,
+maint-tasks, space-map, large-table, apps-empty, leftovers); singles
+`gg/l-inactive-*.png` / `gg/d-inactive-*.png` for every module and stage.
+
+Not done: active-window screenshots after this change (bringing Tidy to the front needs the
+owner away, and they were using the Mac throughout); the active branch is the first pass's
+unchanged look, shot then (`l-smart-intro.png`, first pass). Live appearance switching wasn't
+exercised (see above).
+
+Gates: `scripts/check.sh Tidy --perf` **PASS** (88 tests; launch 174 ms, first window 426 ms,
+idle CPU 0.023 % lowest window, footprint 57.7 MB; load 8.2). Lint clean.
+
+Shared component created in-app: `Hairline.swift` (since replaced by SlopKit's `Hairline`).
+`BottomBar` (ReviewList.swift) and the module pages in ModuleKit.swift
+remain candidates too.
+
+Screenshots (not committed): `/tmp/slopapp-polish/tidy/l-*.png` (light) and `d-*.png` (dark):
+smart-intro / -scanning / -results / -done, cleanup-results / -review / -mail / -trash,
+maint-results / -tasks / -login / -bg, apps-empty / -notely, leftovers, large-intro /
+-scanning / -table, space-intro / -scanning / -map, history, settings-general; light only:
+erase-alert-1, quit-sheet, access-sheet-1, apps-busybee, history-putback, settings-advanced.

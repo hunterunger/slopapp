@@ -17,6 +17,10 @@ struct ReviewItem: Identifiable, Hashable {
     var knownSize: Int64?
     /// Tooltip: why it's listed.
     var help: String?
+    /// Show this file's icon instead (an owning app's).
+    var iconURL: URL?
+    /// Some rows (launch agent plists) aren't worth a size.
+    var showsSize = true
 }
 
 struct ReviewSection: Identifiable {
@@ -62,10 +66,12 @@ struct ReviewList: View {
 
     private func header(_ section: ReviewSection) -> some View {
         let checkable = section.items.filter { $0.lockReason == nil }
-        let total = sizes.total(section.items.map(\.url))
+        let total = sizes.total(section.items.filter(\.showsSize).filter { $0.knownSize == nil }.map(\.url))
         let knownTotal = section.items.compactMap(\.knownSize).reduce(0, +)
-        return HStack(spacing: Spacing.s) {
-            let checkedCount = checkable.filter { checked.contains($0.id) }.count
+        let checkedCount = checkable.filter { checked.contains($0.id) }.count
+        // Same columns as ReviewRow: checkbox, a 20 pt icon slot, then the text, so the group's
+        // title lines up with its rows' names whatever the symbol's width.
+        return HStack(alignment: .titleLine, spacing: Spacing.s) {
             TriStateCheckbox(
                 label: "Check all in \(section.title)",
                 state: checkable.isEmpty || checkedCount == 0 ? .off : (checkedCount == checkable.count ? .on : .mixed),
@@ -75,29 +81,44 @@ struct ReviewList: View {
                 if ids.allSatisfy(checked.contains) { checked.subtract(ids) } else { checked.formUnion(ids) }
             }
             .fixedSize()
+            .alignmentGuide(.titleLine) { $0[VerticalAlignment.center] }
             .accessibilityRemoveTraits(.isHeader)
-            Label(section.title, systemImage: section.systemImage)
+            Image(systemName: section.systemImage)
                 .font(.headline)
                 .foregroundStyle(checkable.isEmpty ? .secondary : .primary)
-            if let detail = section.detail {
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(detail)
+                .frame(width: ReviewRow.iconSide)
+                .alignmentGuide(.titleLine) { $0[VerticalAlignment.center] }
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                    Text(section.title)
+                        .font(.headline)
+                        .foregroundStyle(checkable.isEmpty ? .secondary : .primary)
+                        .lineLimit(1)
+                    Spacer(minLength: Spacing.s)
+                    Text(countText(section, checkable: checkable.count, checked: checkedCount))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                    if section.items.contains(where: \.showsSize) {
+                        Text(total.bytes + knownTotal == 0 && !total.isComplete ? "—" : ByteFormat.string(total.bytes + knownTotal))
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(total.isComplete ? .primary : .secondary)
+                            .frame(width: ReviewRow.sizeWidth, alignment: .trailing)
+                    }
+                }
+                .alignmentGuide(.titleLine) { $0[VerticalAlignment.center] }
+                if let detail = section.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .help(detail)
+                }
             }
-            Spacer(minLength: Spacing.s)
-            Text(countText(section, checkable: checkable.count, checked: checkedCount))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(total.bytes + knownTotal == 0 && !total.isComplete ? "—" : ByteFormat.string(total.bytes + knownTotal))
-                .font(.callout.monospacedDigit())
-                .foregroundStyle(total.isComplete ? .primary : .secondary)
-                .frame(minWidth: 70, alignment: .trailing)
         }
-        .padding(.vertical, 4)
-        .background(.background)
+        .padding(.vertical, Spacing.xs)
     }
 
     /// One rule everywhere: every row counts (locked and possible matches too).
@@ -151,6 +172,11 @@ struct ReviewList: View {
 }
 
 struct ReviewRow: View {
+    /// The icon column, shared with the group headers.
+    static let iconSide: CGFloat = 20
+    /// The size column: fixed, so sizes filling in never move the rest of the row.
+    static let sizeWidth: CGFloat = 72
+
     let item: ReviewItem
     @Binding var isChecked: Bool
     var sizes: SizeStore
@@ -162,9 +188,9 @@ struct ReviewRow: View {
                 .labelsHidden()
                 .disabled(item.lockReason != nil)
                 .accessibilityLabel(item.title)
-            Image(nsImage: Icons.icon(for: item.url))
+            Image(nsImage: Icons.icon(for: item.iconURL ?? item.url))
                 .resizable()
-                .frame(width: 20, height: 20)
+                .frame(width: Self.iconSide, height: Self.iconSide)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title)
@@ -191,8 +217,10 @@ struct ReviewRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            SizeText(url: item.url, knownSize: item.knownSize, sizes: sizes, isLocked: item.lockReason != nil)
-                .frame(minWidth: 70, alignment: .trailing)
+            if item.showsSize {
+                SizeText(url: item.url, knownSize: item.knownSize, sizes: sizes, isLocked: item.lockReason != nil)
+                    .frame(width: Self.sizeWidth, alignment: .trailing)
+            }
         }
         .padding(.vertical, 1)
         .accessibilityElement(children: .combine)
@@ -233,16 +261,19 @@ struct ActionBar: View {
     /// Sizes already known (large files); otherwise they come from the size store.
     var knownBytes: Int64?
     var buttonTitle = "Move to Trash"
+    /// Leave out the size (launch agent plists).
+    var showsBytes = true
 
     var body: some View {
-        HStack(spacing: Spacing.m) {
+        BottomBar {
             if let result = model.results[section] {
                 Image(systemName: result.isPutBack ? "arrow.uturn.backward.circle" : "checkmark.circle.fill")
                     .foregroundStyle(result.isPutBack ? Color.secondary : Color.green)
+                    .font(.title3)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(result.summary)
-                    if !result.isPutBack, result.bytes > 0 {
+                    if !result.isPutBack, result.bytes > 0, showsBytes {
                         Text("Empty the Trash to free \(ByteFormat.string(result.bytes)).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -275,15 +306,13 @@ struct ActionBar: View {
                 // The button never asks: it acts on the list right above it, and everything can be put back.
                 .help("Move the checked items to the Trash. You can put them back (⌘Z).")
         }
-        .padding(.horizontal, Spacing.l)
-        .padding(.vertical, Spacing.s + 2)
-        .background(.bar)
     }
 
     private func selectionSummary(bytes: Int64, complete: Bool) -> String {
         let count = checkedURLs.count
         guard count > 0 else { return "Nothing checked" }
         let items = count == 1 ? "1 item" : "\(count.formatted()) items"
+        guard showsBytes else { return "\(items) checked" }
         return "\(items) checked, \(complete ? "" : "at least ")\(ByteFormat.string(bytes))"
     }
 }
@@ -330,5 +359,42 @@ struct TriStateCheckbox: NSViewRepresentable {
 enum ItemCount {
     static func text(total: Int, checked: Int) -> String {
         "\(total == 1 ? "1 item" : "\(total) items") · \(checked) checked"
+    }
+}
+
+/// The bar under a list: a hairline on top, the system bar material, and the same insets
+/// everywhere (16 pt sides, so its text lines up with the list's, 12 pt above and below).
+struct BottomBar<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Hairline()
+            HStack(spacing: Spacing.m) { content }
+                .padding(.horizontal, Spacing.l)
+                .padding(.vertical, Spacing.m)
+                .frame(maxWidth: .infinity)
+        }
+        .background(.bar)
+    }
+}
+
+extension VerticalAlignment {
+    /// The centre of a group header's first line, so its checkbox and icon sit on the title
+    /// even when a description wraps below it.
+    private enum TitleLine: AlignmentID {
+        static func defaultValue(in context: ViewDimensions) -> CGFloat { context[VerticalAlignment.center] }
+    }
+
+    static let titleLine = VerticalAlignment(TitleLine.self)
+}
+
+extension View {
+    /// The category column of a module's review (Cleanup, Maintenance): one width for both, so
+    /// the list beside it doesn't shift between modules. It keeps the sidebar's row metrics and
+    /// selection but not its material: one sidebar per window, and the column reads as part of
+    /// the review rather than a second, nested sidebar.
+    func reviewCategoryColumn() -> some View {
+        scrollContentBackground(.hidden).frame(width: 220)
     }
 }

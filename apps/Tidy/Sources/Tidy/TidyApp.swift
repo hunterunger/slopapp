@@ -2,8 +2,10 @@ import SlopKit
 import SwiftUI
 import TidyCore
 
-// Archetype: library window (docs/design-system.md, 2c). Sidebar: Uninstall, Leftovers,
-// Junk, Large & Old. Everything is reviewed in a list and moved to the Trash, never deleted.
+// Archetype: library window (docs/design-system.md, 2c), laid out like the cleaner it replaces:
+// a sidebar of modules (Smart Scan, Cleanup, Maintenance, Applications, Large & Old, Space
+// Map), each with an intro, a scan, result tiles and a review list. Everything is reviewed and
+// moved to the Trash; the only permanent delete is emptying the Trash, which always asks.
 
 @main
 struct TidyApp: App {
@@ -59,8 +61,12 @@ struct TidyCommands: Commands {
                 .keyboardShortcut("y")
                 .disabled(model.selectedURLs.isEmpty)
             Divider()
-            Button("Scan Again") { model.rescan() }
+            Button(model.section == .uninstall || model.section == .leftovers ? "Scan Again" : "Scan") { model.rescan() }
                 .keyboardShortcut("r")
+                .disabled(model.isModalUp)
+            Button("Empty Trash…") { model.emptyTrashCommand() }
+                .keyboardShortcut(.delete, modifiers: [.command, .shift])
+                .disabled(model.isModalUp)
         }
         CommandGroup(replacing: .undoRedo) {
             // While typing, Undo and Redo belong to the text.
@@ -84,7 +90,7 @@ struct TidyCommands: Commands {
                 .disabled(model.isModalUp)
         }
         CommandGroup(before: .sidebar) {
-            ForEach(Array(SidebarSection.allCases.enumerated()), id: \.element) { index, section in
+            ForEach(Array(SidebarSection.sidebar.enumerated()), id: \.element) { index, section in
                 Button(section.title) { model.section = section }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
                     .disabled(model.isModalUp)
@@ -188,17 +194,23 @@ struct SettingsView: View {
 
     var body: some View {
         SlopSettings(info: info, isMenuBarApp: false) {
-            LabeledContent("Full Disk Access") {
+            // Each explanation sits under its own label (the form's subtitle style), not in a
+            // row of its own.
+            LabeledContent {
                 if model.hasFullDiskAccess {
                     Label("On", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(.textGreen)
                 } else {
                     Button("Open System Settings") { Permission.fullDiskAccess.request() }
                 }
+            } label: {
+                Text("Full Disk Access")
+                Text("Lets Tidy measure and move protected app data, and look in Desktop, Documents and Downloads.")
             }
-            Text("Lets Tidy measure and move protected app data, and look in Desktop, Documents and Downloads.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Toggle(isOn: Binding(get: { model.smart.includeTrash }, set: { model.smart.includeTrash = $0 })) {
+                Text("Smart Scan empties the Trash")
+                Text("Off by default. Emptying the Trash erases for good, so Tidy always asks first.")
+            }
         } advanced: {
             // The same setting as the size filter in Large & Old.
             Section("Large & Old") {

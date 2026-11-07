@@ -65,6 +65,12 @@ public struct TrashPolicy: Sendable {
         ".npm", ".gradle", ".cache", ".Trash",
     ]
 
+    /// macOS folders whose contents (not the folder) Tidy may move: copies of opened Mail
+    /// attachments.
+    static let allowedAppleFolders: [[String]] = [
+        ["Library", "Containers", "com.apple.mail", "Data", "Library", "Mail Downloads"],
+    ]
+
     /// Throws if `url` must not be moved to the Trash.
     public func check(_ url: URL) throws {
         guard url.isFileURL, url.path.hasPrefix("/") else { throw TrashRefusal.notAbsolute }
@@ -93,6 +99,10 @@ public struct TrashPolicy: Sendable {
     public func allows(_ url: URL) -> Bool { (try? check(url)) != nil }
 
     private func checkInHome(_ relative: [String]) throws {
+        for folder in Self.allowedAppleFolders where relative.count > folder.count && relative.starts(with: folder) {
+            try Self.rejectApple(relative.dropFirst(folder.count))
+            return
+        }
         let joined = relative.joined(separator: "/")
         if Self.protectedHomePaths.contains(joined) { throw TrashRefusal.protectedFolder }
         if relative[0] == "Library" {

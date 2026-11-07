@@ -2,7 +2,7 @@ import Foundation
 
 /// A kind of junk: things apps and developer tools recreate when they need them.
 public enum JunkCategory: String, CaseIterable, Sendable, Identifiable {
-    case userCaches, logs, crashReports, derivedData, xcodeCaches, deviceSupport, simulatorCaches, archives, packageCaches
+    case userCaches, logs, crashReports, mailDownloads, derivedData, xcodeCaches, deviceSupport, simulatorCaches, archives, packageCaches
 
     public var id: String { rawValue }
 
@@ -11,6 +11,7 @@ public enum JunkCategory: String, CaseIterable, Sendable, Identifiable {
         case .userCaches: "App Caches"
         case .logs: "Logs"
         case .crashReports: "Crash Reports"
+        case .mailDownloads: "Mail Downloads"
         case .derivedData: "Xcode Derived Data"
         case .xcodeCaches: "Xcode Caches and Previews"
         case .deviceSupport: "Device Support Files"
@@ -26,6 +27,7 @@ public enum JunkCategory: String, CaseIterable, Sendable, Identifiable {
         case .userCaches: "Files apps keep to load faster. They rebuild them as needed."
         case .logs: "Activity logs written by apps. Safe to remove."
         case .crashReports: "Reports saved when apps crashed. Only useful for sending to developers."
+        case .mailDownloads: "Copies Mail saved when you opened attachments. The attachments stay in your messages."
         case .derivedData: "Build products and indexes. Xcode rebuilds them on the next build."
         case .xcodeCaches: "Xcode's download and preview caches. Recreated on demand."
         case .deviceSupport: "Debug symbols for devices you've connected. Downloaded again when you connect that device."
@@ -40,6 +42,7 @@ public enum JunkCategory: String, CaseIterable, Sendable, Identifiable {
         case .userCaches: "internaldrive"
         case .logs: "doc.text"
         case .crashReports: "exclamationmark.triangle"
+        case .mailDownloads: "paperclip"
         case .derivedData: "hammer"
         case .xcodeCaches: "hammer.circle"
         case .deviceSupport: "iphone"
@@ -51,7 +54,7 @@ public enum JunkCategory: String, CaseIterable, Sendable, Identifiable {
 
     public var isDeveloper: Bool {
         switch self {
-        case .userCaches, .logs, .crashReports: false
+        case .userCaches, .logs, .crashReports, .mailDownloads: false
         default: true
         }
     }
@@ -81,11 +84,16 @@ public struct JunkItem: Sendable, Hashable, Identifiable {
 public struct JunkScanner: Sendable {
     public var environment: TidyEnvironment
     public var runningBundleIDs: Set<String>
+    /// Look in folders macOS protects (Mail's). Only with Full Disk Access: without it,
+    /// macOS would ask about another app's data.
+    public var includesProtected: Bool
     /// Display names for bundle-id-named caches (`com.acme.Widget` → `Widget`).
     public var appNames: [String: String]
 
-    public init(environment: TidyEnvironment, runningBundleIDs: Set<String> = [], appNames: [String: String] = [:]) {
+    public init(environment: TidyEnvironment, runningBundleIDs: Set<String> = [], appNames: [String: String] = [:],
+                includesProtected: Bool = false) {
         self.environment = environment
+        self.includesProtected = includesProtected
         self.runningBundleIDs = Set(runningBundleIDs.map { $0.lowercased() })
         self.appNames = Dictionary(appNames.map { ($0.key.lowercased(), $0.value) }, uniquingKeysWith: { a, _ in a })
     }
@@ -179,6 +187,7 @@ public struct JunkScanner: Sendable {
                                       isRecommended: false, note: "Kept unless you check it"))
             }
         }
+        if includesProtected { items += mailDownloads() }
         for url in children(library.appendingPathComponent("Developer/CoreSimulator/Caches")) {
             items.append(JunkItem(url: url, name: url.lastPathComponent, category: .simulatorCaches))
         }
@@ -186,6 +195,30 @@ public struct JunkScanner: Sendable {
             items.append(JunkItem(url: url, name: "Simulator log: \(url.lastPathComponent)", category: .logs))
         }
         return items
+    }
+
+    /// Mail's folder of opened attachments.
+    public static func mailDownloadsFolder(in library: URL) -> URL {
+        library.appendingPathComponent("Containers/com.apple.mail/Data/Library/Mail Downloads")
+    }
+
+    /// Each entry in Mail Downloads (usually a folder per attachment). Ones changed after
+    /// they were saved may hold edits that exist nowhere else, so they start unchecked.
+    func mailDownloads() -> [JunkItem] {
+        children(Self.mailDownloadsFolder(in: environment.library)).map { url in
+            let files = isDirectory(url) ? children(url).filter { !isDirectory($0) } : [url]
+            let name = files.count == 1 ? files[0].lastPathComponent : url.lastPathComponent
+            let edited = files.contains(where: Self.wasEdited)
+            return JunkItem(url: url, name: name, category: .mailDownloads, isRecommended: !edited,
+                            note: edited ? "Changed after it was saved" : nil)
+        }
+    }
+
+    /// Modified more than a minute after it was created.
+    static func wasEdited(_ url: URL) -> Bool {
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else { return false }
+        return info.st_mtimespec.tv_sec - info.st_birthtimespec.tv_sec > 60
     }
 
     func displayName(for name: String) -> String {

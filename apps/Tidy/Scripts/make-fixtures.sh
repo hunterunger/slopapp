@@ -13,7 +13,11 @@
 #     --env TIDY_RUNNING_IDS=com.fixture.Busybee
 #
 # Optional: --env TIDY_ASSUME_FULL_DISK_ACCESS=1 (pretend Full Disk Access is on),
-#           --env TIDY_APPEARANCE=dark|light.
+#           --env TIDY_APPEARANCE=dark|light,
+#           --env TIDY_LOADED_LABELS=com.fixture.Notely.helper (show a launch agent as running),
+#           --env TIDY_TASK_FAIL=flushDNS|cancel (simulate a failing task or cancelled password).
+# The fixture also has things in its Trash (Trash Bins), Mail Downloads (needs the Full Disk
+# Access override to show), and launch agents (two whose program is gone).
 set -euo pipefail
 PKG="$(cd "$(dirname "$0")/.." && pwd)"
 ROOT=/tmp/tidy-test

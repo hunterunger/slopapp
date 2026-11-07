@@ -96,6 +96,19 @@ public struct TidyEnvironment: Sendable, Equatable {
     /// `home/Library`.
     public var library: URL { home.appendingPathComponent("Library", isDirectory: true) }
 
+    /// The Trash folders Tidy shows and empties: the fixture Trash in test mode, else
+    /// `~/.Trash`. (Other volumes' Trash folders: later; reading them makes macOS ask.)
+    public var trashBins: [URL] {
+        [trashDirectory ?? home.appendingPathComponent(".Trash", isDirectory: true)]
+    }
+
+    /// Where test mode records maintenance tasks instead of running them.
+    public var maintenanceLog: URL? {
+        guard isTestMode else { return nil }
+        let base = trashDirectory?.deletingLastPathComponent() ?? home.deletingLastPathComponent()
+        return base.appendingPathComponent("tidy-maintenance-log.txt")
+    }
+
     /// Short description for the window subtitle in test mode.
     public var testModeSummary: String? {
         guard isTestMode else { return nil }

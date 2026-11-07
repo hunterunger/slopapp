@@ -4,35 +4,52 @@ import TidyCore
 import UniformTypeIdentifiers
 
 enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
-    case uninstall, leftovers, junk, large
+    // Raw values are stored in the move log; keep them stable.
+    case smartScan, junk, maintenance, uninstall, leftovers, large, spaceLens
 
     var id: String { rawValue }
 
+    /// The sidebar, in order (Leftovers lives inside Applications).
+    static let sidebar: [SidebarSection] = [.smartScan, .junk, .maintenance, .uninstall, .large, .spaceLens]
+
     var title: String {
         switch self {
-        case .uninstall: "Uninstall"
+        case .smartScan: "Smart Scan"
+        case .junk: "Cleanup"
+        case .maintenance: "Maintenance"
+        case .uninstall: "Applications"
         case .leftovers: "Leftovers"
-        case .junk: "Junk"
         case .large: "Large & Old"
+        case .spaceLens: "Space Map"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .uninstall: "trash.square"
+        case .smartScan: "wand.and.sparkles"
+        case .junk: "bubbles.and.sparkles"
+        case .maintenance: "wrench.and.screwdriver"
+        case .uninstall: "square.grid.2x2"
         case .leftovers: "questionmark.folder"
-        case .junk: "sparkles"
         case .large: "doc.badge.clock"
+        case .spaceLens: "square.grid.3x3.square"
         }
     }
+
+    /// The sidebar row that shows this section.
+    var sidebarRow: SidebarSection { self == .leftovers ? .uninstall : self }
 
     var searchPrompt: String {
         switch self {
         case .uninstall: "Search apps"
-        case .leftovers, .junk: "Search items"
-        case .large: "Search files"
+        case .leftovers, .junk, .maintenance: "Search items"
+        case .large, .spaceLens: "Search files"
+        case .smartScan: "Search"
         }
     }
+
+    /// Sections that list things and use the search field.
+    var isSearchable: Bool { self != .smartScan }
 }
 
 enum AppSort: String, CaseIterable, Identifiable {
@@ -144,7 +161,17 @@ final class AppModel {
     let trash: TrashService
     let sizes = SizeStore()
     let running: RunningApps
-    var section: SidebarSection = .uninstall
+    var section: SidebarSection = .smartScan
+    /// Where each module page is (intro, scanning, results, review...).
+    var stages: [SidebarSection: ModuleStage] = [:]
+    let cleanup = CleanupState()
+    let maintenance = MaintenanceState()
+    let space = SpaceState()
+    let smart = SmartScanState()
+    /// Waiting for the user to confirm emptying the Trash (permanent).
+    var pendingErase: ErasePlan?
+    /// Waiting for the user to confirm moving Space Map items to the Trash.
+    var pendingSpaceMove: SpaceMovePlan?
     var query = "" {
         didSet { if query != oldValue { reconcileSelections() } }
     }
@@ -173,6 +200,7 @@ final class AppModel {
     /// A sheet or alert is up: menu commands that change what's behind it are off.
     var isModalUp: Bool {
         showingHistory || showingAccessSheet || quitRequest != nil || pendingUninstall != nil || failureReport != nil
+            || pendingErase != nil || pendingSpaceMove != nil
     }
     /// Waiting for the user to confirm an uninstall started from a menu or shortcut.
     var pendingUninstall: UninstallPlan?
@@ -220,7 +248,7 @@ final class AppModel {
     var junkPhase: ScanPhase = .idle
     var junkChecked: Set<String> = []
     var junkSelection: Set<String> = []
-    @ObservationIgnored private var junkTask: Task<Void, Never>?
+    @ObservationIgnored var junkTask: Task<Void, Never>?
 
     // Large & Old
     var largeFiles: [LargeFile] = []
@@ -464,8 +492,13 @@ final class AppModel {
         switch section {
         case .uninstall: uninstallChecked(trigger)
         case .leftovers: move(actionableOrphans.map(\.url), section: .leftovers)
-        case .junk: move(actionableJunk.map(\.url), section: .junk)
+        case .junk:
+            guard stage(.junk) == .review, cleanup.pane != .trash else { return }
+            move(actionableJunk.map(\.url), section: .junk)
         case .large: move(actionableLarge.map(\.url), section: .large)
+        case .maintenance: move(actionableLaunchItems.map(\.url), section: .maintenance)
+        case .spaceLens: confirmSpaceMove()
+        case .smartScan: break
         }
     }
 
@@ -474,8 +507,11 @@ final class AppModel {
         switch section {
         case .uninstall: return currentApp.map(canRemove) == true && !checkedLeftovers.isEmpty
         case .leftovers: return !actionableOrphans.isEmpty
-        case .junk: return !actionableJunk.isEmpty
+        case .junk: return stage(.junk) == .review && cleanup.pane != .trash && !actionableJunk.isEmpty
         case .large: return !actionableLarge.isEmpty
+        case .maintenance: return stage(.maintenance) == .review && maintenance.pane == .backgroundItems && !actionableLaunchItems.isEmpty
+        case .spaceLens: return !space.checkedNodes.isEmpty
+        case .smartScan: return false
         }
     }
 
@@ -504,9 +540,11 @@ final class AppModel {
         return items.filter { ids.contains($0.id) && isRemovable($0) }
     }
 
+    /// Junk in the Cleanup category showing (System Junk or Mail Downloads), filtered by search.
     var visibleJunkItems: [JunkItem] {
-        guard !query.isEmpty else { return junkItems }
-        return junkItems.filter {
+        let items = junkItems(in: cleanup.pane == .trash ? .systemJunk : cleanup.pane)
+        guard !query.isEmpty else { return items }
+        return items.filter {
             $0.name.localizedCaseInsensitiveContains(query) || $0.url.path.localizedCaseInsensitiveContains(query)
         }
     }
@@ -557,33 +595,49 @@ final class AppModel {
         }
     }
 
-    private func move(_ urls: [URL], section: SidebarSection, stopIfFirstFails: Bool = false,
-                      appName: String? = nil, keptAppName: String? = nil, leftInPlace: [Leftover] = [],
-                      clearsRedo: Bool = true) {
-        guard !urls.isEmpty, !isMoving else { return }
-        isMoving = true
-        let items = urls.map { (url: $0, bytes: sizes.size($0)?.bytes ?? junkSize($0) ?? largeSize($0) ?? 0) }
-        let trash = self.trash
+    func move(_ urls: [URL], section: SidebarSection, stopIfFirstFails: Bool = false,
+              appName: String? = nil, keptAppName: String? = nil, leftInPlace: [Leftover] = [],
+              clearsRedo: Bool = true) {
         Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                trash.moveToTrash(items, stopIfFirstFails: stopIfFirstFails)
-            }.value
-            isMoving = false
-            let movedApp = appName != nil && result.moved.first?.original == urls.first
-            let outcome = ActionResult(section: section, moved: result.moved, failures: result.failures,
-                                       appName: movedApp ? appName : nil, keptAppName: keptAppName, leftInPlace: leftInPlace)
-            if !result.moved.isEmpty {
-                results[section] = outcome
-                history.append(outcome)
-                if clearsRedo { redoStack.removeAll() }
-            }
-            if !result.failures.isEmpty {
-                failureReport = FailureReport(
-                    title: result.stoppedEarly ? "Nothing was moved" : "Some items weren't moved",
-                    failures: result.failures)
-            }
-            afterChange(movedPaths: Set(result.moved.map(\.original.path)), section: section)
+            await performMove(urls, section: section, stopIfFirstFails: stopIfFirstFails, appName: appName,
+                              keptAppName: keptAppName, leftInPlace: leftInPlace, clearsRedo: clearsRedo)
         }
+    }
+
+    /// Moves to the Trash, records the move for Put Back, and refreshes every list. Returns
+    /// what happened (nil if nothing was tried).
+    @discardableResult
+    func performMove(_ urls: [URL], section: SidebarSection, stopIfFirstFails: Bool = false,
+                     appName: String? = nil, keptAppName: String? = nil, leftInPlace: [Leftover] = [],
+                     clearsRedo: Bool = true, reportsFailures: Bool = true) async -> ActionResult? {
+        guard !urls.isEmpty, !isMoving else { return nil }
+        isMoving = true
+        let items = urls.map { (url: $0, bytes: knownSize($0)) }
+        let trash = self.trash
+        let result = await Task.detached(priority: .userInitiated) {
+            trash.moveToTrash(items, stopIfFirstFails: stopIfFirstFails)
+        }.value
+        isMoving = false
+        let movedApp = appName != nil && result.moved.first?.original == urls.first
+        let outcome = ActionResult(section: section, moved: result.moved, failures: result.failures,
+                                   appName: movedApp ? appName : nil, keptAppName: keptAppName, leftInPlace: leftInPlace)
+        if !result.moved.isEmpty {
+            results[section] = outcome
+            history.append(outcome)
+            if clearsRedo { redoStack.removeAll() }
+        }
+        if !result.failures.isEmpty && reportsFailures {
+            failureReport = FailureReport(
+                title: result.stoppedEarly ? "Nothing was moved" : "Some items weren't moved",
+                failures: result.failures)
+        }
+        afterChange(movedPaths: Set(result.moved.map(\.original.path)), section: section)
+        return outcome
+    }
+
+    /// The best size Tidy knows for something about to move.
+    private func knownSize(_ url: URL) -> Int64 {
+        sizes.size(url)?.bytes ?? largeSize(url) ?? space.size(of: url) ?? 0
     }
 
     /// Puts back the latest move shown in `section`.
@@ -668,10 +722,14 @@ final class AppModel {
             if section == .large { scanLarge() }
         }
         if let external = externalApp, movedPaths.contains(external.id) { externalApp = nil }
+        space.noteChanged(movedPaths, restored: restoredApp)
+        if section == .maintenance || movedPaths.contains(where: { $0.hasSuffix(".plist") && $0.contains("/Launch") }) {
+            scanBackgroundItems()
+        }
+        if cleanup.trashPhase != .idle { scanTrashBins() }
         loadApps()
     }
 
-    private func junkSize(_ url: URL) -> Int64? { sizes.size(url)?.bytes }
     private func largeSize(_ url: URL) -> Int64? { largeFiles.first { $0.url == url }?.size }
 
     // MARK: Leftovers of deleted apps
@@ -710,7 +768,8 @@ final class AppModel {
         results[.junk] = nil
         let scanner = JunkScanner(environment: environment, runningBundleIDs: running.bundleIDs,
                                   appNames: Dictionary(apps.compactMap { app in app.bundleID.map { ($0, app.name) } },
-                                                       uniquingKeysWith: { a, _ in a }))
+                                                       uniquingKeysWith: { a, _ in a }),
+                                  includesProtected: hasFullDiskAccess)
         junkTask = Task {
             let items = await Task.detached(priority: .userInitiated) { scanner.scan() }.value
             guard !Task.isCancelled else { return }
@@ -718,7 +777,7 @@ final class AppModel {
             junkChecked = Set(items.filter(\.isRecommended).map(\.id))
             sizes.forget(items.map(\.url))
             sizes.request(items.map(\.url))
-            junkPhase = .scanning("Measuring…")
+            junkPhase = .scanning("Measuring \(items.count.formatted()) items…")
             while !Task.isCancelled, items.contains(where: { sizes.isMeasuring($0.url) }) {
                 try? await Task.sleep(for: .milliseconds(150))
             }
@@ -823,12 +882,20 @@ final class AppModel {
         section = .large
         largeRoot = url.standardizedFileURL
         largeChoice = .withoutProtectedFolders
+        setStage(.review, for: .large)
         scanLarge()
     }
 
     func resetLargeRoot() {
         largeRoot = environment.home
+        setStage(.review, for: .large)
         scanLarge()
+    }
+
+    /// Scan on the Large & Old intro: asks about protected folders first when needed.
+    func startLargeScan() {
+        setStage(.review, for: .large)
+        if !largeNeedsChoice { scanLarge() }
     }
 
     // MARK: Section-independent actions
@@ -838,8 +905,11 @@ final class AppModel {
         case .uninstall:
             return appSelection.isEmpty ? currentApp.map { [$0.url] } ?? [] : appSelection.map { URL(fileURLWithPath: $0) }
         case .leftovers: return orphanSelection.map { URL(fileURLWithPath: $0) }
-        case .junk: return junkSelection.map { URL(fileURLWithPath: $0) }
+        case .junk: return (cleanup.pane == .trash ? cleanup.trashSelection : junkSelection).map { URL(fileURLWithPath: $0) }
         case .large: return largeSelection.map { URL(fileURLWithPath: $0) }
+        case .maintenance: return maintenance.selection.map { URL(fileURLWithPath: $0) }
+        case .spaceLens: return space.selection.map { URL(fileURLWithPath: $0) }
+        case .smartScan: return []
         }
     }
 
@@ -859,8 +929,11 @@ final class AppModel {
             sizes.reset()
             loadApps()
             findOrphans()
-        case .junk: scanJunk()
-        case .large: scanLarge()
+        case .junk: startCleanupScan()
+        case .large: startLargeScan()
+        case .maintenance: startMaintenanceScan()
+        case .spaceLens: space.scan(environment: environment, hasFullDiskAccess: hasFullDiskAccess)
+        case .smartScan: startSmartScan()
         }
     }
 
@@ -868,10 +941,13 @@ final class AppModel {
         switch section {
         case .uninstall: break
         case .leftovers: if orphanPhase == .idle { findOrphans() } else { requestOrphanSizes() }
-        case .junk: if junkPhase == .idle { scanJunk() }
-        case .large: if largePhase == .idle && !largeNeedsChoice { scanLarge() }
+        case .junk, .large, .maintenance, .spaceLens, .smartScan: break
         }
     }
+
+    func stage(_ section: SidebarSection) -> ModuleStage { stages[section] ?? .intro }
+
+    func setStage(_ stage: ModuleStage, for section: SidebarSection) { stages[section] = stage }
 }
 
 /// A counter shared between a scan and the UI polling it.
