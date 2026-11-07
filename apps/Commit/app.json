@@ -1,0 +1,30 @@
+{
+  "slug": "commit",
+  "name": "Commit",
+  "tagline": "A calm Git client.",
+  "replaces": [
+    "Gitfox"
+  ],
+  "category": "Developer",
+  "icon": "git-branch",
+  "menuBarOnly": false,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.commit",
+  "infoPlist": {
+    "CFBundleDocumentTypes": [
+      {
+        "CFBundleTypeName": "Folder",
+        "CFBundleTypeRole": "Editor",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "public.folder"
+        ]
+      }
+    ],
+    "NSSupportsAutomaticTermination": false,
+    "NSSupportsSuddenTermination": false
+  }
+}
