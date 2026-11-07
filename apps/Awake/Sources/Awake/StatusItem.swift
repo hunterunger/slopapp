@@ -141,6 +141,12 @@ struct StatusMenuBuilder {
     /// for them, and the status line has to follow.
     private var hasStateColumn = false
 
+    // Spelled out: Swift 6.2 makes the memberwise initializer private because of the
+    // private property above (newer compilers don't).
+    init(app: AppController) {
+        self.app = app
+    }
+
     func build(_ entries: [MenuEntry]) -> NSMenu {
         var builder = self
         builder.hasStateColumn = entries.contains { if case .item(_, _, true, _, _) = $0 { true } else { false } }
