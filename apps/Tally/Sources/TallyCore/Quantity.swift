@@ -7,6 +7,74 @@ public enum Tag: Hashable, Sendable {
     case percent
     case unit(PhysicalUnit)
     case currency(String)
+    /// A compound unit: `km/h`, `$/h`, `Mb/s`.
+    case rate(RateUnit)
+    /// A point in time. The value is seconds since 1970 (UTC).
+    case date(DateTag)
+}
+
+/// `numerator / denominator`, where the numerator is a unit or a currency.
+public struct RateUnit: Hashable, Sendable {
+    public enum Numerator: Hashable, Sendable {
+        case unit(PhysicalUnit)
+        case currency(String)
+
+        var tag: Tag {
+            switch self {
+            case .unit(let u): .unit(u)
+            case .currency(let c): .currency(c)
+            }
+        }
+
+        var dimensionKey: String {
+            switch self {
+            case .unit(let u): u.dimension.rawValue
+            case .currency: "currency"
+            }
+        }
+    }
+
+    public var numerator: Numerator
+    public var denominator: PhysicalUnit
+    /// A name to show instead of `num/den` (`mph`, `knots`, `Mbps`).
+    public var alias: String?
+
+    public init(_ numerator: Numerator, per denominator: PhysicalUnit, alias: String? = nil) {
+        self.numerator = numerator
+        self.denominator = denominator
+        self.alias = alias
+    }
+
+    /// Same kind of rate (length per time, currency per mass...).
+    func isCompatible(with other: RateUnit) -> Bool {
+        numerator.dimensionKey == other.numerator.dimensionKey && denominator.dimension == other.denominator.dimension
+    }
+}
+
+/// How a date is shown and which zone it's in.
+public struct DateTag: Hashable, Sendable {
+    public enum Style: Hashable, Sendable {
+        /// A time of day ("3:00 PM"), with the weekday or date only when it isn't today.
+        case time
+        /// A calendar day ("Tue, Nov 24, 2026").
+        case date
+        /// Both.
+        case dateTime
+    }
+
+    /// A `TimeZone` identifier.
+    public var zone: String
+    /// What the user called the zone ("Tokyo", "PST"); nil for the Mac's own zone.
+    public var label: String?
+    public var style: Style
+
+    public init(zone: String, label: String? = nil, style: Style) {
+        self.zone = zone
+        self.label = label
+        self.style = style
+    }
+
+    var timeZone: TimeZone { DateMath.zone(zone) ?? .current }
 }
 
 /// How a plain number is written out (`in hex`, `in sci`).
@@ -33,6 +101,16 @@ public struct Quantity: Hashable, Sendable {
 
     public var currency: String? {
         if case .currency(let c) = tag { return c }
+        return nil
+    }
+
+    public var rate: RateUnit? {
+        if case .rate(let r) = tag { return r }
+        return nil
+    }
+
+    public var date: DateTag? {
+        if case .date(let d) = tag { return d }
         return nil
     }
 

@@ -1,4 +1,5 @@
 import AppKit
+import SlopKit
 import TallyCore
 
 /// A text container that narrows only the lines that have a result, by that result's
@@ -31,15 +32,29 @@ final class SheetTextView: NSTextView {
     var displays: [ResultDisplay?] = []
     /// Width each line keeps free for its result (0 = none).
     private(set) var reserved: [CGFloat] = []
-    static let margin: CGFloat = 20
-    static let gap: CGFloat = 16
+    /// Text and results sit this far in from each side (the bottom bar's controls line up
+    /// with both edges).
+    static let margin: CGFloat = Spacing.xl
+    /// The least space between a line's text and its result.
+    static let gap: CGFloat = Spacing.l
+    /// A result takes at most this share of the width; longer ones are shortened.
+    static let resultShare: CGFloat = 0.6
 
     var resultFont: NSFont = .monospacedDigitSystemFont(ofSize: 15, weight: .medium) { didSet { widthCache.removeAll() } }
     var errorFont: NSFont = .systemFont(ofSize: 13) { didSet { widthCache.removeAll() } }
     /// Measured text widths; measuring 1,000 strings per keystroke would cost a few ms.
     private var widthCache: [String: CGFloat] = [:]
+    private(set) var theme: Theme = .system
+    /// Typing attributes for plain text (the styler's base attributes).
+    var baseAttributes: [NSAttributedString.Key: Any] = [:]
 
     var onResultClick: ((Int) -> Void)?
+    /// Variable names of the shown sheet, for suggestions.
+    var variableNames: () -> [String] = { [] }
+    /// Whether to show the rest of a name greyed after the insertion point.
+    var suggestsInline: () -> Bool = { true }
+    /// The greyed rest of the word being typed (Tab accepts it).
+    private(set) var suggestion: String?
 
     static func make() -> SheetTextView {
         let storage = NSTextStorage()
@@ -69,6 +84,7 @@ final class SheetTextView: NSTextView {
         isGrammarCheckingEnabled = false
         isAutomaticLinkDetectionEnabled = false
         isAutomaticDataDetectionEnabled = false
+        isAutomaticTextCompletionEnabled = false
         smartInsertDeleteEnabled = false
         allowsDocumentBackgroundColorChange = false
         drawsBackground = true
@@ -78,7 +94,7 @@ final class SheetTextView: NSTextView {
         isVerticallyResizable = true
         isHorizontallyResizable = false
         autoresizingMask = []
-        textContainerInset = NSSize(width: Self.margin, height: 14)
+        textContainerInset = NSSize(width: Self.margin, height: Spacing.l)
         setAccessibilityLabel("Sheet")
         setAccessibilityHelp("Type one calculation per line. Results appear in the results column.")
 
@@ -86,11 +102,160 @@ final class SheetTextView: NSTextView {
         addSubview(resultsView)
     }
 
+    // MARK: Sheets and themes
+
+    /// Shows `document`: its shared text storage, selection and answers.
+    func show(_ document: SheetDocument) {
+        guard let layout = layoutManager else { return }
+        if layout.textStorage !== document.storage {
+            breakUndoCoalescing()
+            layout.replaceTextStorage(document.storage)
+        }
+        suggestion = nil
+        let length = document.storage.length
+        var selection = document.selection
+        if selection.location == NSNotFound || NSMaxRange(selection) > length {
+            selection = NSRange(location: length, length: 0)
+        }
+        setSelectedRange(selection)
+        typingAttributes = baseAttributes
+        apply(displays: document.displays)
+        scrollRangeToVisible(selection)
+        needsDisplay = true
+    }
+
+    func applyTheme(_ theme: Theme, pointSize size: CGFloat) {
+        self.theme = theme
+        backgroundColor = theme.background
+        insertionPointColor = theme.caret
+        enclosingScrollView?.backgroundColor = theme.background
+        if let name = theme.appearance { appearance = NSAppearance(named: name) } else { appearance = nil }
+        enclosingScrollView?.appearance = appearance
+        font = .monospacedDigitSystemFont(ofSize: size, weight: .regular)
+        typingAttributes = baseAttributes
+        defaultParagraphStyle = SheetStyler.paragraph(for: size)
+        resultFont = .monospacedDigitSystemFont(ofSize: size, weight: .medium)
+        errorFont = .systemFont(ofSize: (size * 0.87).rounded())
+        layoutColumns()
+        resultsView.needsDisplay = true
+        needsDisplay = true
+    }
+
+    // MARK: Suggestions
+
+    /// Recomputes the inline suggestion after typing.
+    func updateSuggestion() {
+        let old = suggestion
+        defer { if old != suggestion { needsDisplay = true } }
+        guard suggestsInline(), selectedRange().length == 0, window?.firstResponder === self || window == nil else {
+            suggestion = nil
+            return
+        }
+        let cursor = selectedRange().location
+        let ns = string as NSString
+        let lineRange = ns.lineRange(for: NSRange(location: min(cursor, ns.length), length: 0))
+        var line = ns.substring(with: lineRange)
+        if line.hasSuffix("\n") { line.removeLast() }
+        suggestion = Completions.inline(line: line, cursor: cursor - lineRange.location, variables: variableNames())
+    }
+
+    func clearSuggestion() {
+        guard suggestion != nil else { return }
+        suggestion = nil
+        needsDisplay = true
+    }
+
+    /// Tab accepts the greyed suggestion, else offers completions for the word, else is a tab.
+    override func insertTab(_ sender: Any?) {
+        if let suggestion {
+            self.suggestion = nil
+            insertText(suggestion, replacementRange: selectedRange())
+            return
+        }
+        let range = rangeForUserCompletion
+        if window != nil, range.location != NSNotFound, range.length > 0,
+           !Completions.candidates(for: (string as NSString).substring(with: range), variables: variableNames()).isEmpty {
+            complete(sender)
+            return
+        }
+        super.insertTab(sender)
+    }
+
+    /// Esc hides the suggestion first; otherwise it opens the completion list as usual.
+    override func cancelOperation(_ sender: Any?) {
+        if suggestion != nil {
+            clearSuggestion()
+            return
+        }
+        super.cancelOperation(sender)
+    }
+
+    override func complete(_ sender: Any?) {
+        clearSuggestion()
+        super.complete(sender)
+    }
+
+    override func completions(forPartialWordRange charRange: NSRange, indexOfSelectedItem index: UnsafeMutablePointer<Int>) -> [String]? {
+        let partial = (string as NSString).substring(with: charRange)
+        let list = Completions.candidates(for: partial, variables: variableNames())
+        return list.isEmpty ? nil : list
+    }
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        // Moving the insertion point away hides the suggestion (typing recomputes it).
+        if suggestion != nil, !isApplyingEdit { clearSuggestion() }
+    }
+
+    private var isApplyingEdit = false
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        isApplyingEdit = true
+        super.insertText(string, replacementRange: replacementRange)
+        isApplyingEdit = false
+        updateSuggestion()
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        super.deleteBackward(sender)
+        clearSuggestion()
+    }
+
+    /// Where the suggestion is drawn: just after the insertion point.
+    func suggestionOrigin() -> NSPoint? {
+        guard let layout = layoutManager, let container = textContainer else { return nil }
+        let cursor = selectedRange().location
+        guard cursor > 0 else { return nil }
+        let glyph = layout.glyphIndexForCharacter(at: cursor - 1)
+        let glyphRect = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container)
+        let fragment = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        return NSPoint(x: glyphRect.maxX + textContainerOrigin.x, y: fragment.minY + textContainerOrigin.y)
+    }
+
     // MARK: Layout
 
     override func setFrameSize(_ newSize: NSSize) {
+        let old = frame.size
         super.setFrameSize(newSize)
         layoutColumns()
+        if old != newSize { scheduleRedisplay() }
+    }
+
+    private var redisplayScheduled = false
+
+    /// With non-contiguous layout the text view resizes itself while lines are laid out, which
+    /// can happen in the middle of a display pass; invalidations made then can be dropped
+    /// (seen as a blank sheet, or a last line without its answer, at narrow widths). One
+    /// redisplay on the next turn of the run loop catches up.
+    private func scheduleRedisplay() {
+        guard !redisplayScheduled else { return }
+        redisplayScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            redisplayScheduled = false
+            needsDisplay = true
+            resultsView.needsDisplay = true
+        }
     }
 
     /// Text container = width minus margins. Results float over the right side.
@@ -113,6 +278,12 @@ final class SheetTextView: NSTextView {
         resultsView.resultsChanged()
     }
 
+    /// The widest a result is drawn; wider ones are shortened. Leaves `gap` between it and
+    /// its line's text, which wraps at `resultShare` of the width.
+    var maxResultWidth: CGFloat {
+        max(0, (textContainer?.containerSize.width ?? bounds.width) * Self.resultShare - Self.gap)
+    }
+
     /// The width a result needs, including the stale-rates clock.
     func resultWidth(_ d: ResultDisplay) -> CGFloat {
         textWidth(d) + (d.isStale ? resultFont.pointSize * 1.3 : 0)
@@ -130,7 +301,7 @@ final class SheetTextView: NSTextView {
 
     private func recomputeReserved(invalidateAll: Bool) {
         guard let container = textContainer as? ResultAwareTextContainer, let layout = layoutManager else { return }
-        let maxReserve = container.containerSize.width * 0.6
+        let maxReserve = container.containerSize.width * Self.resultShare
         var next = [CGFloat](repeating: 0, count: displays.count)
         for (i, d) in displays.enumerated() {
             guard let d else { continue }
@@ -192,6 +363,23 @@ final class SheetTextView: NSTextView {
         return rect
     }
 
+    /// The baseline of `line`'s first line fragment, in view coordinates (results sit on it).
+    func baseline(ofLine line: Int) -> CGFloat? {
+        guard let layout = layoutManager, let rect = lineRect(line) else { return nil }
+        let length = (string as NSString).length
+        let start = lineStarts[line]
+        // The empty last line has no glyphs (and never a result).
+        guard start < length else { return nil }
+        let glyph = layout.glyphIndexForCharacter(at: start)
+        return rect.minY + layout.location(forGlyphAt: glyph).y
+    }
+
+    /// How far below the top of a one-line box `font`'s baseline is drawn (the same rule the
+    /// text column's typesetter uses, so a result drawn at `baseline - offset` shares it).
+    func baselineOffset(for font: NSFont) -> CGFloat {
+        layoutManager?.defaultBaselineOffset(for: font) ?? font.ascender
+    }
+
     /// Lines intersecting `rect` (view coordinates).
     func lines(in rect: NSRect) -> ClosedRange<Int> {
         guard let layout = layoutManager, let container = textContainer, !lineStarts.isEmpty else { return 0...0 }
@@ -234,12 +422,19 @@ final class SheetTextView: NSTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        if let suggestion, let origin = suggestionOrigin() {
+            // Opaque (blended with the background), since overlapping redraws of a
+            // translucent colour would darken it.
+            let grey = theme.background.blended(withFraction: 0.45, of: theme.text) ?? theme.comment
+            let attrs: [NSAttributedString.Key: Any] = [.font: font ?? NSFont.systemFont(ofSize: 15), .foregroundColor: grey]
+            (suggestion as NSString).draw(at: origin, withAttributes: attrs)
+        }
         if string.isEmpty {
             let base = font ?? NSFont.systemFont(ofSize: 15)
-            let attrs: [NSAttributedString.Key: Any] = [.font: base, .foregroundColor: NSColor.placeholderTextColor]
+            let attrs: [NSAttributedString.Key: Any] = [.font: base, .foregroundColor: theme.comment]
             ("Type a calculation, like 120 + 15%" as NSString).draw(at: textContainerOrigin, withAttributes: attrs)
             let small = NSFont.systemFont(ofSize: (base.pointSize * 0.8).rounded())
-            let hint: [NSAttributedString.Key: Any] = [.font: small, .foregroundColor: NSColor.tertiaryLabelColor]
+            let hint: [NSAttributedString.Key: Any] = [.font: small, .foregroundColor: theme.comment]
             let y = textContainerOrigin.y + (layoutManager?.defaultLineHeight(for: base) ?? base.pointSize * 1.2) * 1.5
             ("Help ▸ Tally Syntax Guide lists everything Tally understands." as NSString)
                 .draw(at: NSPoint(x: textContainerOrigin.x, y: y), withAttributes: hint)

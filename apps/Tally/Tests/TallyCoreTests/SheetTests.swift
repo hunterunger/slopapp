@@ -52,9 +52,10 @@ import Testing
         #expect(r == ["5", "err(division by zero)", "err(unknown name “a”)"])
     }
 
-    @Test func variablesAreCaseSensitiveAndMayContainDigitsAndUnderscores() {
-        let r = sheet("Rate_2 = 3\nrate_2 + 1\nRate_2 + 1")
-        #expect(r == ["3", "err(unknown name “rate_2”)", "4"])
+    /// Parity pass: names match in any case, as in the original ("Amount = 3", "amount * 8").
+    @Test func variablesIgnoreCaseAndMayContainDigitsAndUnderscores() {
+        let r = sheet("Rate_2 = 3\nrate_2 + 1\nRATE_2 + 1\nrate_3 + 1")
+        #expect(r == ["3", "4", "4", "err(unknown name “rate_3”)"])
     }
 
     @Test func sumLinesDontCountTowardsLaterSums() {

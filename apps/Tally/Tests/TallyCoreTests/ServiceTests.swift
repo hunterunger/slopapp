@@ -140,7 +140,9 @@ let ecbXML = Data("""
 @Suite struct Content {
     @Test func welcomeSheetShowsAnswers() {
         let r = sheet(SheetText.welcome)
-        #expect(r == ["—", "—", "$186.40", "18%", "$219.95", "$54.99", "3.106855961 mi", "—", "—"])
+        #expect(Array(r.prefix(7)) == ["—", "—", "$186.40", "18%", "$219.95", "$54.99", "3.106855961 mi"])
+        #expect(r[7].hasSuffix(" Tokyo"))
+        #expect(Array(r.suffix(2)) == ["—", "—"])
     }
 
     @Test func everySyntaxGuideExampleWorks() {

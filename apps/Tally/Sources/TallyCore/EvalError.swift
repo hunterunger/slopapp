@@ -18,6 +18,8 @@ public enum EvalError: Error, Equatable, Hashable, Sendable {
     /// Rates are loaded but this currency isn't in them.
     case noRate(String)
     case blockUnits
+    /// A date that doesn't exist (Feb 30).
+    case invalidDate
 
     public var message: String {
         switch self {
@@ -33,6 +35,7 @@ public enum EvalError: Error, Equatable, Hashable, Sendable {
         case .ratesUnavailable: "rates unavailable"
         case .noRate(let code): "no rate for \(code)"
         case .blockUnits: "lines above have mixed units"
+        case .invalidDate: "not a real date"
         }
     }
 
@@ -40,7 +43,7 @@ public enum EvalError: Error, Equatable, Hashable, Sendable {
     public var advice: String? {
         switch self {
         case .ratesOff: "Turn on exchange rates in Settings, or write a rate like 1 USD = 1.37 CAD."
-        case .ratesUnavailable: "The saved rates couldn't be read. Update them in Settings."
+        case .ratesUnavailable: "The saved rates couldn’t be read. Update them in Settings."
         case .noRate(let code): "Write a rate for \(code), like 1 EUR = 1.5 \(code)."
         case .reservedName: "Pick another name."
         case .unknownName: "Define it on a line above, like name = 10."

@@ -41,7 +41,8 @@ public struct LineSyntax: Equatable, Sendable {
             } else if u == slash, i + 1 < units.count, units[i + 1] == slash {
                 comment = NSRange(location: i, length: units.count - i)
                 break
-            } else if u == colonUnit, colon == nil {
+            } else if u == colonUnit, colon == nil, !(Self.isDigit(units[safe: i - 1]) && Self.isDigit(units[safe: i + 1])) {
+                // A colon between digits is a time ("3:30"), not a label.
                 colon = i
             }
             i += 1
@@ -69,5 +70,10 @@ public struct LineSyntax: Equatable, Sendable {
         for (k, u) in units.enumerated() { out.append(keep[k] ? u : 0x20) }
         let expression = String(utf16CodeUnits: out, count: out.count)
         return LineSyntax(kind: .content, label: label, comment: comment, quotes: quotes, expression: expression)
+    }
+
+    private static func isDigit(_ unit: UInt16?) -> Bool {
+        guard let unit else { return false }
+        return unit >= 0x30 && unit <= 0x39
     }
 }

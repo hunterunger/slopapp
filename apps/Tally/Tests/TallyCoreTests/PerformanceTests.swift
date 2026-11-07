@@ -2,12 +2,14 @@ import Foundation
 import Testing
 @testable import TallyCore
 
-/// A realistic big sheet: the corpus repeated, with unique variable names per block.
+/// A realistic big sheet: the corpus and the parity lines (dates, zones, rates, CSS)
+/// repeated, with unique variable names per block.
 func bigSheet(lines count: Int) -> [String] {
     var lines: [String] = []
     var block = 0
+    let sample = corpus.map(\.input) + parityLines.prefix(40).map(\.0)
     while lines.count < count {
-        for (input, _) in corpus {
+        for input in sample {
             lines.append(input.replacingOccurrences(of: "price", with: "price\(block)"))
             if lines.count == count { break }
         }
@@ -29,8 +31,10 @@ func medianMillis(runs: Int = 21, _ body: () -> Void) -> Double {
 
 @Suite(.serialized) struct Performance {
     /// One keystroke in a 1,000-line sheet: split, re-evaluate every line (cache hits for
-    /// unchanged lines) and format every result. Budget: one 120 Hz frame (8 ms) in release;
-    /// debug builds are several times slower, so they get a looser bound.
+    /// unchanged lines), format every result, colour the edited line and add up the total.
+    /// Budget: one 120 Hz frame (8 ms) in release; debug builds are several times slower, so
+    /// they get a looser bound. (The app's end-to-end figure, with layout and drawing, comes
+    /// from TALLY_PERF_SIM; see the research doc.)
     @Test func keystrokeInAThousandLineSheet() {
         var lines = bigSheet(lines: 1000)
         let engine = SheetEngine()
@@ -45,6 +49,8 @@ func medianMillis(runs: Int = 21, _ body: () -> Void) -> Double {
             let outputs = engine.evaluate(text, context: context)
             var chars = 0
             for o in outputs { if let q = o.result.quantity { chars += formatter.format(q).count } }
+            chars += Highlighter.spans(lines[500], variables: ["price3"]).count
+            if SheetEngine.total(of: outputs, context: context) != nil { chars += 1 }
             #expect(chars > 0)
         }
         print("TALLY_PERF keystroke_1000_lines_ms=\(String(format: "%.2f", ms))")

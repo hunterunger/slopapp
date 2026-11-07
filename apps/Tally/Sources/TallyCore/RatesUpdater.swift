@@ -72,9 +72,9 @@ public final class RatesUpdater {
             stored = .table(table)
             status = .idle
         } catch is RatesError {
-            status = .failed("The rates download wasn't in the expected format. Try again later.")
+            status = .failed("The rates download wasn’t in the expected format. Try again later.")
         } catch {
-            status = .failed("Couldn't download rates. Check your connection, then choose Update Now.")
+            status = .failed("Couldn’t download rates. Check your connection, then choose Update Now.")
         }
         onChange?()
     }

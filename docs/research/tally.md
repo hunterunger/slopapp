@@ -459,6 +459,274 @@ decimal-comma input (documented). Everything else in v1 scope and "should" is bu
   a walkthrough, so `check.sh`'s smoke/perf launches fetched real ECB rates once into
   `~/Library/Application Support/app.slopapp.tally`. Deleted; Tally's defaults reset.
 
+## Parity pass (2026-11-03)
+
+Per [`docs/parity-pass.md`](../parity-pass.md): look and work much more like Numi, and don't
+miss features. Numi isn't installed, so this used the
+[Numi wiki](https://github.com/nikolaeu/numi/wiki/Documentation) (full syntax),
+[its GitHub releases](https://github.com/nikolaeu/numi/releases) (3.20–3.34: notes and a
+notes list, time zone service, today widget, Alfred, crypto), the
+[Setapp listing](https://setapp.com/apps/numi) and its five screenshots, and the
+[numi.app](https://numi.app/) preview (downloaded to `/tmp/tally-parity/`, not committed).
+**What the screenshots show:** one quiet editor surface where the title bar shares the
+sheet's background; answers right-aligned in a contrasting colour; syntax colouring (labels,
+operator words, variables, headers each in their own colour); a clicked answer gets a filled
+highlight; and a slim bar along the bottom with a control on the left, the sheet's
+**Total** (or "Click to copy" while hovering an answer) in the middle, and a control on the
+right. Numi 3 adds several notes with a notes list.
+
+### Gap table
+
+| Feature / design item | Numi | Tally before | Now | Notes |
+|---|---|---|---|---|
+| Editor surface: title bar shares the sheet background | yes | standard title bar | **done** | `toolbarBackground` in the theme's background; compact unified title showing the sheet's title |
+| Bottom bar: left control, Total in the middle, right control | yes | none | **done** | Left: theme menu. Middle: `Total: $1,648.43`, or `Selection:` for selected lines; click (or ⇧⌘T) copies. Right: New Sheet (window) / Open window (menu bar panel) |
+| Syntax colouring | yes | headers/comments/labels only | **done** | `Highlighter` (core): numbers, operator words, units/currencies/zones, variables, labels, comments, headers. Places only after `in`/`to` or before `time`; `and`/`is`/`with` only in lines with numbers |
+| Click-to-copy highlight | filled pill | grey hover/flash | **done** | Tinted with the theme's answer colour |
+| Several sheets + list | notes + notes list | one sheet | **done** | Sidebar (`NavigationSplitView`), newest edit first, title from the first line, date; hidden by default for the minimal look, ⌃⌘S or the toolbar toggles it. ⌘N, ⇧⌘] / ⇧⌘[, Delete Sheet… (sidebar menu, Delete key, File menu). Each sheet keeps its own undo and insertion point |
+| Themes | day/night + others | system only | **done** | System (default, accent answers), Paper, Midnight, Dusk, Graphite: our own palettes. View ▸ Theme, bottom-bar menu, Settings ▸ Appearance with swatches |
+| Menu bar mode | yes (dock or menu bar) | no | **done** | Settings ▸ General: Show Tally in the menu bar; then Show Dock icon can be turned off. Click: the current sheet in a panel (live, same text), sheet switcher, total, open window. Right-click: Open Tally, New Sheet, Settings…, Quit |
+| Global hotkey | yes | show/hide window | **done** | Menu-bar-only: toggles the panel |
+| Float on top | unconfirmed | no | **done** | Window ▸ Float on Top (cheap, handy for a calculator) |
+| Time zones: `PST time`, `New York time`, `time in Madrid`, `2:30 pm HKT in Berlin` | yes | no | **done** | Offline: every city in the system's zone database plus ~150 extra cities/countries, and upper-case abbreviations |
+| Dates and times: `now`, `today + 3 weeks`, `Dec 25 - today`, `5pm - 9am`, `fromunix()` | yes | no | **done** | Calendar-aware months/years; ISO dates; `Dec 25`, `25 Dec 2027`; `noon`; `now in unix`; answers that use the clock refresh on the minute |
+| CSS units `px pt em` with `em =` / `ppi =` | yes | no | **done** | Defaults 16 px/em and 96 ppi, configurable in Settings ▸ General ▸ Screen units; sheet lines override for the lines below; `rem` = `em` |
+| Compound units (`km/h`) | partial | no | **done** | `km/h`, `m/s`, `mph`, `knots`, `Mbps`, `$/h`, `€/kg`, `per`; rate × time = distance, distance ÷ speed = time, `1 GB / 100 Mbps` |
+| Bitwise `& | xor << >>` | yes | no | **done** | C precedence; whole numbers only |
+| Reverse percentages | yes | no | **done** | `5% of/on/off what is 6`, `6 is 5% of what`, `as a % of/on/off` |
+| Word operators `and with without mul divide (by)` | yes | partial | **done** | |
+| `log 2 (10)`, `root 2 (8)`, `square root of`, `arcsin`, `sinh/cosh/tanh` | yes | partial | **done** | |
+| Units: mil, hand, rod, chain, furlong, cable, league, carat, centner, are, `sqm`, `cbm`, points | yes | partial | **done** | Plus decade, century |
+| Variables in any case (`Amount` / `amount`) | yes | case-sensitive | **done** | |
+| Autocomplete | yes | no | **done** | Inline grey suggestion (sheet variables after 2 letters; units/currencies/places after a number or `in`, 3 letters); Tab accepts, Esc lists every completion (variables first) |
+| Import / export plain text | yes | yes | kept | Import now opens as a new sheet |
+| Sheet-defined functions and units (Numi's JS extensions) | JS plugins | no | deferred, **M (~1 day)** | Running user JavaScript is a code-execution surface we won't add. The safe equivalent is in-sheet definitions: `tip(x) = x * 18%`, `1 sprint = 2 weeks`. Needs function scope in the evaluator and plural handling for new units |
+| Command-line tool + Alfred/Raycast workflow | yes | no | deferred, **M (~1 day)** | Core is a pure library, so a `tally` CLI target is small; shipping it needs the bundle pipeline to carry a second binary, plus a workflow file and docs |
+| Today widget | yes (3.27) | no | deferred, **L** | Needs a WidgetKit app extension, which the SwiftPM + scripts pipeline can't build yet |
+| Precision / format settings | Numi 2 | no | deferred, **S (~2 h)** | A "decimal places: auto / 0–8" setting on `ResultFormatter` |
+| Weekday words (`next friday`), `UTC+3`, zone differences (`Tokyo - London`) | partial | no | deferred, **S each** | Parser additions; not in the docs' examples |
+| Localization (26 languages) | yes | English | deferred, **L** | |
+| Decimal-comma input (`1,5`) | locale | no | deferred, **M** | Conflicts with `1,250` grouping; needs a locale setting |
+| Crypto rates | yes | no | skip | Needs another network source; currency stays opt-in ECB only |
+| iCloud sync | yes | no | skip | No accounts or network sync in Slopapp apps; sheets are plain files |
+
+### Decisions (made while building; owner asleep)
+
+- **Variables match in any case** (`Rent = 1200`, then `rent / 3`), as in the original's own
+  examples. Assigning `RENT` updates the same variable.
+- **Zone abbreviations follow their region's daylight saving time**: `PST` in July means
+  Pacific time, which is what people mean. Upper case only, so "est" in a note isn't a zone.
+- **A time in another zone means today there**: `2:30 pm HKT` is today's date in Hong Kong.
+  Times show the weekday when it isn't today here (`Wed 7:30 AM Berlin`), and the date when
+  it's more than a week away.
+- **The sheet's clock is the current minute**: answers show minutes, refresh on the minute,
+  and identical answers within a minute reuse their formatting.
+- **Total = the most common kind of answer**, added up in its first answer's unit or
+  currency (other currencies converted when rates allow). Percentages, dates and `sum`/`avg`
+  lines are skipped. Numi seems to add everything in order (its screenshot adds a `5%` line
+  into a money total); a budget with a few conversions should still total its money.
+- **Sheets** are ordered by last edit (like Notes) and titled by their first line with text.
+  The sidebar starts hidden, to keep the original's single-surface look; its state is
+  remembered. Deleting asks first (unless the sheet is empty) and can't be undone.
+- **Old data**: a 0.1 `sheet.txt` is copied in as the first sheet and left in place, so going
+  back to 0.1 loses nothing. A first-run welcome sheet isn't written to disk until edited.
+- **Menu bar** icon off by default (Tally stays a Dock app, as before). The Dock icon can only
+  be hidden while the menu bar icon is shown, so Tally is never unreachable.
+- **Suggestions are inline, not a pop-up list while typing**: a list that opens by itself
+  can swallow Return. Grey text never changes what typing does; Tab takes it. Esc (the
+  system's completion key in text views) lists everything.
+- **`pt` is the typographic/CSS point** (as in the original); US pints stay `pint`.
+- **`and` / `with` mean plus** (as in the original), but don't turn unknown words into errors,
+  so "rent and utilities" stays a note. Likewise `&` and `|` next to words ("R&D").
+- **`per`** with a unit makes a rate (`$25 per hour`); with a number it divides
+  (`100 km per 2 hours` = 50 km/h).
+- **Month names before or after a day are dates** (`may 5`, `10 dec`); `in dec` is still the
+  decimal number format.
+
+### Deviations from the design system (and why)
+
+- **Theme palettes are hard-coded colours** (Paper, Midnight, Dusk, Graphite). The original
+  offers themes; ours are our own palettes. The default "System" theme uses only semantic
+  colours and the user's accent colour.
+- **Syntax colouring** uses system colours (pink, indigo, teal) in the System theme.
+- **The title bar takes the sheet's background**, and the **bottom bar is custom**, to match
+  the original's single-surface layout.
+- **Inline suggestions are drawn by the editor** (NSTextView has no ghost-text API).
+- **The menu bar panel is a hand-built `NSStatusItem` + `NSPopover`**, not `MenuBarExtra` +
+  `MenuFooter`: Tally is a window app whose menu bar icon is optional and shows a live editor.
+  Its right-click menu ends with Settings… and Quit, like `MenuFooter`.
+
+### Gates and evidence
+
+- **Tests**: 89 test functions in 17 suites (75 core + 14 app), with 364 parameterized cases:
+  the 68-line v1 corpus, 185 single lines, and 111 new parity lines (time zones and dates on
+  a fixed clock, CSS, rates, bitwise, reverse percentages, word operators, function forms,
+  units). New suites cover em/ppi lines, totals, highlighting, suggestions, the sheet library
+  (first run, migration, ordering, deletion, files) and, in the app, switching sheets, per-sheet
+  undo, two editors sharing a sheet, the footer total and selection total, theme restyling and
+  Tab accepting a suggestion. All pass.
+- **`scripts/check.sh Tally --perf`**: PASS. Launch 161 ms, first window 334 ms, idle CPU
+  0.019% (lowest window), footprint 45.3 MB (was 32.8 MB: the split view, sidebar and theme
+  machinery), load 3.2.
+- **Keystroke latency, 1,000-line sheet**: core (release test, now including dates, zones,
+  rates, the total and highlighting the edited line) 3.77 ms; cold 5,000-line paste 10.1 ms.
+  End to end in the release app (`TALLY_PERF_SIM=1`: real NSTextView edits in an offscreen
+  window, through evaluation, total, colouring, re-wrap, layout and drawing the whole window,
+  36 keystrokes): **median 3.17 ms, p95 4.95 ms, max 5.85 ms**, inside one 120 Hz frame.
+  Before fixing it, splitting the text storage's bridged string cost 2.9 ms per keystroke
+  (median was 8.1 ms); the text is now transcoded to native UTF-8 once.
+- **Offscreen renders** (`TALLY_SNAPSHOT_DIR`, release build, test data and defaults suite;
+  in `/tmp/tally-parity/renders/`, not committed), all looked at: `main-system-light.png`,
+  `main-system-dark.png`, `main-paper.png`, `main-midnight.png`, `main-dusk.png`,
+  `main-graphite.png` (each with the grey suggestion "fli|ghts" on the last line),
+  `sidebar-system-light.png`, `sidebar-system-dark.png`, `sidebar-midnight.png`,
+  `menubar-panel-light.png`, `menubar-panel-dark.png`, `menubar-panel-midnight.png`,
+  `settings-general-{light,dark}.png`, `settings-appearance-{light,dark}.png`,
+  `main-empty-light.png`. (The dark Settings render draws the tab bar blank; that's the
+  offscreen renderer, the light one is fine.)
+- **Not run (screen locked)**: `scripts/drive` walkthroughs, `drive tree`, window
+  screenshots. Every icon-only control has an explicit accessibility label (theme menu,
+  New Sheet, Open Tally Window, Sheets, total button). An in-process AX audit of the
+  offscreen windows found no elements at all (SwiftUI builds its AX tree only for a real
+  client), so it was dropped as proof of nothing.
+
+### On-screen checks still owed (need an unlocked screen)
+
+1. `scripts/drive tree` on the main window (sidebar shown and hidden), menu bar panel,
+   Settings (all tabs) and Syntax Guide: no `[unlabeled]`.
+2. Typing walkthrough on `build/Tally.app` with the launcher (`TALLY_DATA_DIR`,
+   `TALLY_CLIPBOARD_FILE`, `TALLY_RATES_URL`, `TALLY_DEFAULTS_SUITE`): grey suggestion appears
+   while typing a variable, Tab accepts, Esc shows the completion list, Return still makes a
+   new line while a suggestion shows.
+3. Sidebar: ⌘N, click between sheets, ⇧⌘] / ⇧⌘[, Delete key and context menu (with the
+   confirmation), per-sheet ⌘Z, sheet titles updating as the first line changes; the
+   sidebar toggle in the title bar and ⌃⌘S.
+4. Themes on a real window: title bar colour matches the sheet, caret and selection colours,
+   find bar and scroller in the dark themes; switching from the bottom-bar menu.
+5. Menu bar: turn the icon on, click (panel shows the current sheet, typing there updates the
+   window), right-click menu, hide the Dock icon (Tally keeps running with only the icon; the
+   global shortcut toggles the panel), turn it back on.
+6. Footer: select several lines, `Selection:` total, click copies (to the clipboard file).
+7. Float on Top; `now` lines ticking over at the minute.
+8. Light and dark window screenshots with the real title bar.
+
+### Files
+
+New: `TallyCore/Zones.swift` (places, abbreviations, calendar helpers), `Highlighter.swift`
+(colouring, completions, inline suggestions), `Library.swift` (sheets on disk);
+`Tally/SheetDocument.swift`, `MainView.swift` (window, sidebar, bottom bar), `MenuBar.swift`,
+`Theme.swift`, `Snapshots.swift` (render and perf-simulation hooks). Rewritten:
+`SheetModel.swift` (library, several editors, totals, clock refresh, themes),
+`Editor/SheetStyler.swift`, `Editor/SheetEditor.swift`; extended: lexer, parser, arithmetic,
+formatter, units, syntax guide, settings, commands. Candidates for SlopKit later: the
+offscreen render helper (Zones and Convert have their own), `Theme`-style editor palettes,
+and the status-item-plus-popover controller.
+
+## Polish pass (2026-11-05)
+
+Per [`docs/polish-pass.md`](../polish-pass.md), including the mid-pass Golden Gate and
+light/dark addition. Release build (`build/Tally.app`, SDK 27.0) on macOS 27.2, test data
+only (`TALLY_DATA_DIR=/tmp/tally-test/data`, `TALLY_DEFAULTS_SUITE=app.slopapp.tally.test`,
+`TALLY_CLIPBOARD_FILE`, `TALLY_RATES_URL=file://…` pointing at a missing fixture so nothing
+touched the network). The owner's `app.slopapp.tally` domain was exported first and imported
+back at the end (verified identical). Download exchange rates stayed off.
+
+**Measuring.** `drive shot` captures read about 20 % low on contrast in light mode (label
+colour measures 12.7:1, the system's own secondary label 3.13:1, nominal 3.95:1) and a bit
+high in dark mode, so captured numbers are compared against those references, and palette
+numbers are nominal (computed from the colours). Baselines and edges were measured with a
+small ink-bounding-box tool on @2x shots (`/tmp/slopapp-polish/tally/bin/inkc`).
+
+### Defects fixed (before → after)
+
+| # | Where | Before | After |
+|---|---|---|---|
+| 1 | Lint | 2 corner literals (theme swatch `cornerRadius: 6`), 4 spacing literals | 0 / 0: `Radius.s`, `Spacing.xs`/`.s` |
+| 2 | Theme swatch | 1 pt `strokeBorder(.separator)`; fixed 11 pt monospaced code font (not the editor's type) | `hairlineBorder` (one device pixel); `.callout.monospacedDigit()`, medium answer like the sheet |
+| 3 | Answer hover/click pill | `NSBezierPath` radius literal 5; drawn inset 5×2, hit area 6×3, redraw 8×4 (three sizes) | one `pillRect`: `Radius.s`, inset `Spacing.xs`×2, used for drawing, hit testing and the cursor rect |
+| 4 | Error answers' baseline | 1.0 pt above the line (367 vs 368, 390 vs 391, 413 vs 414): smaller font centred vertically | on the line's baseline (370/370, 393/393; values 94/94), using the typesetter's own `defaultBaselineOffset(for:)` |
+| 5 | Error answers' contrast | System: `tertiaryLabelColor`, 1.67:1 measured light, 2.72:1 dark. Palettes 2.10 / 2.86 / 2.91 / 2.92 | System: secondary label (the floor, 3.13 measured light, 6.47 dark); palettes 4.10 / 4.16 / 4.19 / 4.13 (quiet by size, not by colour) |
+| 6 | Palette comments / labels (also the bottom bar's text) | Paper 2.39 / 2.90, Midnight 3.13 / 3.94, Dusk 3.27 / 4.26, Graphite 3.29 / 4.31 | 4.61 / 4.94, 4.65 / 4.90, 4.61 / 4.90, 4.61 / 4.93 (same hues, mixed towards the text colour) |
+| 7 | System theme syntax colours, light | teal variables 1.92:1 measured (≈2.2 nominal), pink words 3.23, accent answers 3.25 (blue; a yellow accent would be ≈1.6) | each darkened just enough to reach 4.5:1 nominal (variables 3.70, answers 3.61 measured), resolved at draw time so it follows the accent colour; dark-mode accent 4.15 → 4.5 (lightened) |
+| 8 | Long answers | head-truncated: "…v 3, 2015 at 2:46:26 PM"; a capped answer could touch its wrapped text (0 pt gap) | middle-truncated ("Tue, Nov 3,…2:46:26 PM"), errors keep their first words (tail); the tooltip shows the whole answer; capped width leaves the 16 pt gap |
+| 9 | Bottom bar edges | theme symbol at 16 pt vs text edge 20; New Sheet symbol 6 pt past the answers' edge | 20.0 and 748.5 vs answers 749.5 (pencil tip, optical) |
+| 10 | Bottom bar theme symbol colour | label colour, 13:1, beside a 3.1:1 sibling (AppKit draws a menu's label itself) | same opaque secondary as its sibling (3.13 both) |
+| 11 | Total | "Total: $1,648.43" centred as a group: every width change moved "Total:" by half | label ends 2.5 pt left of centre, value starts 2.5 pt right: the label never moves |
+| 12 | Bottom bars | sheet bar 28 pt (centre 466) beside the sidebar's 32 pt bar (centre 464) | 32 pt, one centre line |
+| 13 | Sidebar footer | rows scrolled visibly under "New Sheet" (a date overlapped it); "+" at 10 pt, titles at 16 | scroll-edge bar on macOS 26+ (rows fade under it), bar material + hairline on 14–15; "+" at 16 |
+| 14 | Menu bar panel | title at 12 pt vs text 20; sheets menu symbol 4.5 pt short of the answers' edge, label colour | title 20, symbol ends 359.5 = answers 359.5, bar colour |
+| 15 | Editor top inset | 14 pt | 16 pt (`Spacing.l`) |
+| 16 | Empty sheet hint | tertiary, 1.66:1 | comment colour, 3.10 (secondary floor) |
+| 17 | Settings | 7 explanations as separate rows; the Dock toggle carried the menu bar's explanation; theme checkmark appeared/disappeared; rates error in plain `.orange` (≈2:1 light) | subtitles under each control, section notes as footers; each toggle explains itself; checkmark in a fixed slot, grey when the window is inactive; `.textOrange`; px/ppi in equal slots so both fields end on one edge |
+| 18 | Syntax Guide | unrecognised examples in `.tertiary`; answers in plain accent | `.secondary`; the sheet's readable accent |
+| 19 | Narrow windows (360–380 pt) | last line's answer missing until a sheet switch; once a blank sheet (dark, 360 pt) | fixed: one coalesced redisplay after the text view resizes itself mid-display (non-contiguous layout). 6 of 6 launches correct |
+| 20 | Copy | straight apostrophes in 3 strings ("Couldn't download rates…"); delete alert body repeated the title | curly; "Its lines and answers go with it. You can’t undo this." |
+
+Unchanged on purpose: value answers already shared the line's baseline exactly (92/92);
+inputs wrap before their own answer; the 8 pt reserve rounding keeps lines from re-wrapping
+on every digit; Total uses `.monospacedDigit()`.
+
+### Golden Gate + light/dark
+
+- **Sidebar**: system `NavigationSplitView` sidebar. With the System theme the toolbar is
+  now the system's own, so the sidebar runs edge to edge under the title bar (before, the
+  sheet's white strip ran across its top). Rows have no icons (titles and dates, like Notes);
+  the footer is a system scroll-edge bar.
+- **Menus**: every menu is text only: View ▸ Theme and the bottom-bar theme menu (inline
+  picker with its checkmark), the panel's sheet list, the sidebar context menu, the status
+  item's right-click menu, all main-menu commands.
+- **Toolbar**: standard (`unifiedCompact`, sidebar toggle, title). Palette themes (Paper,
+  Midnight, Dusk, Graphite) still paint the toolbar in their background, a recorded
+  deviation: otherwise a navy sheet sits under a grey title bar. Scrolled text stops at the
+  toolbar edge in both modes (`after-scrolled-{light,dark}.png`).
+- **Inactive windows**: every window shot is of an inactive window (the owner was using the
+  Mac): sidebar selection and toggles go grey (system), the theme checkmark now greys too,
+  text selection is the system's. Answers keep their colour when inactive: they're the
+  sheet's syntax colouring (content), not state, and people keep Tally beside other apps.
+  The hover pill only appears in the key window (`.activeInKeyWindow` tracking).
+- **Glass**: system only (the popover, HUD, toolbar); no drawn translucency.
+- **Light and dark**: every window shot in both, side by side, with every theme in both
+  system appearances (palette themes force their own and look identical either way). No layer
+  or CGColor colours: the editor draws with dynamic `NSColor`s resolved at draw time, and the
+  new readable/opaque colours are dynamic providers, so a live appearance change re-resolves
+  them. Each theme's syntax colours pass on its own background (`ThemeContrast` tests check
+  every role of every theme, System in both appearances).
+
+### Tests and gates
+
+- New `Tests/TallyAppTests/PolishTests.swift`: theme contrast (all palettes; System light and
+  dark), the adaptive readable colour, answers and errors on the line's baseline, middle
+  truncation and the full-answer tooltip. **94 tests pass** (75 core, 19 app).
+- `scripts/check.sh Tally --perf`: **PASS** (busy machine, load ≈5): launch 153 ms, first
+  window 362 ms, idle CPU 0.027 %, footprint 52.7 MB.
+- `TALLY_PERF_SIM` keystroke latency, 1,000 lines: median 3.22 ms, p95 4.05 ms (was 3.17 / 4.95).
+- `scripts/drive tree`: 0 `[unlabeled]` across the main window (sidebar shown and hidden),
+  every Settings tab and the Syntax Guide; window buttons 16×16 in all three windows.
+
+### Screenshots
+
+`/tmp/slopapp-polish/tally/shots/`: `before-*` and `after-*` (`after-main-<theme>-<light|dark>`
+for all five themes, `after-sidebar-{light,dark}`, `after-sidebar-midnight-{light,dark}`,
+`after-long-{light,dark}`, `after-long-min-dark`, `after-scrolled-{light,dark}`,
+`a-many-{light,dark}` (40 sheets), `after-settings-<Tab>-<light|dark>` for every tab plus
+`-General-nomenubar-*` and `-Currency-failed-*`, `after-guide-{light,dark}`,
+`after-delete-alert-light-1`, `after-flash-light-1` (HUD)), and offscreen renders of the menu
+bar panel and empty sheet in `renders-before/` and `renders-after/`.
+
+### Not done, and why
+
+- **Hover states** (answer pill, Total turning the answer colour) and the 250 ms click flash:
+  designed in code; seeing them needs the real pointer, and the owner was active.
+- **Active main window screenshot**: the owner came back mid-check; only the Syntax Guide
+  was shot as key. Tally was hidden straight away to hand focus back.
+- **The real status item and popover**: AX can't reach Tally's status item and the real mouse
+  wasn't available; the panel was checked through `TALLY_SNAPSHOT_DIR` renders (light, dark,
+  Midnight) and measured there.
+- **Very long tokens** (a 15-digit number, a 40-letter name) still break mid-token in narrow
+  windows when they can't fit beside their answer; that's the only place they can go.
+- **Deleting a sheet can't be undone** (checklist 9): it asks first. Moving the file to the
+  Trash or an undo is a behaviour change, left for a feature pass.
+
 ## Blind test log
 
 One section per round, newest last. See docs/dev-cycle.md step 5.

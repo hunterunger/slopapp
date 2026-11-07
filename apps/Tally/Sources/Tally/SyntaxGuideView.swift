@@ -55,7 +55,7 @@ struct SyntaxGuideView: View {
                             Spacer(minLength: Spacing.l)
                             Text(row.result)
                                 .font(.body.monospacedDigit())
-                                .foregroundStyle(row.isDimmed ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.tint))
+                                .foregroundStyle(row.isDimmed ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color(nsColor: Theme.system.result)))
                         }
                         .accessibilityElement(children: .combine)
                     }

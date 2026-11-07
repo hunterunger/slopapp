@@ -12,6 +12,7 @@ public enum SheetText {
     dinner + tip
     prev / 4
     5 km in miles
+    now in Tokyo
     // Click an answer to copy it. Delete these lines whenever you like.
 
     """

@@ -10,15 +10,30 @@ final class UndoHost: NSObject, NSTextViewDelegate {
     func undoManager(for view: NSTextView) -> UndoManager? { manager }
 }
 
-final class MemorySheetStorage: SheetStorage {
-    var text: String?
+/// A library in memory. `text` is the first sheet's text (what the old single-sheet tests
+/// checked).
+final class MemorySheetStorage: LibraryStorage {
+    var index: LibraryIndex?
+    var texts: [UUID: String] = [:]
+    var legacy: String?
     var saves = 0
-    init(_ text: String?) { self.text = text }
-    func load() -> String? { text }
-    func save(_ text: String) throws {
-        saves += 1
-        self.text = text
+
+    init(_ text: String?) { legacy = text }
+
+    var text: String? {
+        guard let id = index?.current else { return nil }
+        return texts[id]
     }
+
+    func loadIndex() -> LibraryIndex? { index }
+    func saveIndex(_ index: LibraryIndex) throws { self.index = index }
+    func loadText(_ id: UUID) -> String? { texts[id] }
+    func saveText(_ text: String, id: UUID) throws {
+        saves += 1
+        texts[id] = text
+    }
+    func deleteText(_ id: UUID) throws { texts[id] = nil }
+    func loadLegacySheet() -> String? { legacy }
 }
 
 final class EmptyRatesStorage: RatesStorage {
@@ -82,7 +97,7 @@ final class FakeClipboard: Clipboard {
     func makeModel(_ text: String?) -> (SheetModel, MemorySheetStorage, FakeClipboard) {
         let storage = MemorySheetStorage(text)
         let clipboard = FakeClipboard()
-        let model = SheetModel(storage: storage, ratesStorage: EmptyRatesStorage(), fetcher: NoNetwork(), clipboard: clipboard)
+        let model = SheetModel(libraryStorage: storage, ratesStorage: EmptyRatesStorage(), fetcher: NoNetwork(), clipboard: clipboard)
         return (model, storage, clipboard)
     }
 

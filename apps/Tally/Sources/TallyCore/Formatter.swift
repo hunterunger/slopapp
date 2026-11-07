@@ -8,14 +8,20 @@ public struct ResultFormatter: Sendable {
     public var locale: Locale
     /// Which currency `$` shows for.
     public var dollarCode: String
+    /// Today, for deciding whether a time needs its day shown.
+    public var now: Date
+    /// The Mac's zone.
+    public var timeZone: TimeZone
     public static let significantDigits = 10
 
     private let groupingSeparator: String
     private let decimalSeparator: String
 
-    public init(locale: Locale = .current, dollarCode: String = "USD") {
+    public init(locale: Locale = .current, dollarCode: String = "USD", now: Date = Date(), timeZone: TimeZone = .current) {
         self.locale = locale
         self.dollarCode = dollarCode
+        self.now = now
+        self.timeZone = timeZone
         // Input only accepts "." as the decimal point, so results use it too; locales whose
         // decimal mark is "," get a thin space for grouping instead of a confusing ".".
         let localeDecimal = locale.decimalSeparator ?? "."
@@ -45,11 +51,51 @@ public struct ResultFormatter: Sendable {
             let label = u.label(plural: plural)
             return u.id == "°" ? number(q.value) + label : "\(number(q.value)) \(label)"
         case .currency(let code): return currency(q.value, code: code)
+        case .rate(let r): return rate(q.value, r)
+        case .date(let d): return date(q.value, d)
         }
+    }
+
+    func rate(_ value: Decimal, _ r: RateUnit) -> String {
+        if let alias = r.alias { return "\(number(value)) \(alias)" }
+        let per = "/" + (r.denominator.singular ?? r.denominator.symbol)
+        switch r.numerator {
+        case .unit(let u): return "\(number(value)) \(u.symbol)\(per)"
+        case .currency(let code): return currency(value, code: code) + per
+        }
+    }
+
+    /// "3:00 PM", "Wed 9:00 AM Tokyo", "Tue, Nov 24, 2026".
+    func date(_ seconds: Decimal, _ tag: DateTag) -> String {
+        let date = DateMath.date(seconds)
+        let zone = tag.timeZone
+        let hasSeconds = !DecimalMath.isInteger(DecimalMath.round(seconds, scale: 0, mode: .plain) / 60)
+        let time = hasSeconds ? "jmmss" : "jmm"
+        let template: String
+        switch tag.style {
+        case .date: template = "yMMMEd"
+        case .dateTime: template = "yMMMEd" + time
+        case .time:
+            // The day only when it isn't today (in the Mac's zone): a weekday within a week.
+            let shownDay = DateMath.calendar(zone).dateComponents([.year, .month, .day], from: date)
+            let today = DateMath.calendar(timeZone).dateComponents([.year, .month, .day], from: now)
+            if shownDay == today {
+                template = time
+            } else if let shown = DateMath.calendar(timeZone).date(from: shownDay),
+                      let days = DateMath.dayDifference(from: now, to: shown, zone: timeZone), Swift.abs(days) < 7 {
+                template = "E" + time
+            } else {
+                template = "yMMMd" + time
+            }
+        }
+        var text = DateFormatters.shared.string(from: date, template: template, zone: zone, locale: locale)
+        if let label = tag.label, tag.style != .date { text += " " + label }
+        return text
     }
 
     /// Just the number, without unit or grouping, for "Copy number only".
     public func plainNumber(_ q: Quantity) -> String {
+        if q.date != nil { return format(q) }
         let v = q.isPercent ? q.value * 100 : q.value
         if let code = q.currency {
             return trimmed(DecimalMath.round(v, scale: Currencies.minorUnits(code), mode: .plain), fixedScale: Currencies.minorUnits(code), grouping: false)
@@ -63,6 +109,13 @@ public struct ResultFormatter: Sendable {
         case .percent: return text + "%"
         case .unit(let u): return "\(text) \(u.label(plural: true))"
         case .currency(let code): return "\(text) \(code)"
+        case .rate(let r):
+            let num = switch r.numerator {
+            case .unit(let u): u.symbol
+            case .currency(let c): c
+            }
+            return "\(text) \(r.alias ?? num + "/" + (r.denominator.singular ?? r.denominator.symbol))"
+        case .date(let d): return date(q.value, d)
         }
     }
 
@@ -158,5 +211,31 @@ public struct ResultFormatter: Sendable {
         let n = NSDecimalNumber(decimal: value).int64Value
         let digits = String(n.magnitude, radix: radix, uppercase: true)
         return (n < 0 ? "-" : "") + prefix + digits
+    }
+}
+
+/// Date formatters are slow to make, so each (template, zone, locale) is made once.
+final class DateFormatters: @unchecked Sendable {
+    static let shared = DateFormatters()
+    private var cache: [String: DateFormatter] = [:]
+    private let lock = NSLock()
+
+    func string(from date: Date, template: String, zone: TimeZone, locale: Locale) -> String {
+        let key = "\(template)|\(zone.identifier)|\(locale.identifier)"
+        lock.lock()
+        defer { lock.unlock() }
+        let formatter: DateFormatter
+        if let cached = cache[key] {
+            formatter = cached
+        } else {
+            formatter = DateFormatter()
+            formatter.locale = locale
+            formatter.timeZone = zone
+            formatter.setLocalizedDateFormatFromTemplate(template)
+            if cache.count > 200 { cache.removeAll() }
+            cache[key] = formatter
+        }
+        // Narrow no-break spaces ("3:00 PM") copy badly into plain-text places.
+        return formatter.string(from: date).replacingOccurrences(of: "\u{202F}", with: " ")
     }
 }

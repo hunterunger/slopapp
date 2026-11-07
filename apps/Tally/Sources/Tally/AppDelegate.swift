@@ -13,10 +13,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default: break
         }
         WindowToggler.install()
+        MenuBarController.shared.update()
+        if Snapshots.runIfAsked() || PerfSimulation.runIfAsked() { return }
+        if !Pref.isDockIconShown {
+            // Menu bar only: start with just the icon.
+            DispatchQueue.main.async { WindowToggler.mainWindow?.close() }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        !WindowToggler.hasShortcut
+        !WindowToggler.hasShortcut && !MenuBarController.shared.isShown && !Snapshots.isRunning
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -56,6 +62,11 @@ enum WindowToggler {
     }
 
     static func toggle() {
+        // Menu bar only: the shortcut drops down the panel instead.
+        if !Pref.isDockIconShown, MenuBarController.shared.isShown {
+            MenuBarController.shared.togglePanel()
+            return
+        }
         if NSApp.isActive, let window = mainWindow, window.isVisible, window.isKeyWindow {
             NSApp.hide(nil)
         } else {

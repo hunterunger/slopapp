@@ -3,9 +3,10 @@ import SlopKit
 import SwiftUI
 import TallyCore
 
-// Archetype: a single-window utility (design system 2b), with the window being an editor
-// instead of a drop zone. One autosaved sheet; closing the window quits unless a
-// show/hide shortcut is set (then Tally stays ready in the background).
+// Archetype: a library window (design system 2c) shaped like the original: a minimal sheet
+// editor with answers on the right, a slim total bar along the bottom and a collapsible
+// sidebar of sheets; plus an optional menu bar panel. Closing the window quits unless a
+// show/hide shortcut or the menu bar icon keeps Tally around.
 
 @main
 struct TallyApp: App {
@@ -17,7 +18,8 @@ struct TallyApp: App {
         Window("Tally", id: WindowID.main) {
             ContentView(model: model)
         }
-        .defaultSize(width: 560, height: 480)
+        .defaultSize(width: 600, height: 480)
+        .windowToolbarStyle(.unifiedCompact(showsTitle: true))
         .commands { TallyCommands(model: model, info: info) }
 
         Window("Syntax Guide", id: WindowID.guide) {
@@ -37,48 +39,30 @@ enum WindowID {
     static let guide = "guide"
 }
 
-struct ContentView: View {
-    let model: SheetModel
-    @AppStorage(Pref.textSizeStep) private var textSizeStep = TextSize.defaultStep
-    @Environment(\.openSettings) private var openSettings
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        SheetEditor(model: model, textSizeStep: textSizeStep)
-            .frame(minWidth: 340, minHeight: 220)
-            .ignoresSafeArea(.container, edges: .bottom)
-            .onAppear {
-                model.openSettingsAction = { openSettingsWindow() }
-                WindowToggler.openMain = { openWindow(id: WindowID.main) }
-            }
-    }
-
-    private func openSettingsWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-        openSettings()
-        DispatchQueue.main.async {
-            NSApp.windows.first { $0.identifier?.rawValue.contains("Settings") == true }?.makeKeyAndOrderFront(nil)
-        }
-    }
-}
-
 struct TallyCommands: Commands {
     let model: SheetModel
     let info: AppInfo
-    @AppStorage(Pref.textSizeStep) private var textSizeStep = TextSize.defaultStep
+    @AppStorage(Pref.textSizeStep, store: Pref.defaults) private var textSizeStep = TextSize.defaultStep
     @Environment(\.openWindow) private var openWindow
 
     private func setTextSize(_ step: Int) {
         let clamped = TextSize.clamp(step)
         if clamped == textSizeStep, step != TextSize.defaultStep { NSSound.beep() }
         textSizeStep = clamped
+        model.setTextSize(step: clamped)
     }
 
     var body: some Commands {
+        SidebarCommands()
         CommandGroup(replacing: .appInfo) {
             Button("About \(info.name)") { AboutWindow.show(info: info) }
         }
         CommandGroup(replacing: .newItem) {
+            Button("New Sheet") {
+                WindowToggler.show()
+                model.newSheet()
+            }
+            .keyboardShortcut("n")
             Button("Import…") { model.importText() }
                 .keyboardShortcut("o")
         }
@@ -87,11 +71,15 @@ struct TallyCommands: Commands {
                 .keyboardShortcut("w")
             Button("Export…") { model.exportText() }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+            Divider()
+            Button("Delete Sheet…") { model.deleteSheet(model.currentID) }
         }
         CommandGroup(after: .pasteboard) {
             Divider()
             Button("Copy Result") { model.copyCurrentResult() }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
+            Button("Copy Total") { model.copyTotal() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
             Button("Copy All") { model.copyAll() }
                 .keyboardShortcut("c", modifiers: [.command, .option])
             Button("Clear All") { model.clearAll() }
@@ -119,6 +107,18 @@ struct TallyCommands: Commands {
                 .keyboardShortcut("-")
             Button("Actual Size") { setTextSize(TextSize.defaultStep) }
                 .keyboardShortcut("0")
+            Divider()
+            Menu("Theme") {
+                ThemeMenuItems(model: model)
+            }
+            Divider()
+        }
+        CommandGroup(before: .windowList) {
+            Button("Next Sheet") { model.selectNeighbour(1) }
+                .keyboardShortcut("]", modifiers: [.command, .shift])
+            Button("Previous Sheet") { model.selectNeighbour(-1) }
+                .keyboardShortcut("[", modifiers: [.command, .shift])
+            Toggle("Float on Top", isOn: Binding(get: { WindowFloat.isOn }, set: { _ in WindowFloat.toggle() }))
             Divider()
         }
         CommandGroup(replacing: .help) {

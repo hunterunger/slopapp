@@ -3,10 +3,15 @@ import Foundation
 enum Token: Equatable {
     case number(Decimal)
     case word(String)
-    /// One of `+ - * / ^ % ! ( ) = ,` (Unicode forms are normalized: × → *, ÷ → /, − → -).
+    /// One of `+ - * / ^ % ! ( ) = , & |`, or `<` / `>` for the shifts `<<` / `>>` (Unicode
+    /// forms are normalized: × → *, ÷ → /, − → -).
     case symbol(Character)
     /// `$ € £ ¥ ₹ ...`
     case currencySymbol(String)
+    /// `15:30`, `9:05:10`
+    case clock(hour: Int, minute: Int, second: Int)
+    /// `2026-12-25`
+    case isoDate(year: Int, month: Int, day: Int)
 }
 
 /// Splits one line (already stripped of comments, quotes and labels) into tokens.
@@ -39,6 +44,11 @@ struct Lexer {
                 try lexNumber()
             } else if Self.isWordStart(c) {
                 lexWord()
+            } else if c == "<" || c == ">" {
+                // Only the shifts << and >>.
+                guard peek(1) == c else { throw NotACalculation() }
+                tokens.append(.symbol(c))
+                i += 2
             } else if let s = Self.symbol(c) {
                 if c == "*", peek(1) == "*" {
                     tokens.append(.symbol("^"))
@@ -58,7 +68,7 @@ struct Lexer {
 
     static func symbol(_ c: Character) -> Character? {
         switch c {
-        case "+", "-", "*", "/", "^", "%", "!", "(", ")", "=", ",": c
+        case "+", "-", "*", "/", "^", "%", "!", "(", ")", "=", ",", "&", "|": c
         case "×", "·", "⋅": "*"
         case "÷", "∕": "/"
         case "−", "–": "-"
@@ -111,6 +121,10 @@ struct Lexer {
             tokens.append(.number(Decimal(n)))
             return
         }
+        if let token = lexClockOrDate() {
+            tokens.append(token)
+            return
+        }
         var text = ""
         var integerDigits = 0
         while let c = peek() {
@@ -160,6 +174,49 @@ struct Lexer {
             i += 1
         }
         tokens.append(.number(value))
+    }
+
+    /// `9:30`, `15:30:05` or `2026-12-25` starting at `i`.
+    private mutating func lexClockOrDate() -> Token? {
+        var j = i
+        func digits(max: Int) -> Int? {
+            var n = 0, count = 0
+            while count < max, let c = chars[safe: j], c.isASCIIDigit {
+                n = n * 10 + Int(String(c))!
+                count += 1
+                j += 1
+            }
+            if count == 0 || chars[safe: j]?.isASCIIDigit == true { return nil }
+            return n
+        }
+        let start = i
+        guard let first = digits(max: 4) else { return nil }
+        let width = j - start
+        if width <= 2, chars[safe: j] == ":" {
+            j += 1
+            let minuteStart = j
+            guard let minute = digits(max: 2), j - minuteStart == 2, first < 24, minute < 60 else { return nil }
+            var second = 0
+            if chars[safe: j] == ":" {
+                j += 1
+                let secondStart = j
+                guard let s = digits(max: 2), j - secondStart == 2, s < 60 else { return nil }
+                second = s
+            }
+            if chars[safe: j].map(Self.isWordChar) == true, chars[safe: j]?.isLetter != true { return nil }
+            i = j
+            return .clock(hour: first, minute: minute, second: second)
+        }
+        if width == 4, chars[safe: j] == "-", chars[safe: j + 1]?.isASCIIDigit == true {
+            j += 1
+            guard let month = digits(max: 2), chars[safe: j] == "-" else { return nil }
+            j += 1
+            guard let day = digits(max: 2), (1...12).contains(month), (1...31).contains(day) else { return nil }
+            if chars[safe: j].map(Self.isWordChar) == true { return nil }
+            i = j
+            return .isoDate(year: first, month: month, day: day)
+        }
+        return nil
     }
 
     private func isGroup(at j: Int) -> Bool {

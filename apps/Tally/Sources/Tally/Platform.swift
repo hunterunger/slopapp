@@ -6,8 +6,13 @@ import TallyCore
 enum Platform {
     /// `TALLY_DATA_DIR` overrides the data folder (tests and walkthroughs use /tmp).
     static var dataDirectory: URL {
-        if let override = ProcessInfo.processInfo.environment["TALLY_DATA_DIR"], !override.isEmpty {
+        let env = ProcessInfo.processInfo.environment
+        if let override = env["TALLY_DATA_DIR"], !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        // The pipeline's launch test shouldn't write into the real data folder.
+        if env["SLOPAPP_SMOKE_TEST"] == "1" {
+            return FileManager.default.temporaryDirectory.appendingPathComponent("tally-smoke-\(ProcessInfo.processInfo.processIdentifier)")
         }
         return (try? AppPaths.applicationSupport)
             ?? FileManager.default.temporaryDirectory.appendingPathComponent("app.slopapp.tally")

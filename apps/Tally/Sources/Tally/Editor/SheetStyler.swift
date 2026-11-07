@@ -1,15 +1,24 @@
 import AppKit
 import TallyCore
 
-/// Styles note parts as they're typed: headers semibold, comments, labels and quoted text
-/// secondary. Only the edited lines are restyled.
+/// Colours each line as it's typed, from the theme: numbers, operator words, units,
+/// variables, labels, comments and headers. Only edited lines are restyled; a full pass
+/// runs when the theme, text size or the sheet's variable names change.
 @MainActor
 final class SheetStyler: NSObject, NSTextStorageDelegate {
-    var font: NSFont
-    var headerFont: NSFont
-    var paragraph: NSParagraphStyle
+    private(set) var font: NSFont
+    private(set) var headerFont: NSFont
+    private(set) var paragraph: NSParagraphStyle
+    private(set) var theme: Theme
+    private(set) var pointSize: CGFloat
+    /// Bumped on every theme or size change, so sheets styled earlier get restyled when shown.
+    private(set) var generation = 0
+    /// The lower-cased variable names of the sheet a storage belongs to.
+    var variables: (NSTextStorage) -> Set<String> = { _ in [] }
 
-    init(pointSize: CGFloat) {
+    init(pointSize: CGFloat, theme: Theme) {
+        self.pointSize = pointSize
+        self.theme = theme
         font = .monospacedDigitSystemFont(ofSize: pointSize, weight: .regular)
         headerFont = .monospacedDigitSystemFont(ofSize: pointSize, weight: .semibold)
         paragraph = Self.paragraph(for: pointSize)
@@ -22,13 +31,20 @@ final class SheetStyler: NSObject, NSTextStorageDelegate {
     }
 
     func setPointSize(_ size: CGFloat) {
+        pointSize = size
         font = .monospacedDigitSystemFont(ofSize: size, weight: .regular)
         headerFont = .monospacedDigitSystemFont(ofSize: size, weight: .semibold)
         paragraph = Self.paragraph(for: size)
+        generation += 1
+    }
+
+    func setTheme(_ theme: Theme) {
+        self.theme = theme
+        generation += 1
     }
 
     var baseAttributes: [NSAttributedString.Key: Any] {
-        [.font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph]
+        [.font: font, .foregroundColor: theme.text, .paragraphStyle: paragraph]
     }
 
     nonisolated func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions,
@@ -45,23 +61,17 @@ final class SheetStyler: NSObject, NSTextStorageDelegate {
     func style(_ storage: NSTextStorage, in range: NSRange) {
         let text = storage.string as NSString
         guard text.length > 0 else { return }
-        let lines = text.lineRange(for: NSRange(location: min(range.location, text.length), length: min(range.length, text.length - min(range.location, text.length))))
+        let location = min(range.location, text.length)
+        let lines = text.lineRange(for: NSRange(location: location, length: min(range.length, text.length - location)))
         storage.setAttributes(baseAttributes, range: lines)
+        let names = variables(storage)
         text.enumerateSubstrings(in: lines, options: [.byLines, .substringNotRequired]) { _, lineRange, _, _ in
             let line = text.substring(with: lineRange)
-            let syntax = LineSyntax.parse(line)
-            switch syntax.kind {
-            case .blank, .content: break
-            case .header:
-                storage.addAttribute(.font, value: self.headerFont, range: lineRange)
-            case .comment:
-                storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: lineRange)
-            }
-            for part in syntax.quotes + [syntax.label, syntax.comment].compactMap({ $0 }) {
-                let r = NSRange(location: lineRange.location + part.location, length: part.length)
-                if NSMaxRange(r) <= NSMaxRange(lineRange) {
-                    storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: r)
-                }
+            for span in Highlighter.spans(line, variables: names) {
+                let r = NSRange(location: lineRange.location + span.range.location, length: span.range.length)
+                guard NSMaxRange(r) <= NSMaxRange(lineRange) else { continue }
+                storage.addAttribute(.foregroundColor, value: self.theme.color(for: span.kind), range: r)
+                if span.kind == .header { storage.addAttribute(.font, value: self.headerFont, range: r) }
             }
         }
     }

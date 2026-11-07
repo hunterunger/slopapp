@@ -1,4 +1,5 @@
 import AppKit
+import SlopKit
 import TallyCore
 
 /// Draws each line's result right-aligned beside it, handles clicks (copy), and exposes
@@ -32,27 +33,42 @@ final class ResultsColumnView: NSView {
 
     // MARK: Geometry
 
-    /// Where `line`'s result is drawn, in this view's coordinates.
+    /// Where `line`'s result is drawn, in this view's coordinates: right-aligned, on the
+    /// line's own baseline (errors use a smaller font, so centring would sit them high).
     func resultRect(_ line: Int) -> NSRect? {
         guard let tv = textView, tv.displays.indices.contains(line), let display = tv.displays[line],
-              let lineRect = tv.lineRect(line) else { return nil }
+              let baseline = tv.baseline(ofLine: line) else { return nil }
         let font = display.kind == .value ? tv.resultFont : tv.errorFont
-        let textHeight = ceil(lineHeight(font))
-        let width = min(bounds.width * 0.6, tv.resultWidth(display))
-        let height = ceil(lineHeight(tv.resultFont))
-        let y = lineRect.minY + max(0, (min(lineRect.height, height) - textHeight) / 2)
-        return NSRect(x: bounds.width - width, y: y, width: width, height: textHeight)
+        let width = min(tv.maxResultWidth, tv.resultWidth(display))
+        let height = ceil(font.ascender - font.descender)
+        return NSRect(x: bounds.width - width, y: baseline - tv.baselineOffset(for: font), width: width, height: height)
     }
 
-    private func lineHeight(_ font: NSFont) -> CGFloat {
-        textView?.layoutManager?.defaultLineHeight(for: font) ?? font.pointSize * 1.2
+    /// The result doesn't fit its column and is drawn shortened.
+    func isTruncated(_ line: Int) -> Bool {
+        guard let tv = textView, let display = tv.displays[safe: line] ?? nil else { return false }
+        return tv.resultWidth(display) > tv.maxResultWidth
+    }
+
+    /// The hover tip: the whole result when it's shortened, then what a click does.
+    func toolTip(for line: Int) -> String? {
+        guard let display = textView?.displays[safe: line] ?? nil else { return nil }
+        guard isTruncated(line) else { return display.help }
+        return [display.text, display.help].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    /// The filled shape behind a hovered or clicked result.
+    static let pillInset = NSSize(width: Spacing.xs, height: 2)
+
+    private func pillRect(_ rect: NSRect) -> NSRect {
+        rect.insetBy(dx: -Self.pillInset.width, dy: -Self.pillInset.height)
     }
 
     private func line(at point: NSPoint) -> Int? {
         guard let tv = textView else { return nil }
         let probe = NSRect(x: 0, y: point.y - 1, width: 1, height: 2)
         for line in tv.lines(in: probe) {
-            if let r = resultRect(line), r.insetBy(dx: -6, dy: -3).contains(point) { return line }
+            if let r = resultRect(line), pillRect(r).contains(point) { return line }
         }
         return nil
     }
@@ -71,26 +87,27 @@ final class ResultsColumnView: NSView {
             guard tv.displays.indices.contains(line), let display = tv.displays[line], let rect = resultRect(line) else { continue }
             let clickable = display.kind == .value || display.opensCurrencySettings
             if clickable, line == hoveredLine || line == flashLine {
-                let bg = rect.insetBy(dx: -5, dy: -2)
-                NSColor.quaternaryLabelColor.withAlphaComponent(line == flashLine ? 0.6 : 0.35).setFill()
-                NSBezierPath(roundedRect: bg, xRadius: 5, yRadius: 5).fill()
+                tv.theme.result.withAlphaComponent(line == flashLine ? 0.28 : 0.14).setFill()
+                NSBezierPath(roundedRect: pillRect(rect), xRadius: Radius.s, yRadius: Radius.s).fill()
             }
             var textRect = rect
             if display.isStale, let icon = NSImage(systemSymbolName: "clock", accessibilityDescription: "Old exchange rates") {
                 let side = tv.resultFont.pointSize * 0.9
                 let iconRect = NSRect(x: rect.minX, y: rect.midY - side / 2, width: side, height: side)
                 let config = NSImage.SymbolConfiguration(pointSize: side, weight: .regular)
-                    .applying(.init(hierarchicalColor: .secondaryLabelColor))
+                    .applying(.init(hierarchicalColor: tv.theme.comment))
                 icon.withSymbolConfiguration(config)?.draw(in: iconRect)
                 textRect.origin.x += tv.resultFont.pointSize * 1.3
                 textRect.size.width -= tv.resultFont.pointSize * 1.3
             }
             let style = NSMutableParagraphStyle()
             style.alignment = .right
-            style.lineBreakMode = .byTruncatingHead
+            // A shortened answer keeps its start and its unit ("Tue, Nov 3, 20…2:46:26 PM");
+            // an error keeps its first words. The tooltip has the whole answer.
+            style.lineBreakMode = display.kind == .value ? .byTruncatingMiddle : .byTruncatingTail
             let attrs: [NSAttributedString.Key: Any] = display.kind == .value
-                ? [.font: tv.resultFont, .foregroundColor: NSColor.controlAccentColor, .paragraphStyle: style]
-                : [.font: tv.errorFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style]
+                ? [.font: tv.resultFont, .foregroundColor: tv.theme.result, .paragraphStyle: style]
+                : [.font: tv.errorFont, .foregroundColor: tv.theme.error, .paragraphStyle: style]
             (display.text as NSString).draw(with: textRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
         }
     }
@@ -119,9 +136,9 @@ final class ResultsColumnView: NSView {
         let old = hoveredLine
         hoveredLine = line
         for l in [old, line].compactMap({ $0 }) {
-            if let r = resultRect(l) { setNeedsDisplay(r.insetBy(dx: -8, dy: -4)) }
+            if let r = resultRect(l) { setNeedsDisplay(pillRect(r).insetBy(dx: -1, dy: -1)) }
         }
-        toolTip = line.flatMap { textView?.displays[safe: $0]??.help }
+        toolTip = line.flatMap { toolTip(for: $0) }
     }
 
     override func resetCursorRects() {
@@ -129,7 +146,7 @@ final class ResultsColumnView: NSView {
         for line in tv.lines(in: visibleRect) {
             guard let d = tv.displays[safe: line] ?? nil, d.kind == .value || d.opensCurrencySettings,
                   let r = resultRect(line) else { continue }
-            addCursorRect(r.insetBy(dx: -6, dy: -3), cursor: .pointingHand)
+            addCursorRect(pillRect(r), cursor: .pointingHand)
         }
     }
 
@@ -143,13 +160,13 @@ final class ResultsColumnView: NSView {
 
     func activate(_ line: Int) {
         flashLine = line
-        if let r = resultRect(line) { setNeedsDisplay(r.insetBy(dx: -8, dy: -4)) }
+        if let r = resultRect(line) { setNeedsDisplay(pillRect(r).insetBy(dx: -1, dy: -1)) }
         textView?.onResultClick?(line)
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard let self, flashLine == line else { return }
             flashLine = nil
-            if let r = resultRect(line) { setNeedsDisplay(r.insetBy(dx: -8, dy: -4)) }
+            if let r = resultRect(line) { setNeedsDisplay(pillRect(r).insetBy(dx: -1, dy: -1)) }
         }
     }
 

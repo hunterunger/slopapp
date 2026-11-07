@@ -14,10 +14,13 @@ final class SheetScrollView: NSScrollView {
     }
 }
 
-/// The editor, for SwiftUI: a scroll view holding a `SheetTextView`.
+/// The editor, for SwiftUI: a scroll view holding a `SheetTextView` that shows the model's
+/// current sheet. Several can be open at once (the window and the menu bar panel); they
+/// share the sheet's text storage.
 struct SheetEditor: NSViewRepresentable {
     let model: SheetModel
-    let textSizeStep: Int
+    /// Gets keyboard focus when it appears.
+    var focusOnAppear = true
 
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
@@ -27,83 +30,70 @@ struct SheetEditor: NSViewRepresentable {
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
         scroll.drawsBackground = true
-        scroll.backgroundColor = .textBackgroundColor
 
         let textView = SheetTextView.make()
         let coordinator = context.coordinator
         coordinator.textView = textView
-        let size = TextSize.pointSize(step: textSizeStep)
-        coordinator.applySize(size)
-
-        textView.textStorage?.delegate = coordinator.styler
         textView.delegate = coordinator
-        textView.string = model.text
-        coordinator.styler.styleAll(textView.textStorage!)
+        textView.baseAttributes = model.styler.baseAttributes
         textView.onResultClick = { [weak model] line in model?.resultClicked(line: line) }
-
+        textView.variableNames = { [weak model] in model?.current.variableNames ?? [] }
+        textView.suggestsInline = { Pref.isSuggestingNames }
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         scroll.documentView = textView
-        model.editor = textView
-        model.onResultsChange = { [weak coordinator] in coordinator?.resultsChanged() }
-        coordinator.resultsChanged()
+        model.register(textView)
 
-        // Start at the end of the sheet, ready to type.
-        let end = (textView.string as NSString).length
-        textView.setSelectedRange(NSRange(location: end, length: 0))
-        DispatchQueue.main.async {
-            textView.window?.makeFirstResponder(textView)
-            textView.scrollRangeToVisible(textView.selectedRange())
+        if focusOnAppear {
+            DispatchQueue.main.async {
+                textView.window?.makeFirstResponder(textView)
+                textView.scrollRangeToVisible(textView.selectedRange())
+            }
         }
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        let size = TextSize.pointSize(step: textSizeStep)
-        if context.coordinator.pointSize != size {
-            context.coordinator.applySize(size)
+        guard let tv = context.coordinator.textView else { return }
+        // Theme or size changed: the model already restyled; refresh the view's own settings.
+        if tv.theme != model.theme || tv.font?.pointSize != model.pointSize {
+            tv.baseAttributes = model.styler.baseAttributes
+            tv.applyTheme(model.theme, pointSize: model.pointSize)
+            tv.apply(displays: model.displays)
         }
+    }
+
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        if let tv = coordinator.textView { coordinator.model.unregister(tv) }
     }
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         let model: SheetModel
-        let styler = SheetStyler(pointSize: 15)
         weak var textView: SheetTextView?
-        private(set) var pointSize: CGFloat = 0
 
         init(model: SheetModel) {
             self.model = model
         }
 
-        func applySize(_ size: CGFloat) {
-            pointSize = size
-            styler.setPointSize(size)
-            guard let tv = textView else { return }
-            tv.font = styler.font
-            tv.typingAttributes = styler.baseAttributes
-            tv.defaultParagraphStyle = styler.paragraph
-            tv.resultFont = .monospacedDigitSystemFont(ofSize: size, weight: .medium)
-            tv.errorFont = .systemFont(ofSize: (size * 0.87).rounded())
-            if let storage = tv.textStorage { styler.styleAll(storage) }
-            tv.layoutColumns()
-            tv.apply(displays: model.displays)
-        }
-
         func textDidChange(_ notification: Notification) {
-            guard let tv = textView else { return }
             let start = ContinuousClock.now
-            model.textDidChange(tv.string)
+            model.storageDidChange()
             PerfLog.keystroke(total: ContinuousClock.now - start, evaluation: model.lastEvaluationMillis, lines: model.lines.count)
         }
 
-        func resultsChanged() {
-            textView?.apply(displays: model.displays)
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let tv = textView else { return }
+            model.selectionChanged(tv.selectedRange(), lineStarts: tv.lineStarts)
+        }
+
+        func undoManager(for view: NSTextView) -> UndoManager? {
+            model.current.undoManager
         }
 
         func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString text: String?) -> Bool {
             // Keep typing attributes plain after styled lines (headers, comments).
-            textView.typingAttributes = styler.baseAttributes
+            textView.typingAttributes = model.styler.baseAttributes
             return true
         }
     }

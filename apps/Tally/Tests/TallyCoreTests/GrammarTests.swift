@@ -50,7 +50,7 @@ let singleLines: [(String, String)] = [
     ("255 in hex", "0xFF"), ("10 in binary", "0b1010"), ("8 in oct", "0o10"), ("1500 in sci", "1.5e3"),
     ("0xff in dec", "255"), ("2.5 in hex", "err(hex needs a whole number)"),
     // Text and notes
-    ("Tip: 18% of 40", "7.2"), ("\"Dinner\" 40 + 2", "42"), ("40 + 2 // tip", "42"), ("12:30", "—"),
+    ("Tip: 18% of 40", "7.2"), ("\"Dinner\" 40 + 2", "42"), ("40 + 2 // tip", "42"), ("12:30", "12:30 PM"),
     ("3 apples + 2", "—"), ("apples", "—"), ("apples + 2", "err(unknown name “apples”)"),
     ("Groceries 3 + 4", "—"), ("the total is 5", "—"), ("5 +", "—"), ("* 5", "—"), ("()", "—"),
     ("in", "—"), ("km", "—"), ("5 in", "—"), ("what?", "—"), ("Total 1200 + 85", "—"),

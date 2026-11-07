@@ -17,11 +17,14 @@ public struct PhysicalUnit: Hashable, Sendable, CustomStringConvertible {
     let singular: String?
     /// For area/volume made from a length unit (`sq ft`): that unit's id.
     let lengthBase: String?
+    /// `px` and `em` depend on the sheet's pixel density and em size.
+    let css: CSSKind?
 
     public var description: String { id }
 
     init(_ id: String, _ dimension: Dimension, _ factor: String, divisor: String = "1", offset: String = "0",
-         symbol: String? = nil, singular: String? = nil, lengthBase: String? = nil) {
+         symbol: String? = nil, singular: String? = nil, lengthBase: String? = nil, css: CSSKind? = nil) {
+        self.css = css
         self.id = id
         self.dimension = dimension
         self.factor = DecimalMath.decimal(factor)
@@ -41,18 +44,21 @@ public struct PhysicalUnit: Hashable, Sendable, CustomStringConvertible {
         self.symbol = symbol
         self.singular = nil
         self.lengthBase = lengthBase
+        self.css = nil
     }
 
     public static func == (a: PhysicalUnit, b: PhysicalUnit) -> Bool { a.id == b.id }
     public func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
-    func toBase(_ value: Decimal) throws(EvalError) -> Decimal {
+    func toBase(_ value: Decimal, css metrics: CSSMetrics = .standard) throws(EvalError) -> Decimal {
+        if let css { return try DecimalMath.multiply(value, try metrics.metres(per: css)) }
         let shifted = offset.isZero ? value : try DecimalMath.add(value, offset)
         if divisor == 1 { return try DecimalMath.multiply(shifted, factor) }
         return try DecimalMath.divide(try DecimalMath.multiply(shifted, factor), divisor)
     }
 
-    func fromBase(_ base: Decimal) throws(EvalError) -> Decimal {
+    func fromBase(_ base: Decimal, css metrics: CSSMetrics = .standard) throws(EvalError) -> Decimal {
+        if let css { return try DecimalMath.divide(base, try metrics.metres(per: css)) }
         let scaled = divisor == 1
             ? try DecimalMath.divide(base, factor)
             : try DecimalMath.divide(try DecimalMath.multiply(base, divisor), factor)
@@ -66,6 +72,29 @@ public struct PhysicalUnit: Hashable, Sendable, CustomStringConvertible {
     }
 }
 
+/// Screen units whose size depends on settings.
+public enum CSSKind: Hashable, Sendable { case px, em }
+
+/// The pixel density and em size `px` and `em` convert with. Defaults are the web's:
+/// 96 px per inch, 16 px per em. Settings and sheet lines (`ppi = 326`, `em = 20px`) change them.
+public struct CSSMetrics: Hashable, Sendable {
+    public var ppi: Decimal
+    /// Pixels per em.
+    public var em: Decimal
+
+    public init(ppi: Decimal = 96, em: Decimal = 16) {
+        self.ppi = ppi
+        self.em = em
+    }
+
+    public static let standard = CSSMetrics()
+
+    func metres(per kind: CSSKind) throws(EvalError) -> Decimal {
+        let px = try DecimalMath.divide(DecimalMath.decimal("0.0254"), ppi)
+        return kind == .px ? px : try DecimalMath.multiply(px, em)
+    }
+}
+
 /// Every unit Tally knows, and how words map to them. Symbols are case-sensitive
 /// (`m` metre, `M` a scale; `b` bit, `B` byte); spelled-out names aren't.
 public enum Units {
@@ -76,11 +105,23 @@ public enum Units {
         .init("µm", .length, "0.000001"),
         .init("in", .length, "0.0254"), .init("ft", .length, "0.3048"), .init("yd", .length, "0.9144"),
         .init("mi", .length, "1609.344"), .init("nmi", .length, "1852"),
+        .init("pt", .length, "0.0254", divisor: "72"),
+        .init("mil", .length, "0.0000254"), .init("hand", .length, "0.1016", symbol: "hands", singular: "hand"),
+        .init("rod", .length, "5.0292", symbol: "rods", singular: "rod"),
+        .init("chain", .length, "20.1168", symbol: "chains", singular: "chain"),
+        .init("furlong", .length, "201.168", symbol: "furlongs", singular: "furlong"),
+        .init("cable", .length, "185.2", symbol: "cables", singular: "cable"),
+        .init("league", .length, "4828.032", symbol: "leagues", singular: "league"),
+    ]
+    /// `px` and `em`: lengths whose size comes from `CSSMetrics`. No squares or cubes.
+    static let css: [PhysicalUnit] = [
+        .init("px", .length, "1", css: .px), .init("em", .length, "1", css: .em),
     ]
     static let mass: [PhysicalUnit] = [
         .init("mg", .mass, "0.001"), .init("g", .mass, "1"), .init("kg", .mass, "1000"),
         .init("t", .mass, "1000000"), .init("oz", .mass, "28.349523125"), .init("lb", .mass, "453.59237"),
-        .init("st", .mass, "6350.29318"),
+        .init("st", .mass, "6350.29318"), .init("ct", .mass, "0.2"),
+        .init("centner", .mass, "100000", symbol: "centners", singular: "centner"),
     ]
     static let data: [PhysicalUnit] = [
         .init("bit", .data, "1", symbol: "bits", singular: "bit"), .init("B", .data, "8"),
@@ -97,6 +138,8 @@ public enum Units {
         .init("week", .time, "604800", symbol: "weeks", singular: "week"),
         .init("month", .time, "2628000", symbol: "months", singular: "month"),
         .init("year", .time, "31536000", symbol: "years", singular: "year"),
+        .init("decade", .time, "315360000", symbol: "decades", singular: "decade"),
+        .init("century", .time, "3153600000", symbol: "centuries", singular: "century"),
     ]
     static let temperature: [PhysicalUnit] = [
         .init("°C", .temperature, "1", offset: "273.15"),
@@ -108,7 +151,7 @@ public enum Units {
         .init("rad", .angle, "1"),
     ]
     static let otherArea: [PhysicalUnit] = [
-        .init("ha", .area, "10000"), .init("acre", .area, "4046.8564224", symbol: "acres", singular: "acre"),
+        .init("ha", .area, "10000"), .init("are", .area, "100", symbol: "ares", singular: "are"), .init("acre", .area, "4046.8564224", symbol: "acres", singular: "acre"),
     ]
     static let otherVolume: [PhysicalUnit] = [
         .init("L", .volume, "1"), .init("mL", .volume, "0.001"), .init("cL", .volume, "0.01"),
@@ -132,7 +175,7 @@ public enum Units {
                             symbol: "\(unit.symbol)³", lengthBase: unit.id)
     }
 
-    static let all: [PhysicalUnit] = length + mass + data + time + temperature + angle + otherArea + otherVolume + squares + cubes
+    static let all: [PhysicalUnit] = length + css + mass + data + time + temperature + angle + otherArea + otherVolume + squares + cubes
     static let byID: [String: PhysicalUnit] = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
 
     public static func unit(id: String) -> PhysicalUnit? { byID[id] }
@@ -154,7 +197,8 @@ public enum Units {
         "m²": "sq m", "cm²": "sq cm", "mm²": "sq mm", "km²": "sq km", "ft²": "sq ft", "in²": "sq in",
         "yd²": "sq yd", "mi²": "sq mi",
         "m³": "cu m", "cm³": "cu cm", "mm³": "cu mm", "ft³": "cu ft", "in³": "cu in", "yd³": "cu yd",
-        "cc": "cu cm",
+        "cc": "cu cm", "sqm": "sq m", "sqft": "sq ft", "sqkm": "sq km", "cbm": "cu m", "cbft": "cu ft",
+        "pt": "pt", "px": "px", "em": "em", "rem": "em", "ct": "ct",
     ]
 
     /// Spelled-out names, matched case-insensitively.
@@ -172,6 +216,20 @@ public enum Units {
         add("yd", "yard", "yards")
         add("mi", "mile", "miles")
         add("nmi", "nautical mile", "nautical miles")
+        add("pt", "point", "points")
+        add("px", "pixel", "pixels")
+        add("mil", "mil", "mils", "thou")
+        add("hand", "hand", "hands")
+        add("rod", "rod", "rods")
+        add("chain", "chain", "chains")
+        add("furlong", "furlong", "furlongs")
+        add("cable", "cable", "cables")
+        add("league", "league", "leagues")
+        add("ct", "carat", "carats")
+        add("centner", "centner", "centners")
+        add("are", "are", "ares")
+        add("decade", "decade", "decades")
+        add("century", "century", "centuries")
         add("mg", "milligram", "milligrams")
         add("g", "gram", "grams", "gramme", "grammes")
         add("kg", "kilogram", "kilograms", "kilo", "kilos")
@@ -250,5 +308,23 @@ public enum Units {
         case 3: return byID["cu \(length.id)"]
         default: return nil
         }
+    }
+
+    /// Compound units written as one word: `mph`, `kph`, `knots`, `Mbps`.
+    static let rateAliases: [String: RateUnit] = {
+        func rate(_ num: String, _ den: String, _ alias: String?) -> RateUnit {
+            RateUnit(.unit(byID[num]!), per: byID[den]!, alias: alias)
+        }
+        let mph = rate("mi", "h", "mph"), kph = rate("km", "h", nil), knots = rate("nmi", "h", "knots")
+        return [
+            "mph": mph, "kph": kph, "kmh": kph, "kmph": kph, "knot": knots, "knots": knots, "kn": knots,
+            "kbps": rate("kb", "s", nil), "Mbps": rate("Mb", "s", nil), "Gbps": rate("Gb", "s", nil),
+            "mps": rate("m", "s", nil),
+        ]
+    }()
+
+    /// A one-word compound unit.
+    static func rateAlias(_ word: String) -> RateUnit? {
+        rateAliases[word]
     }
 }
