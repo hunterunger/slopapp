@@ -1,5 +1,5 @@
-:HL["/slopapp/_next/static/chunks/34egkhp8_lomj.css","style"]
+:HL["/slopapp/_next/static/chunks/32h06o0_93amu.css","style"]
 :HL["/slopapp/_next/static/media/07c7676b89ed2778-s.p.2bn3s6zvc0dyp.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/slopapp/_next/static/media/8056169c9d560660-s.p.41rroleoq1br7.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 1:[["children",{"s":"__PAGE__","h":160}]]
-0:{"b":"Cs0i_jaTj70ZiW6lwAaaK","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
+0:{"b":"cOmnfc9vc6XNwtBxAP_jD","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
