@@ -1,4 +1,4 @@
 :HL["/slopapp/_next/static/chunks/32h06o0_93amu.css","style"]
 2:[["children",{"s":"__PAGE__","h":160}]]
 1:[["children",{"s":"/_not-found","h":96,"c":"$Q2"}]]
-0:{"b":"FwDa3eepLBqFHN0Bg-oUs","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
+0:{"b":"f9lVCGnFUQPfT3MFzVkA8","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
