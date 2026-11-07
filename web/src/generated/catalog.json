@@ -131,6 +131,27 @@
       "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/clips-v0.2.0/Clips.zip"
     },
     {
+      "slug": "dictate",
+      "name": "Dictate",
+      "tagline": "Talk, and your words appear wherever you're typing.",
+      "replaces": [
+        "Superwhisper",
+        "Wispr Flow"
+      ],
+      "category": "Productivity",
+      "icon": "audio-lines",
+      "size": "L",
+      "menuBarOnly": true,
+      "priority": 1,
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.dictate",
+      "dir": "apps/Dictate",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/dictate-v0.1.0/Dictate.zip"
+    },
+    {
       "slug": "squish",
       "name": "Squish",
       "tagline": "Drop in images and PDFs, get smaller files out.",
@@ -589,36 +610,6 @@
       "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/paper-v0.1.0/Paper.zip"
     },
     {
-      "slug": "dual",
-      "name": "Dual",
-      "tagline": "A two-pane file manager with remote servers.",
-      "replaces": [
-        "ForkLift"
-      ],
-      "category": "Utilities",
-      "icon": "folder-tree",
-      "size": "L",
-      "menuBarOnly": false,
-      "favourite": true,
-      "priority": 3,
-      "status": "planned"
-    },
-    {
-      "slug": "commit",
-      "name": "Commit",
-      "tagline": "A calm Git client.",
-      "replaces": [
-        "Gitfox"
-      ],
-      "category": "Developer",
-      "icon": "git-branch",
-      "size": "L",
-      "menuBarOnly": false,
-      "favourite": true,
-      "priority": 3,
-      "status": "planned"
-    },
-    {
       "slug": "awake",
       "name": "Awake",
       "tagline": "Keep your Mac awake, from the menu bar.",
@@ -714,19 +705,25 @@
       "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/devkit-v0.1.0/Devkit.zip"
     },
     {
-      "slug": "snip",
-      "name": "Snip",
-      "tagline": "Copy text from anything on your screen.",
+      "slug": "commit",
+      "name": "Commit",
+      "tagline": "A calm Git client.",
       "replaces": [
-        "TextSniper"
+        "Gitfox"
       ],
-      "category": "Utilities",
-      "icon": "scan-text",
-      "size": "M",
-      "menuBarOnly": true,
+      "category": "Developer",
+      "icon": "git-branch",
+      "size": "L",
+      "menuBarOnly": false,
+      "favourite": true,
       "priority": 3,
-      "favourite": false,
-      "status": "planned"
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.commit",
+      "dir": "apps/Commit",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/commit-v0.1.0/Commit.zip"
     },
     {
       "slug": "gauge",
@@ -737,6 +734,82 @@
       ],
       "category": "Utilities",
       "icon": "gauge",
+      "size": "M",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "tuck",
+      "name": "Tuck",
+      "tagline": "Tuck menu bar icons out of sight.",
+      "replaces": [
+        "Bartender"
+      ],
+      "category": "Utilities",
+      "icon": "panel-top-close",
+      "size": "L",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "triggers",
+      "name": "Triggers",
+      "tagline": "Your own gestures, shortcuts and actions.",
+      "replaces": [
+        "BetterTouchTool"
+      ],
+      "category": "Utilities",
+      "icon": "pointer",
+      "size": "L",
+      "menuBarOnly": true,
+      "priority": 3,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "shorthand",
+      "name": "Shorthand",
+      "tagline": "Type a few letters, get the whole thing.",
+      "replaces": [
+        "TextExpander",
+        "Rocket Typist"
+      ],
+      "category": "Productivity",
+      "icon": "text-cursor-input",
+      "size": "M",
+      "menuBarOnly": true,
+      "priority": 4,
+      "favourite": false,
+      "status": "planned"
+    },
+    {
+      "slug": "dual",
+      "name": "Dual",
+      "tagline": "A two-pane file manager with remote servers.",
+      "replaces": [
+        "ForkLift"
+      ],
+      "category": "Utilities",
+      "icon": "folder-tree",
+      "size": "L",
+      "menuBarOnly": false,
+      "favourite": true,
+      "priority": 3,
+      "status": "planned"
+    },
+    {
+      "slug": "snip",
+      "name": "Snip",
+      "tagline": "Copy text from anything on your screen.",
+      "replaces": [
+        "TextSniper"
+      ],
+      "category": "Utilities",
+      "icon": "scan-text",
       "size": "M",
       "menuBarOnly": true,
       "priority": 3,

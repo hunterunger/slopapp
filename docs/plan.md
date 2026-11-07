@@ -74,6 +74,22 @@ Cheaper once phase 3's shared components exist.
   Shelf, Margin, Hours, Twins, Glance, Seek, Switches, Quit.
 - Awake predates the dev cycle: give it a research pass and blind test when there's time.
 
+## Owner's picks (2026-11-07)
+
+The owner trimmed the later list. In order:
+
+1. **Commit** (Gitfox): the one they're most excited about. v1 with a simple branch graph,
+   unified diff only. Research: [`research/commit.md`](research/commit.md).
+2. **Dictate**: the owner's own Better Transcriber, moved into Slopapp (old repo archived
+   after the switch-over).
+3. Eventually: **Gauge** (iStat Menus), **Tuck** (Bartender), **Triggers** (BetterTouchTool).
+4. Lower priority: a **disk map in Tidy** (DaisyDisk / GrandPerspective: a visual map of
+   what fills the disk, reusing Tidy's scan) and **Shorthand** (TextExpander / Rocket Typist).
+
+Skipped: video downloaders (owner wants no legal risk), Safari extensions and proxies.
+The remaining P3 apps (Snip, Tiles, Switches, Quit, Shelf, Margin, Hours, Twins, Glance,
+Seek, Dual) are on hold; most can be skipped.
+
 ## Running alongside every phase
 
 - **Suite review every ~3 apps.** Use the apps side by side, update the design system,
