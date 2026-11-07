@@ -3,108 +3,28 @@ import DropperCore
 import SlopKit
 import SwiftUI
 
-// Archetype: menu bar utility (docs/design-system.md 2a), plus a small Contrast Checker window.
+// Archetype: menu bar utility with a rich panel (docs/design-system.md 2a), plus the
+// Library window, the Contrast Checker and the precise loupe overlay. The parity pass
+// (docs/parity-pass.md) follows the original's layout: split status icon, a panel with a
+// toolbar, format selector, history and palettes, and a bottom bar.
 
 @main
 struct DropperApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @AppStorage(MenuBarIcon.storageKey) private var showMenuBarIcon = true
     @State private var controller = AppController.shared
-    private let info = AppInfo.current(fallbackName: "Dropper")
 
     var body: some Scene {
-        MenuBarExtra(isInserted: $showMenuBarIcon) {
-            DropperMenu(controller: controller, model: controller.model)
-            MenuFooter(info: info)
-        } label: {
-            Image(systemName: controller.model.isPicking ? "eyedropper.full" : "eyedropper")
-                .accessibilityLabel("Dropper")
+        // Never inserted: the real status item is StatusItemController's (it needs a split
+        // click and a panel that opens from code). Without a non-window scene first, SwiftUI
+        // would open Settings at launch.
+        MenuBarExtra("Dropper", systemImage: "eyedropper", isInserted: .constant(false)) {
+            EmptyView()
         }
-        .menuBarExtraStyle(.menu)
 
         Settings {
-            SettingsView(model: controller.model, info: info)
+            SettingsView(controller: controller, model: controller.model, settings: controller.settings)
         }
         .commands { DropperCommands(controller: controller) }
-    }
-}
-
-/// Pick → last color in every format → recent colors → options → footer.
-struct DropperMenu: View {
-    let controller: AppController
-    @Bindable var model: DropperModel
-
-    var body: some View {
-        Button("Pick Color") { controller.pickAndCopy() }
-            .globalShortcut(.pickColor)
-        Button("Contrast Checker…") { controller.showContrastChecker() }
-            .keyboardShortcut("k")
-        Divider()
-
-        if let last = model.history.latest {
-            Section(lastColorHeader(last.color)) {
-                ForEach(ColorFormat.allCases) { format in
-                    Button {
-                        controller.copy(last, as: format)
-                    } label: {
-                        Label {
-                            Text(model.text(for: last.color, as: format))
-                        } icon: {
-                            Image(nsImage: SwatchImage.image(for: last.color))
-                        }
-                    }
-                    .accessibilityLabel("Copy as \(format.title): \(model.text(for: last.color, as: format))")
-                }
-            }
-            let recent = Array(model.history.items.dropFirst().prefix(10))
-            if !recent.isEmpty {
-                Divider()
-                Section("Recent Colors") {
-                    ForEach(recent) { item in
-                        Button {
-                            controller.copy(item)
-                        } label: {
-                            Label {
-                                Text(model.menuTitle(for: item.color))
-                            } icon: {
-                                Image(nsImage: SwatchImage.image(for: item.color))
-                            }
-                        }
-                    }
-                }
-            }
-            Button("Clear History…") { controller.clearHistory() }
-        } else {
-            Text(emptyLine)
-        }
-        if let error = model.historyLoadError {
-            Text(error)
-        }
-        Divider()
-
-        Picker("Copy Format", selection: $model.preferences.format) {
-            ForEach(ColorFormat.allCases) { format in
-                Text(format.title).tag(format)
-            }
-        }
-        Picker("Color Space", selection: $model.preferences.options.space) {
-            ForEach(OutputSpace.allCases) { space in
-                Text(space.title).tag(space)
-            }
-        }
-    }
-
-    private func lastColorHeader(_ color: ColorValue) -> String {
-        let space = model.preferences.options.space
-        if color.isOutside(space) { return "Last Color · outside \(space.title)" }
-        return "Last Color · \(space.title)"
-    }
-
-    private var emptyLine: String {
-        if let shortcut = KeyboardShortcuts.getShortcut(for: .pickColor) {
-            return "No colors yet. Press \(shortcut) to pick one."
-        }
-        return "No colors yet. Choose Pick Color to pick one."
     }
 }
 
@@ -124,19 +44,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let controller = AppController.shared
+        controller.start()
         KeyboardShortcuts.onKeyDown(for: .pickColor) { controller.pickAndCopy() }
+        KeyboardShortcuts.onKeyDown(for: .pickMultiple) { controller.pickMultiple() }
         KeyboardShortcuts.onKeyDown(for: .contrastChecker) { controller.showContrastChecker() }
+        KeyboardShortcuts.onKeyDown(for: .showPanel) { controller.togglePanel() }
+        KeyboardShortcuts.onKeyDown(for: .showLibrary) { controller.showLibrary() }
+        KeyboardShortcuts.onKeyDown(for: .toggleDock) { controller.dock.toggle() }
+        TestScene.showIfRequested()
+        SnapshotRenderer.renderIfRequested(controller)
         if Diagnostics.testHooks { installTestHooks(controller) }
     }
 
     private func installTestHooks(_ controller: AppController) {
         let center = DistributedNotificationCenter.default()
         let prefix = "app.slopapp.dropper.test."
-        center.addObserver(forName: .init(prefix + "pick"), object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { controller.pickAndCopy() }
-        }
-        center.addObserver(forName: .init(prefix + "contrast"), object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { controller.showContrastChecker() }
+        let actions: [String: @MainActor (String?) -> Void] = [
+            "pick": { _ in controller.pickAndCopy() },
+            "multi": { _ in controller.pickMultiple() },
+            "pair": { _ in controller.pickContrastPair() },
+            "contrast": { _ in controller.showContrastChecker() },
+            "panel": { _ in controller.togglePanel() },
+            "library": { _ in controller.showLibrary() },
+            "dock": { _ in controller.dock.toggle() },
+            "export": { raw in
+                let format = raw.flatMap(PaletteFileFormat.init(rawValue:)) ?? .json
+                let palette = controller.model.palettes.first ?? controller.historyAsPalette
+                PaletteFiles.export(palette, as: format, controller: controller)
+            },
+            "import": { path in if let path { PaletteFiles.importFiles([URL(fileURLWithPath: path)], into: controller) } },
+            "jump": { slot in controller.precise.testJump(to: Int(slot ?? "0") ?? 0) },
+        ]
+        for (name, action) in actions {
+            center.addObserver(forName: .init(prefix + name), object: nil, queue: .main) { note in
+                let object = note.object as? String
+                MainActor.assumeIsolated { action(object) }
+            }
         }
     }
 

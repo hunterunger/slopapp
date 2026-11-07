@@ -1,15 +1,29 @@
 import Foundation
 
-/// One color in the history.
+/// One saved color: in the history or in a palette.
 public struct PickedColor: Equatable, Codable, Sendable, Identifiable {
     public var id: UUID
     public var color: ColorValue
+    /// When it was picked or added.
     public var date: Date
+    /// A name the person gave it. nil shows the plain generated name.
+    public var name: String?
+    public var note: String?
+    public var modified: Date?
 
-    public init(id: UUID = UUID(), color: ColorValue, date: Date) {
+    public init(id: UUID = UUID(), color: ColorValue, date: Date, name: String? = nil, note: String? = nil, modified: Date? = nil) {
         self.id = id
         self.color = color
         self.date = date
+        self.name = name
+        self.note = note
+        self.modified = modified
+    }
+
+    /// The person's name for it, or a plain generated one ("Dark Blue").
+    public var displayName: String {
+        if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
+        return ColorNamer.name(for: color)
     }
 }
 
@@ -54,20 +68,41 @@ public struct ColorHistory: Equatable, Sendable {
         items.removeAll { $0.id == id }
     }
 
+    /// Replaces an item's name, note or color (edited in the color editor). A new color
+    /// that's already elsewhere in the history replaces that older copy.
+    public mutating func update(_ item: PickedColor) {
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        items[index] = item
+        items.removeAll { $0.id != item.id && $0.color.identityKey == item.color.identityKey }
+    }
+
     public mutating func clear() {
         items.removeAll()
     }
 }
 
-/// Where the history is kept. Faked in tests.
-public protocol HistoryStore: Sendable {
-    func load() throws -> [PickedColor]
-    func save(_ items: [PickedColor]) throws
+/// Everything Dropper saves: the history, the palettes and which palette new picks join.
+public struct LibraryContents: Equatable, Codable, Sendable {
+    public var history: [PickedColor]
+    public var palettes: [Palette]
+    public var activePaletteID: UUID?
+
+    public init(history: [PickedColor] = [], palettes: [Palette] = [], activePaletteID: UUID? = nil) {
+        self.history = history
+        self.palettes = palettes
+        self.activePaletteID = activePaletteID
+    }
+}
+
+/// Where the library is kept. Faked in tests.
+public protocol LibraryStore: Sendable {
+    func load() throws -> LibraryContents
+    func save(_ contents: LibraryContents) throws
 }
 
 /// `colors.json` in a folder. A file that can't be read is moved aside (never deleted) and the
-/// app starts with an empty history.
-public struct FileHistoryStore: HistoryStore {
+/// app starts empty. Version 1 files (history only) load fine.
+public struct FileLibraryStore: LibraryStore {
     public let fileURL: URL
 
     public init(directory: URL) {
@@ -77,22 +112,27 @@ public struct FileHistoryStore: HistoryStore {
     struct FileContents: Codable {
         var version: Int
         var history: [PickedColor]
+        var palettes: [Palette]?
+        var activePalette: UUID?
     }
 
-    public func load() throws -> [PickedColor] {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
+    public func load() throws -> LibraryContents {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return LibraryContents() }
         do {
             let data = try Data(contentsOf: fileURL)
-            return try Self.decoder.decode(FileContents.self, from: data).history
+            let file = try Self.decoder.decode(FileContents.self, from: data)
+            return LibraryContents(history: file.history, palettes: file.palettes ?? [], activePaletteID: file.activePalette)
         } catch {
             try? moveAside()
             throw error
         }
     }
 
-    public func save(_ items: [PickedColor]) throws {
+    public func save(_ contents: LibraryContents) throws {
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let data = try Self.encoder.encode(FileContents(version: 1, history: items))
+        let file = FileContents(version: 2, history: contents.history, palettes: contents.palettes,
+                                activePalette: contents.activePaletteID)
+        let data = try Self.encoder.encode(file)
         try data.write(to: fileURL, options: .atomic)
     }
 
@@ -118,22 +158,22 @@ public struct FileHistoryStore: HistoryStore {
 }
 
 /// Keeps everything in memory. For tests and previews.
-public final class MemoryHistoryStore: HistoryStore, @unchecked Sendable {
+public final class MemoryLibraryStore: LibraryStore, @unchecked Sendable {
     private let lock = NSLock()
-    private var stored: [PickedColor]
+    private var stored: LibraryContents
     public private(set) var saveCount = 0
 
-    public init(_ items: [PickedColor] = []) {
-        stored = items
+    public init(_ history: [PickedColor] = [], palettes: [Palette] = []) {
+        stored = LibraryContents(history: history, palettes: palettes)
     }
 
-    public func load() throws -> [PickedColor] {
+    public func load() throws -> LibraryContents {
         lock.withLock { stored }
     }
 
-    public func save(_ items: [PickedColor]) throws {
+    public func save(_ contents: LibraryContents) throws {
         lock.withLock {
-            stored = items
+            stored = contents
             saveCount += 1
         }
     }

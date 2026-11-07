@@ -551,3 +551,346 @@ results, and finishing it to `hsl(220, 60%, 50%)` restored them. Screenshots:
 `/tmp/dropper-test/r1-offer.png`, `/tmp/dropper-test/r1-invalid.png`.
 
 Shipped as **0.2.0, status beta** (`app.json` build 2).
+
+## Parity pass (2026-11-03)
+
+Owner direction (docs/parity-pass.md): look and work much more like Sip, and don't miss
+features. Studied from Sip's help center pages and their official screenshots (downloaded
+to `/tmp/dropper-parity/`, not committed): the status panel (toolbar, format control,
+palette list, palette detail, bottom bar), the main window (three columns with the Color
+Panel editor), the picker loupe and its ⌘ mode menu, the Contrast Checker (pass, fail,
+fix, edit), the Color Dock, the formats menu and Shortcuts. Sip itself was not launched
+this time (its panel ignores Accessibility presses, and the earlier walk already covered
+Settings).
+
+### What Sip looks like (layout only; nothing copied)
+
+- **Status panel**, ~350 pt wide, under the icon: a row of four toolbar icons (picker,
+  contrast, +, color panel), a full-width format dropdown, a white card listing "Color
+  History" as a long color strip and then each palette as a radio + name + color strip;
+  clicking a palette opens it as a list of round swatches with name and hex (••• on
+  hover); a bottom bar with settings, color-blindness menu, main window, quit.
+- **Main window**: sidebar of palette strips, a middle list of colors, and the Color Panel
+  on the right: name, a saturation/brightness square, hue and opacity sliders, a big
+  swatch, HEX + RGB/HSB/HSL + alpha fields, notes, created/modified, and export /
+  duplicate / delete.
+- **Picker**: a round magnifier with a pixel grid, the center pixel boxed, and a pill
+  inside the circle with a swatch and the hex; holding ⌘ shows a mode menu (pick one,
+  multiple, check contrast).
+- **Contrast Checker**: a card whose top half is filled with the background color and
+  shows the verdict ("AAA"/"Fail") and a sentence in the text color, with the ratio in a
+  pill; below, a column per color: swatch, hex field with an eyedropper, a Fix button, and
+  hue/saturation/brightness sliders, a swap arrow between; "Create Palette" at the bottom.
+- **Color Dock**: a slim vertical strip on a screen edge, one segmented bar per palette;
+  hovering one shows its colors in a flyout with "Palette / Color" and •••.
+
+### Gap table
+
+| Item (Sip) | Before | Now | Notes |
+|---|---|---|---|
+| Split status icon (pick / panel), filled with last color | single icon, `.menu` | **done** | Eyedropper half picks, arrow opens the panel; right-click or an AX press opens the panel. Dot of the last color (setting, on). Single-icon style in Settings. |
+| Status panel: toolbar, format selector, history strip, palettes, bottom bar | `.menu` | **done** | AppKit status item + anchored glass panel (`StatusItem.swift`, `PanelView.swift`). |
+| Palettes (create, name, notes, add by picking while selected, radio) | – | **done** | `Palette`, model ops, active palette ("New picks go here"). |
+| Palette actions: rename, duplicate, export, delete, lock, merge, sort | – | **done** | Sort by hue / lightness / name / date added. |
+| Delete duplicated colors | – | n/a | Our palettes never hold duplicates (same rule Sip states). |
+| Reorder palettes / colors, drag between palettes, ⌥-drag copies | – | **done (mostly)** | Library: drag to reorder palettes and colors; dragging a color onto a palette adds a copy (text drag, so colors from other apps work too). Moving (vs copying) between palettes: deferred (S). |
+| Group colors inside a palette | – | deferred (M) | Needs a nested model + UI; rare in daily flow. |
+| Main window (3 columns) | – | **done** | Library window, `LibraryWindow.swift`. |
+| Color Panel editor: name, SB square, hue slider, HEX, RGB/HSB/HSL fields, notes, info | – | **done** | `ColorEditor.swift`; also lists every format with copy buttons (replaces the old menu's "every format" list). Replace with a new pick. |
+| Opacity slider / alpha | – | deferred (M) | Our colors are opaque picks; alpha touches every format, parser and contrast. |
+| Duplicate color | – | n/a | Palettes can't hold duplicates; "Add to Palette" / "New Palette with This Color" cover it. |
+| Export single color | – | covered | Copy As every format; palette export. |
+| Picker loupe with grid, center box and value | system loupe only | **done** (opt-in) | `PrecisePicker.swift` on SlopKit `ScreenCaptureService` + `BadgeLayer`; value in the copy format. |
+| Arrow nudge 1 px / ⇧ 10 px | – | **done** | Moves by physical pixels in the frozen image; the real pointer is hidden, never warped. |
+| Size + / −, zoom ⌥+ / ⌥−, two-finger swipe | – | **done** | Plus Settings › Picker steppers; remembered. |
+| Pick multiple colors | – | **done** | Panel eyedropper menu, Color menu, optional global shortcut; copies all values. Works with both pickers. |
+| Check contrast from the picker | – | **done** | "Pick Contrast Pair". Sip's hold-⌘ menu inside the picker: not copied (explicit items instead; see decisions). |
+| Formats: Android (ARGB, RGB, XML), CGColor, CSS (HSLA, RGBA, CMYK, HWB), Java, .NET, NSColor/UIColor HSB, OpenGL, Swift variants | 8 formats | **done (31)** | Plus OKLCH, Lab, LCH, Display P3, Compose, Flutter, Objective-C. Android RGB (`#RRGGBB`) is the same as Hex, so not repeated. CGColor CMYK: skipped (CMYK has no meaningful screen conversion; CSS CMYK covers the number). |
+| Enable / disable formats | – | **done** | Settings › Formats with a live example per format. |
+| Format options (caps, #, whitespace) | caps, # | same | Whitespace option: not needed (our formats have one canonical spacing). |
+| Custom format templates | – | deferred (M) | Template language + editor + import/export. |
+| Smart Formats (per-app format) | – | **done** | Settings › Formats: off by default; turning it on suggests Xcode → SwiftUI, VS Code → Hex, Android Studio → Compose (installed ones only); add any running app. Follows the last app you worked in, so picking from Dropper's own panel still uses it. The HUD says which app's format was used. |
+| Smart Profiles | – | skip | Correct conversion makes it unnecessary (decision unchanged). |
+| Contrast Checker look (verdict header in the colors, columns, sliders, swap) | form | **done** | `ContrastView.swift`. Kept our full WCAG breakdown below it. |
+| Contrast Fix | – | **done** | `ContrastFixer`: OKLCH lightness search to the next level (AA, then AAA), gamut-mapped; says so when impossible. |
+| Create Palette from the checker | – | **done** | "Save as Palette". |
+| Import / export palettes: Sip, ASE, CLR, JSON, PDF | – | **done** | ASE, CLR, GPL, our JSON, CSS variables, PDF swatch sheet (export only); import also scans any text for colors. Sip's own palette format: can't read (undocumented, proprietary). |
+| Open .ase/.clr from Finder (document types) | – | deferred (S) | Registering document types changes LaunchServices handlers on the owner's Mac; not during an unattended pass. |
+| Color Dock | – | **done** | `ColorDock.swift`: palettes opt in, snaps to any edge, hover/click flyout, click copies, drag out, ••• actions, show/hide shortcut. |
+| Color blindness simulation | – | **done** | Panel bottom bar; 4 deficiencies (Machado et al. 2009) applied to every swatch. |
+| Sounds | – | **done (off)** | Setting "Play a sound when a color is copied" uses the system "Pop" sound. |
+| Color names | – | **done** | Our own small OKLCH-based namer ("Dark Blue", "Pale Pink"); editable per color. |
+| Shortcuts: open picker, contrast, status menu, main window, color panel, dock | 2 | **done** | Pick, pick multiple, contrast, show panel, open Library, toggle dock. "Get primary/secondary color" from design apps: skip (Automation per app). |
+| Send to app (plugins) | – | skip | Automation permission per app, brittle (decision unchanged). |
+| URL scheme | – | deferred (S) | Same LaunchServices concern as document types. |
+| Cloud sync, snapshots, licensing, onboarding | – | skip | No accounts/network; one small JSON file. |
+| Appearance theme (Auto/Light/Dark) | – | skip | Follows the system. |
+
+### Decisions (parity pass)
+
+1. **Menu bar UI is now a panel, not a `.menu`.** Matching Sip's panel layout is the
+   point of the pass. Everything the old menu offered is still one step away: Copy As
+   (every format) in each color's ••• and context menu, the editor's values list, and the
+   main-menu Color menu.
+2. **Split icon by default**, like Sip's default "Extended" icon; an Accessibility press
+   (VoiceOver, scripts) always opens the panel, so the pick-on-click half never surprises
+   assistive tech.
+3. **System magnifier stays the default picker.** The loupe needs Screen Recording; the
+   first pick should work with no prompt. Settings › Picker turns the loupe on and shows
+   the permission state; without permission picks fall back to the system magnifier with
+   a one-line note.
+4. **No hold-⌘ mode menu inside the picker.** Multi-pick and contrast-pair are explicit
+   commands (panel eyedropper menu, Color menu, shortcuts) so they also work with the
+   system magnifier.
+5. **Clicking a palette opens it; clicking a color copies it** (panel). In the Library a
+   click selects and double-click copies, as in other Mac list windows.
+6. **Palettes never hold duplicates; history keeps 100.** Same rules as Sip's docs.
+7. **Fix changes lightness only** (OKLCH), so the hue the designer chose stays; it aims
+   at AA first and AAA once AA passes.
+8. **Platform formats stay sRGB in P3 mode** (Android, Flutter, .NET, Java, HSB code):
+   those APIs interpret numbers as sRGB.
+9. **Color Dock shows only palettes you add**, so nothing appears on screen until asked.
+
+### Deviations from the design system
+
+- **Custom status item + panel** instead of `MenuBarExtra(.menu)` + `MenuFooter`: the
+  panel's bottom bar has Settings, Library and Quit (About lives in Settings › About).
+- **Colored menu bar icon**: when "Show the last color" is on, the icon is a non-template
+  image with a color dot; the eyedropper glyph is still drawn in the menu bar's label color.
+- **Colored UI surfaces**: the Contrast Checker header is filled with the user's background
+  color and its text uses the text color; the Color Dock floats over other windows on
+  every Space. Both are the feature itself.
+- **Fixed-size type** in the checker's verdict (52 pt) to match the original's poster-like
+  verdict; everything else uses text styles.
+- **Optional sound** (system "Pop"), off by default.
+
+### Shared components built in-app (candidates for SlopKit)
+
+- `Material.view(wrapping:cornerRadius:)` (StatusItem.swift): SlopKit's `FloatingPanel`
+  has the same helper internally; making it public would remove this copy.
+- `GradientSlider` (ColorViews.swift): accessible gradient-track slider.
+- `ColorHUD` (unchanged): HUD with custom content.
+- `SnapshotRenderer`: offscreen PNG rendering of views for locked-screen/CI layout checks.
+
+### Gates (parity pass)
+
+- `scripts/check.sh Dropper`: **PASS** (101 tests in 17 suites; release bundle; smoke).
+  New tests: 31 formats incl. CSS reference values for OKLCH/Lab, names, contrast Fix,
+  color vision, palette rules, library model (active palette, lock, merge, import names,
+  multi-pick, contrast pair, per-app formats, dock flag), v1/v2 file compatibility, ASE /
+  JSON / GPL / CSS / text codecs, loupe geometry and pixel nudging, dock snapping.
+- Verified through the real app without the screen (test hooks + offscreen rendering):
+  export of every format (JSON, ASE, CLR, GPL, CSS, PDF) to `/tmp/dropper-test/export`,
+  re-import of ASE, CLR, GPL and a CSS token file with exact hex values and names;
+  offscreen renders of the panel (root and opened palette), Contrast Checker, editor,
+  Library, Color Dock strip and flyout, Settings, light and dark
+  (`DROPPER_RENDER_DIR`, files in `/tmp/dropper-test/render/`, PDF page in
+  `/tmp/dropper-test/shots/brand-pdf.png`).
+- **Not run yet: needs an unlocked screen.** The Mac was locked (display asleep, owner
+  away) for the whole session after the build, so macOS hides windows from Accessibility
+  and screen capture: the `scripts/drive` walkthrough on `build/Dropper.app`, the
+  `[unlabeled]` tree check, on-screen screenshots, the precise loupe against the test
+  scene (`DROPPER_TEST_SCENE=1`, launched `--direct`), and real mouse checks (split icon
+  click, drag reorder, Color Dock drag). `scripts/perf.sh` was also not run: it quits
+  every running Dropper, and a Dropper I didn't start (pid 10334, launched normally from
+  build/Dropper.app at 16:45, likely the owner's) was running.
+
+## Polish pass (2026-11-05)
+
+Brief: `docs/polish-pass.md`. Every surface shot with `scripts/drive shot` on the stamped release
+build, light and dark (`SLOP_APPEARANCE`), on test data only (`DROPPER_DATA_DIR` fixture with 14
+history colours and 5 palettes: one with a very long name, one empty, one locked, one of 60
+colours; `DROPPER_DEFAULTS` suite, `DROPPER_PASTEBOARD` private pasteboard, `DROPPER_FAKE_PICKS`,
+`DROPPER_EXPORT_DIR`). The loupe was shot over the app's own test scene (`DROPPER_TEST_SCENE=1`,
+launched `--direct`), whose capture contains only that window. No `shot --screen`, no real
+clipboard writes, no real mouse, no global keys. Screenshots: `/tmp/slopapp-polish/dropper/`
+(`final/` = after, `render-before/` + `before-*.png` = before, `loupe/` = loupe sizes).
+
+### Defects found and fixed (before → after)
+
+**Crash**
+- Opening the Contrast Checker crashed the app (AppKit "update constraints" exception, three
+  crash reports today). Cause: SlopKit's `Hairline` is 1 pt tall until the window reaches a
+  Retina screen, then 0.5 pt; in this self-sizing window (`preferredContentSize`) that resized
+  the window mid-layout. → The hairline sits in a fixed 1 pt slot. Opens every time now.
+
+**Lint** (`scripts/lint.sh Dropper`): 23 corner literals, 2 colour hits, 17 spacing warnings → 0 / 0 / 0.
+The two colour hits were the SwiftUI/UIKit *code text* Dropper copies (`"Color(red: …)"`),
+marked `lint:allow`; the PDF sheet's 40 pt page margin is `lint:allow`.
+
+**Menu bar panel**
+- Panel radius 14 (literal) → `Radius.xl` 16 (measured 15.4 on the glass edge).
+- Card radius 12, padding 8; rows' hover shape 10 at 4 pt padding; strips 8 → card `Radius.xl`,
+  card padding 4, row hover `nested(16, 4)` = 12, row padding 4, strips `nested(12, 4)` = 8. All
+  four curves concentric; strips 16 pt from the panel edge on both sides (measured 16.0/16.0).
+- Format menu: 192 pt wide, floating centred → full width of the card (8–312 pt, measured).
+- Toolbar icons 3.5 pt right of centre (the pick menu's arrow) and uneven gaps (27.5 vs 20 pt)
+  → arrow hidden (hold still opens the menu, as the tooltip says; also in the Color menu);
+  centred.
+- Bottom bar icons at 17 pt vs strips at 20 pt → both at 16 pt (`contentInset`).
+- Card height was an estimate: up to ~40 pt of blank card under a short palette → measured
+  content height (estimate only before the first measure), so the card hugs its rows.
+- Color History row had no hover state and its ••• was full strength while the palettes' were
+  at 35 % → same row style for both (hover fill, ••• 45 % at rest, full on hover).
+- "Empty" strip label `.tertiary` (≈1.9:1) → `.secondary`.
+- List-detail header ••• trailing 4 pt vs rows' 8 pt → 8 pt; header leading matches swatches.
+
+**Swatches everywhere**: 1 pt `primary.opacity` strokes (blurry, doubled on dark) → one device
+pixel edge (`hairlineBorder`) on strips, round swatches, gradient tracks, dock bars, flyout
+swatches. Small swatches 6/7 pt → `Radius.xs`, or nested in their container.
+
+**Library window**
+- Sidebar strip inset from the selection 6 pt at the sides, 8 pt below, radius 8 inside an
+  8 pt selection → 2 pt side padding makes it an even 8/8 (measured), strip `Radius.xs`.
+- Window title stuck on the fixed "Dropper Library" (or "Untitled") until the selection changed
+  → starts as the selected list's name ("Color History – 14 colors").
+- Export menu in the info forms drew as plain text + round arrow, lighter and lower than the
+  bordered Duplicate/Delete buttons → a bordered Export button that opens the formats in a menu
+  under it (`ExportMenuButton.swift`). Same height as its neighbours.
+- Explanations as separate caption rows ("A locked palette can't…", "Every pick lands here…")
+  → subtitles of their control. Counts use monospaced digits.
+- Sidebar + / import buttons at 10 pt vs row text at 18 pt → aligned to 18 pt.
+- Form strips radius 8 inside sections ~10 pt in → `Radius.s` (inset ≈ section radius, so
+  the shape's own token).
+
+**Color editor**
+- Hex field 7 pt higher than the R/G/B fields (caption vs menu heights) → one grid, both rows
+  aligned (fields 790–842 px, measured).
+- Values: names in a fixed 112 pt column ("NSColor (Objective-C)", "Unit RGBA (OpenGL)" wrapped)
+  and values ran into the copy buttons → a grid sized to the longest name, values wrap in their
+  own column.
+- Saturation/brightness square radius 10 literal + 1 pt stroke → `Radius.l` + device-pixel edge.
+- Channel label gap 2 pt → 4 pt, fields 8 pt apart.
+
+**Contrast Checker**
+- 32 pt of blank window under the footer (content ignored the title-bar safe area but the window
+  still added it) → `safeAreaRegions = []`; footer 20 pt from the bottom (measured).
+- Swap button nudged with a 30 pt literal → same caption + row slot as the columns, centred on
+  the fields (measured).
+- Swatch 26, field 25, Fix 23.5 pt tall in one row → all 24 pt.
+- Ratio pill 12 pt from the top, 16 pt from the right, radius 10 → 8/8 with radius
+  `nested(16, 8)` concentric with the window corner (`windowConcentric` itself feeds back into
+  this self-sizing window, so the macOS 26 title-bar-window radius is used).
+- "Not a color" plain `.red` → `.textRed`; "–" cells `.tertiary` → `.secondary`; 1 pt `Divider`
+  → hairline; offer swatches → `Radius.xs`.
+
+**Color Dock and flyout**
+- Dock 29 pt wide although laid out for 26 (the grip glyph's 13 pt width pushed it), radius 9
+  around 12 pt capsule bars 7 pt in → 28 pt wide (measured), bars 8 pt in on every side, dock
+  ends radius 14 = bar radius 6 + 8 (concentric).
+- Flyout radius 12 with 12 pt padding and 6 pt swatch radius → flyout `Radius.xl`, swatches
+  `nested(16, 12)` = 4; insets 12/12.5 measured.
+
+**HUD**: radius 14, padding 12 × 16 with a 7 pt swatch in the corner → `Radius.xl`, even 12 pt
+padding, swatch `nested(16, 12)`.
+
+**Loupe**
+- Grid lines 1 pt → one device pixel; pill swatch edge 1 pt → one device pixel.
+- "Fits inside" was `width ≤ 0.8 × diameter`, which let a long readout's round ends cross the
+  ring → checks both capsule ends against the circle (ring + 4 pt clearance). Shot at 104, 136,
+  168, 208 and 256 pt: inside from 136 pt for hex, under the loupe at 104 pt.
+- Prompt badge 10 pt above → `Spacing.s`.
+
+**Settings**: every explanation row (colour space, menu bar icon, Color Dock, picker engine,
+copy format, loupe keys) → subtitle or section footer. Loupe Size and Zoom steppers were 24 pt
+apart horizontally ("168 pt" vs "6×") → value slot of one width, steppers aligned.
+
+**Errors**: export failure showed Cocoa's "The folder “Brand.json” doesn't exist." → "Couldn't
+export “Brand”" + "The folder “export” is missing or can't be written to. Export again and
+choose another folder." (verified by exporting into a missing `DROPPER_EXPORT_DIR`; then a real
+ASE export to the test folder).
+
+### Checked and fine
+Window buttons 16×16 (Library, Contrast, Settings); Library window radius 17.1 pt; no
+`[unlabeled]` in `drive tree` (panel, dock, Library, alert); toolbar controls in the Library all
+36 pt; Settings tabs light/dark; Screen Recording not granted path in Settings › Picker (gate
+shown); text contrast: secondary text only, status text via `.textRed`.
+
+### Not done, and why
+- **Hover with the real pointer** (panel rows, ColorRow •••, dock flyout): not triggered; the
+  owner or another agent was using the Mac throughout (HID idle mostly 0 s, and someone clicked
+  the test instance's menu bar icon several times). Hover is designed in code (row fill + •••).
+- **Loupe colour accuracy**: over the test scene, `#3366CC` reads exact but `#12AB7F` reads
+  `#0DAC7F` and sRGB red stripes `#FE0100`: the capture is an 8-bit display-space image, and
+  converting back to sRGB moves dark channels a few units. Not a finish issue; worth a look
+  (capture in sRGB or float, or sample the system sampler's way).
+- **Contrast pill radius** uses the measured macOS 26 title-bar-window radius instead of reading
+  it (`windowConcentric` crashes this self-sizing window, see above): about 1 pt off.
+
+### Shared-component notes (SlopKit)
+- `Hairline` changes height with `displayScale`; inside a self-sizing window
+  (`NSHostingController.sizingOptions = .preferredContentSize`) that crashes AppKit on macOS 26.
+  Suggest a fixed 1 pt layout height with the line drawn inside it.
+- `windowConcentric` / `ConcentricRectangle` in the same kind of window also loops; worth a note
+  in `Corners.swift`.
+- `ExportMenuButton` (`ExportMenuButton.swift`): a bordered button that pops an `NSMenu` under
+  itself, for menus inside grouped forms; candidate for SlopKit.
+
+### Gates
+- `scripts/check.sh Dropper --perf`: **PASS** (lint, 101 tests in 17 suites, bundle, smoke, perf:
+  launch 129 ms, first status item 234 ms, idle CPU 0.018 %, footprint 22.9 MB).
+
+### Golden Gate + light/dark (2026-11-06)
+
+Owner: "ensure all the apps are optimized for dark/light mode AND look like they fit in with
+macOS Golden Gate" (macOS 27.2). Checked against design system §4 "Fitting in on macOS 27
+Golden Gate" and §10 items 25–26. Shots, light and dark side by side:
+`/tmp/slopapp-polish/dropper/goldengate/` (`*-light*` / `*-dark*`, `inactive-*`, `loupe-*`,
+`reopen-settings-light.png`). Same test-data rules as above. The owner's `app.slopapp.dropper`
+defaults were backed up first and restored after (window frames had moved); the test suite's
+defaults were deleted.
+
+**Changed**
+- **Inactive windows**: the Library sidebar's "new picks go here" eyedropper stayed accent blue
+  in a background window → `Color.windowAccent(controlActiveState)`, grey when inactive
+  (`inactive-library-*.png`). Same for the panel's active-palette radio. List and sidebar
+  selections, text selection and toggles are the system's and already grey.
+- **Panel card text on glass**: secondary text was vibrant, blended with what's behind the
+  glass instead of the 75 % card under it: 3.2:1 light, 3.1:1 dark on a bare shot (measured
+  on glyph pixels), and it would shift with the backdrop. → solid `controlBackgroundColor` card
+  and label colours resolved for the appearance (`PlainLabelColors` in `PanelView.swift`): dark
+  3.1 → 4.05:1 on the same measure; light is now exactly the system secondary on white (3.95:1,
+  the design system's accepted floor) whatever is behind the panel.
+- **Glass**: Dropper's glass helper (panel, Color Dock, flyout, HUD) sets `style = .regular`
+  explicitly, the text-bearing style that follows the clear/tinted slider and Reduce
+  Transparency. The HUD's private copy of the helper is gone (it uses the same one).
+- **Loupe chrome → `OverlayPalette`**: ring, pixel marker, shadows, grid and the readout were
+  pure white/black (a white readout pill with dark text). Now ink/paper from SlopKit's overlay
+  palette, and the readout matches `BadgeLayer` (dark badge, light text) like the hint badge
+  beside it; same in both modes because it sits on screen content (`loupe-136-light.png`,
+  `loupe-136-dark.png`, `loupe-256-white.png`, shot over the test scene only).
+- **Knobs on colour** (hue/saturation/brightness sliders, the editor's square): pure white ring +
+  black shadow → overlay paper/ink. The square's white→black gradients stay (colour math).
+- **Settings opener**: Dropper's own `SettingsOpener` (and the `onOpenSettingsAvailable`
+  modifier on three views) → `SettingsWindow.open()`. Clean swap; the panel's Settings button
+  opens Settings in both modes.
+- **Hairline**: my fixed 1 pt wrapper around the Contrast Checker's hairline is gone (SlopKit's
+  `Hairline` now lays out 1 pt). Opened and closed the checker 6 times in light and 6 in dark:
+  no crash. The line is one device pixel (px row 894 = 447 pt, `#E6E6E6` on white).
+
+**Checked, no change needed**
+- **Menus are text** (context menus, ••• menus, Copy As, Add to Palette, Export, the Color and
+  Window menus). The only images are colour swatches in Color › Recent Colors: information,
+  kept.
+- **Sidebar**: the system's edge-to-edge `.sidebar` list, no card; rows show colour strips, no
+  symbols to tint. **Toolbar**: the standard unified toolbar.
+- **Inactive shots**: Library, Contrast Checker and Settings each shot while another Dropper
+  window was key, light and dark.
+- **Reopen**: with the icon hidden by macOS (`VisibleCC = 0` on this Mac), `open
+  build/Dropper.app` on the running app opens Settings (SlopKit's reopen; Dropper's panels are
+  `NSPanel`s, so they don't count as visible windows). Reopening again with Settings showing
+  just brings it forward. One instance throughout.
+- **Light/dark**: Library, editor, panel (list and palette pages), Color Dock and flyout,
+  Contrast Checker, HUD, every Settings tab and the export alert shot in both modes. Picked
+  colours are data; the chrome around them is semantic or overlay palette. The PDF swatch sheet
+  stays white on purpose (a printed page).
+- `drive tree`: no `[unlabeled]`.
+
+**Not done**
+- The real clear-glass setting wasn't switched (that's a System Settings change). The panel's
+  readable text now sits on a solid card. The toolbar icons, bottom bar and HUD text sit on
+  regular glass, as SlopKit's `HUD` does.
+- Hover with the real pointer: still owed (same reason as above).
+
+**Gates**: `scripts/check.sh Dropper --perf` **PASS** (lint, 101 tests in 17 suites, bundle,
+smoke, perf: launch 141 ms, first status item 247 ms, idle CPU 0.002 %, footprint 22.9 MB).

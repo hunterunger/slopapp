@@ -15,8 +15,14 @@ import os
 ///   Copied text is a color value, never clipboard content from elsewhere.
 /// - `DROPPER_APPEARANCE=light|dark`: force an appearance (screenshots).
 /// - `DROPPER_TEST_HOOKS=1`: listen for the distributed notifications
-///   `app.slopapp.dropper.test.pick` and `.contrast` so scripts can start a pick without a
-///   global key press.
+///   `app.slopapp.dropper.test.<name>` so scripts can act without global keys or the mouse:
+///   `pick`, `multi`, `pair`, `contrast`, `panel`, `library`, `dock`, `export` (object: a
+///   format like `ase`; exports the first palette), `import` (object: a file
+///   path) and `jump` (object: a test-scene slot 0...5, moves the open precise loupe there).
+/// - `DROPPER_EXPORT_DIR=/tmp/dropper-test/export`: Export writes here without a save panel.
+/// - `DROPPER_TEST_SCENE=1`: show a window of known swatches; the precise loupe then freezes
+///   only that window (everything else is transparent), so tests never capture the screen.
+///   The loupe starts on the scene's first swatch instead of the pointer.
 enum Diagnostics {
     static let logger = Logger(subsystem: "app.slopapp.dropper", category: "dropper")
 
@@ -26,6 +32,8 @@ enum Diagnostics {
     static let pasteboardName = environment["DROPPER_PASTEBOARD"].flatMap { $0.isEmpty ? nil : $0 }
     static let forcedAppearance = environment["DROPPER_APPEARANCE"]
     static let testHooks = environment["DROPPER_TEST_HOOKS"] == "1"
+    static let exportDirectory = environment["DROPPER_EXPORT_DIR"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+    static let testScene = environment["DROPPER_TEST_SCENE"].map { !$0.isEmpty && $0 != "0" } ?? false
     private static let logFile = environment["DROPPER_LOG"].map { URL(fileURLWithPath: $0) }
 
     /// nil when unset. Each entry is a color, or nil for a cancelled pick.

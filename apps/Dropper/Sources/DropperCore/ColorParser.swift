@@ -24,6 +24,12 @@ public enum ColorParser {
             guard let c = channels(parts, alphaAt: 3),
                   let h = hue(c[0]), let sat = percent(c[1]), let l = percent(c[2]) else { return nil }
             return ColorValue(hslToRGB(h: h, s: sat, l: l), in: space)
+        case "oklch":
+            guard let c = channels(parts, alphaAt: 3) else { return nil }
+            let lightness: Double?
+            if c[0].hasSuffix("%") { lightness = Double(c[0].dropLast()).map { $0 / 100 } } else { lightness = Double(c[0]) }
+            guard let l = lightness, (0...1).contains(l), let chroma = Double(c[1]), chroma >= 0, let h = hue(c[2]) else { return nil }
+            return ColorValue(sRGB: ColorMath.sRGB(fromOKLCH: LCh(l: l, c: chroma, h: h)))
         case "color":
             guard parts.first == "display-p3", let c = channels(Array(parts.dropFirst()), alphaAt: 3) else { return nil }
             let values = c.compactMap { component($0, scale: 1) }
@@ -70,7 +76,7 @@ public enum ColorParser {
         return wrapped < 0 ? wrapped + 360 : wrapped
     }
 
-    static func hslToRGB(h: Double, s: Double, l: Double) -> RGB {
+    public static func hslToRGB(h: Double, s: Double, l: Double) -> RGB {
         let c = (1 - abs(2 * l - 1)) * s
         let x = c * (1 - abs((h / 60).truncatingRemainder(dividingBy: 2) - 1))
         let m = l - c / 2

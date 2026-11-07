@@ -54,11 +54,11 @@ import Testing
     @Test func fileStoreRoundTrip() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("dropper-tests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
-        let store = FileHistoryStore(directory: dir)
-        #expect(try store.load().isEmpty)
+        let store = FileLibraryStore(directory: dir)
+        #expect(try store.load().history.isEmpty)
         let items = [PickedColor(color: ColorValue(displayP3: RGB(red: 1, green: 0, blue: 0)), date: Date(timeIntervalSince1970: 100))]
-        try store.save(items)
-        let loaded = try store.load()
+        try store.save(LibraryContents(history: items))
+        let loaded = try store.load().history
         #expect(loaded.count == 1)
         #expect(loaded[0].id == items[0].id)
         #expect(close(loaded[0].color.sRGB, items[0].color.sRGB, 1e-9))
@@ -68,12 +68,12 @@ import Testing
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("dropper-tests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let store = FileHistoryStore(directory: dir)
+        let store = FileLibraryStore(directory: dir)
         try Data("not json".utf8).write(to: store.fileURL)
         #expect(throws: (any Error).self) { try store.load() }
         #expect(!FileManager.default.fileExists(atPath: store.fileURL.path))
         let files = try FileManager.default.contentsOfDirectory(atPath: dir.path)
         #expect(files.contains { $0.hasPrefix("colors.json.unreadable-") })
-        #expect(try store.load().isEmpty)
+        #expect(try store.load().history.isEmpty)
     }
 }

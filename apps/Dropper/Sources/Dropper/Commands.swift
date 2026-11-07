@@ -3,14 +3,30 @@ import DropperCore
 import SlopKit
 import SwiftUI
 
-/// The main menu while Dropper is frontmost (Settings or the Contrast Checker open). Also
-/// the way in when a crowded menu bar hides the status item.
+/// The main menu while Dropper is frontmost (Library, Settings or the Contrast Checker).
+/// Also the way in when a crowded menu bar hides the status item.
 struct DropperCommands: Commands {
     let controller: AppController
 
     var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New Palette") {
+                let palette = controller.newPalette()
+                controller.showLibrary(list: .palette(palette.id))
+            }
+            .keyboardShortcut("n")
+            Button("Import Palette…") { controller.importPalettes() }
+                .keyboardShortcut("o")
+        }
         CommandMenu("Color") {
             ColorCommandItems(controller: controller, model: controller.model)
+        }
+        CommandGroup(before: .windowList) {
+            Button("Dropper Library") { controller.showLibrary() }
+                .keyboardShortcut("0")
+            Button("Dropper Panel") { controller.togglePanel() }
+            Button(controller.settings.showDock ? "Hide Color Dock" : "Show Color Dock") { controller.dock.toggle() }
+            Divider()
         }
         CommandGroup(replacing: .help) {
             Button("Dropper Help") {
@@ -27,13 +43,22 @@ private struct ColorCommandItems: View {
     var body: some View {
         Button("Pick Color") { controller.pickAndCopy() }
             .globalShortcut(.pickColor)
+        Button("Pick Multiple Colors") { controller.pickMultiple() }
+            .globalShortcut(.pickMultiple)
+        Button("Pick Contrast Pair") { controller.pickContrastPair() }
         Button("Contrast Checker…") { controller.showContrastChecker() }
             .keyboardShortcut("k")
         Divider()
         Menu("Copy Last Color As") {
             if let last = model.history.latest {
-                ForEach(ColorFormat.allCases) { format in
-                    Button(format.title) { controller.copy(last, as: format) }
+                ForEach(ColorFormat.groups) { group in
+                    Section(group.title) {
+                        ForEach(model.preferences.visible(in: group)) { format in
+                            Button("\(format.title): \(model.text(for: last.color, as: format, name: last.name))") {
+                                controller.copy(last, as: format)
+                            }
+                        }
+                    }
                 }
             }
         }

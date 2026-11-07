@@ -62,36 +62,15 @@ enum ColorHUD {
     }
 
     private static func materialView(wrapping content: NSView) -> NSView {
-        let radius: CGFloat = 14
-        #if compiler(>=6.2)
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView()
-            glass.cornerRadius = radius
-            glass.contentView = content
-            return glass
-        }
-        #endif
-        let effect = NSVisualEffectView()
-        effect.material = .popover
-        effect.blendingMode = .behindWindow
-        effect.state = .active
-        effect.wantsLayer = true
-        effect.layer?.cornerRadius = radius
-        effect.layer?.cornerCurve = .continuous
-        effect.layer?.masksToBounds = true
-        content.translatesAutoresizingMaskIntoConstraints = false
-        effect.addSubview(content)
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
-            content.topAnchor.constraint(equalTo: effect.topAnchor),
-            content.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
-        ])
-        return effect
+        Material.view(wrapping: content, cornerRadius: ColorHUDView.cornerRadius)
     }
 }
 
 struct ColorHUDView: View {
+    static let cornerRadius = Radius.xl
+    /// Even on every side, so the swatch in the top-leading corner is concentric with it.
+    static let padding = Spacing.m
+
     let color: ColorValue
     let text: String
     let note: String?
@@ -100,7 +79,7 @@ struct ColorHUDView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             HStack(spacing: Spacing.m) {
-                SwatchView(color: color, size: 28, cornerRadius: 7)
+                SwatchView(color: color, size: 28, cornerRadius: Radius.nested(in: Self.cornerRadius, padding: Self.padding))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Copied")
                         .font(.caption)
@@ -124,7 +103,6 @@ struct ColorHUDView: View {
                     .frame(maxWidth: 280, alignment: .leading)
             }
         }
-        .padding(.horizontal, Spacing.l)
-        .padding(.vertical, Spacing.m)
+        .padding(Self.padding)
     }
 }

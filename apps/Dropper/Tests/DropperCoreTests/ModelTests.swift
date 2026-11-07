@@ -11,7 +11,7 @@ final class FakeSampler: ColorSampling {
 
     init(_ queue: [ColorValue?]) { self.queue = queue }
 
-    func sample() async -> ColorValue? {
+    func sample(prompt: String?) async -> ColorValue? {
         calls += 1
         if holdNext {
             await withCheckedContinuation { gate = $0 }
@@ -40,9 +40,9 @@ final class FakePreferences: PreferencesStore, @unchecked Sendable {
     func save(_ preferences: Preferences) { stored = preferences; saves += 1 }
 }
 
-struct BrokenStore: HistoryStore {
-    func load() throws -> [PickedColor] { throw CocoaError(.fileReadCorruptFile) }
-    func save(_ items: [PickedColor]) throws {}
+struct BrokenStore: LibraryStore {
+    func load() throws -> LibraryContents { throw CocoaError(.fileReadCorruptFile) }
+    func save(_ contents: LibraryContents) throws {}
 }
 
 @MainActor
@@ -50,7 +50,7 @@ struct BrokenStore: HistoryStore {
     let blue = ColorValue(red: 0.2, green: 0.4, blue: 0.8)
     let red = ColorValue(red: 1, green: 0, blue: 0)
 
-    func makeModel(_ picks: [ColorValue?], prefs: Preferences = Preferences(), store: HistoryStore = MemoryHistoryStore())
+    func makeModel(_ picks: [ColorValue?], prefs: Preferences = Preferences(), store: LibraryStore = MemoryLibraryStore())
         -> (DropperModel, FakeSampler, FakeClipboard) {
         let sampler = FakeSampler(picks)
         let clipboard = FakeClipboard()
@@ -60,18 +60,18 @@ struct BrokenStore: HistoryStore {
     }
 
     @Test func pickCopiesInDefaultFormatAndRemembers() async throws {
-        let store = MemoryHistoryStore()
+        let store = MemoryLibraryStore()
         let (model, _, clipboard) = makeModel([blue], store: store)
         let result = await model.pickAndCopy()
         #expect(result?.text == "#3366CC")
         #expect(result?.wasClamped == false)
         #expect(clipboard.writes == ["#3366CC"])
         #expect(model.history.latest?.color == blue)
-        #expect(try store.load().count == 1)
+        #expect(try store.load().history.count == 1)
     }
 
     @Test func cancelLeavesEverythingAlone() async {
-        let store = MemoryHistoryStore()
+        let store = MemoryLibraryStore()
         let (model, _, clipboard) = makeModel([nil], store: store)
         let result = await model.pickAndCopy()
         #expect(result == nil)
@@ -129,7 +129,7 @@ struct BrokenStore: HistoryStore {
 
     @Test func preferencesAreSaved() {
         let prefsStore = FakePreferences()
-        let model = DropperModel(sampler: FakeSampler([]), clipboard: FakeClipboard(), historyStore: MemoryHistoryStore(),
+        let model = DropperModel(sampler: FakeSampler([]), clipboard: FakeClipboard(), historyStore: MemoryLibraryStore(),
                                  preferencesStore: prefsStore)
         model.preferences.format = .uiColor
         model.preferences.options.hexUppercase = false
@@ -146,12 +146,12 @@ struct BrokenStore: HistoryStore {
     }
 
     @Test func clearHistory() async throws {
-        let store = MemoryHistoryStore()
+        let store = MemoryLibraryStore()
         let (model, _, _) = makeModel([blue], store: store)
         _ = await model.pickAndCopy()
         model.clearHistory()
         #expect(model.history.items.isEmpty)
-        #expect(try store.load().isEmpty)
+        #expect(try store.load().history.isEmpty)
     }
 
     @Test func pickColorWithoutCopyingStillRemembers() async {
