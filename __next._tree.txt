@@ -3,4 +3,4 @@
 :HL["/slopapp/_next/static/media/61e56fd33ece1ad8-s.p.0op912u62qdhl.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/slopapp/_next/static/media/cf9a11b6772b9533-s.p.1elj1f4z6aq4a.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 1:[["children",{"s":"__PAGE__","h":160}]]
-0:{"b":"hn0QEMKfFO2ktdHin25ob","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
+0:{"b":"GPafgwNmGqXCcAerTKGov","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
