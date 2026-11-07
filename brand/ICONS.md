@@ -5,8 +5,8 @@ Every Slopapp app icon follows this spec. It was chosen on 2026-11-07 after six 
 `scripts/icons/herbarium.py` builds and checks it, so a new icon can only differ from the family in
 what a spec file is allowed to say.
 
-The launcher (`apps/Slopapp/AppIcon.icon`, strawberry → tangerine glass) is the one exception. It is
-the brand mark, not an app.
+The launcher (`apps/Slopapp/Icon.py`) uses the same finish with the owner's own stacked-layers mark as
+its artwork: a moss tile, a birch front sheet over an ochre one, and a linden print on the ground.
 
 ## The idea in one paragraph
 
@@ -168,8 +168,8 @@ python3 scripts/icons/export_web.py <App>           # the website's icon and pri
    and Dark), so the website shows the icon the app ships with. The launcher shows installed apps'
    own icons, and the release's `<Name>-icon.png` (the `bundle.sh` preview) for the rest.
 
-The launcher (`apps/Slopapp/AppIcon.icon`) has no `Icon.py`: it's the brand mark, edited in Icon
-Composer. Dictate's earlier hand-made microphone icon is kept at `brand/legacy/dictate-AppIcon.icon`.
+The launcher (`apps/Slopapp/Icon.py`) is built the same way, with one exception: its artwork is the
+owner's stacked-layers mark (isometric, off the 32 grid) instead of grid construction.
 
 Requirements: Xcode 26+ (`ictool`, `actool`) and Python 3 (the macOS one is fine). ImageMagick
 only to re-process a print or export the website's WebP files.

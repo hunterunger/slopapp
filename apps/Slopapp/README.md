@@ -10,10 +10,11 @@ cleanly. An open alternative to Setapp's own app, minus the account and the subs
 
 ## What it does
 
-- **Candy glass around a calm page**: the window's shell is the sidebar material washed with
-  the icon's strawberry → tangerine (berry → plum in dark mode), with candy selection, a
-  colour per category and glossy featured banners. The pages themselves (cards, app pages,
-  text) stay in system colours and your accent colour.
+- **A herbarium frame around a calm page**: the window's shell is the sidebar material washed
+  with warm birch (night in dark mode), the pages sit on paper, pine marks the selection and the
+  update count, each category has its own muted Nordic colour, and the featured banners are
+  botanical print panels with the app's label on a paper card. The pages themselves (cards, app
+  pages, text) stay in system colours and your accent colour.
 - **A store-style window**: a full-height sidebar with Back and Forward beside the window
   buttons, then Discover, Installed, Favorites, All Apps with the categories (Utilities,
   Productivity, Media, Design, Developer) underneath, and Updates (with a count) last. The
@@ -178,7 +179,11 @@ default browser).
   cookies), `DittoUnarchiver`, `LocalFiles` (Trash, scratch folders, quarantine),
   `LocalAppLocator` and `CodeSignature` (LaunchServices + Security framework), `Checksum`.
 - `Sources/Slopapp`: `Store` (state and actions), `Config` (Info.plist + env overrides),
-  `RunningApps`, `Icons`, and the views.
+  `RunningApps`, `Icons`, and the views. `Views/Herbarium.swift` is the Nordic frame (colours
+  from SlopKit's `Brand.Nordic`, the print panels). `Resources/Prints/` holds six botanical
+  plates from *Köhler's Medizinal-Pflanzen* (1887–1898, public domain, via the Biodiversity
+  Heritage Library; sources in `brand/plates/sources.json`), the same files as the website's
+  `web/public/prints/`.
 - `Tests/SlopappCoreTests`: unit tests with fakes, plus integration tests that build tiny
   real app bundles, sign and zip them, and run the real installer against them.
 

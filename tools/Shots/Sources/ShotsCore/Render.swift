@@ -34,8 +34,8 @@ public enum Render {
 
     // MARK: Backdrop
 
-    /// The soft category-colour backdrop: a vertical wash, a light from above and a pool of
-    /// the flavour low on the trailing side. Proportional, so the capture backdrop on a big
+    /// The soft tile-colour backdrop: a vertical wash, a light from above and a pool of the
+    /// tile colour low on the trailing side. Proportional, so the capture backdrop on a big
     /// screen and the composed canvas look the same.
     public static func backdrop(_ palette: BackdropPalette, in context: CGContext, size: CGSize) {
         let rect = CGRect(origin: .zero, size: size)

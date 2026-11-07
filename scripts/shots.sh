@@ -146,7 +146,7 @@ prepare_copy() {
 start_backdrop() {
   local appearance="$1" ready="$WORK/backdrop-$1.ready"
   rm -f "$ready"
-  "$SHOTS" backdrop --category "$CATEGORY" --appearance "$appearance" --ready "$ready" >"$WORK/logs/backdrop.log" 2>&1 &
+  "$SHOTS" backdrop --showcase "$SHOWCASE" --category "$CATEGORY" --appearance "$appearance" --ready "$ready" >"$WORK/logs/backdrop.log" 2>&1 &
   BACKDROP_PID=$!
   for _ in $(seq 1 50); do
     if [[ -s "$ready" ]]; then BACKDROP_WID="$(tr -dc '0-9' <"$ready")"; return 0; fi

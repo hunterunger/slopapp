@@ -23,8 +23,9 @@ but cleaner:
   readable in both appearances, accessible (VoiceOver, alt text), translatable, and
   editable without retaking anything. (Setapp's images bake captions in; we don't.)
 - **Composition**: the real app window (real glass, real controls, real window shadow) on a
-  soft backdrop in the app's category colour from `Brand.Candy`, so the store feels like
-  one family. Menu bar apps get a synthetic menu bar strip with their panel dropping from
+  soft, matte backdrop in the app's own icon tile colour (Nordic, `apps/<Name>/Icon.py`) over
+  birch, or night in dark mode, so each set matches its icon and the store feels like one
+  family. Windows fill about three quarters of the frame width, as far as the height allows. Menu bar apps get a synthetic menu bar strip with their panel dropping from
   it. A shot may add one **zoom callout** (a magnified crop) to show a detail that's too
   small at gallery size.
 - **Content is always synthetic**: fixtures through each app's test-data hooks. Never the
@@ -68,8 +69,10 @@ scripts/shots.sh Snapper --compose-only   # re-compose the last captures (compos
   app's test-data variables, `{data}` = the scene's scratch folder; `shots` with `id`, `title`,
   `caption`, `scene`, optional `size` "1160x720", `zoom`, `menuBar`, `callout`), put any fixture
   files in `apps/<Name>/showcase/` (copied into `{data}`), and handle `Showcase.scene` at launch:
-  load synthetic data, open the window, call `Showcase.ready { [window] }` (SlopKit). Windows up
-  to about 1160 × 720 pt are drawn pixel for pixel; small panels and Settings windows use `zoom`.
+  load synthetic data, open the window, call `Showcase.ready { [window] }` (SlopKit). The
+  composer scales every shot's windows to about three quarters of the frame width, or as tall as
+  the frame allows when that comes first, and never magnifies past 2× (the captures are 2×). A
+  shot's `zoom` is a floor for small panels whose text needs it.
 - **What the script does**: bundles the app, waits for 60 s without keyboard or mouse input,
   copies `build/<Name>.app` to `/tmp/<slug>-showcase` with the bundle id `<id>.showcase` (no URL
   schemes, no document types: it can never receive the owner's links or files, and has its own
@@ -77,8 +80,9 @@ scripts/shots.sh Snapper --compose-only   # re-compose the last captures (compos
   `SLOP_SHOWCASE`, `SLOP_APPEARANCE` and the `env`, captures the windows the ready file lists
   with `screencapture -l<id> -o`, then composes with `tools/Shots compose` and encodes with
   `cwebp`. If anyone touches the Mac mid-run, it stops without writing anything.
-- **Composition** (tools/Shots, `ShotsCore`): the category's candy colour as a soft wash (light:
-  over ice; dark: deep, over graphite), the windows centred with a rendered two-layer shadow
+- **Composition** (tools/Shots, `ShotsCore`): the app's icon tile colour (its `Icon.py`; the
+  category's Nordic colour for apps without one) as a soft wash (light: over birch; dark: sunk
+  toward night), no gloss and no print (prints only live inside panels), the windows centred with a rendered two-layer shadow
   (the same for every window, so the set matches), a frosted menu bar strip with the app's own
   status item (tinted for the strip) for menu bar apps, and an optional magnified callout.
 - **Review** every image in `web/public/shots/<slug>/` light and dark before committing; raw

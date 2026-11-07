@@ -36,6 +36,11 @@ public struct Composition: Equatable, Sendable {
     /// Share of the canvas the windows may use when fitting (shadows need the rest).
     public static let fitWidth: CGFloat = 0.88
     public static let fitHeight: CGFloat = 0.84
+    /// Windows are scaled to about this share of the canvas width, as far as the height allows,
+    /// so every shot in the store reads at the same size.
+    public static let targetWidth: CGFloat = 0.75
+    /// Captures are 2x; magnifying them further than this turns soft.
+    public static let maxMagnification: CGFloat = 2
     /// Standard menu bar height when the status item doesn't say.
     public static let menuBarHeight: CGFloat = 24
     /// Windows sit a little above centre: their shadow falls below.
@@ -53,9 +58,7 @@ public struct Composition: Equatable, Sendable {
         let baseStrip: CGFloat = wantsStrip ? max(menuBarHeight, (item?.frame.height).map { CGFloat($0) } ?? 0) : 0
 
         let group = windows.map(\.frame.cgRect).reduce(CGRect.null) { $0.union($1) }
-        let fitArea = CGSize(width: canvasPoints.width, height: canvasPoints.height - baseStrip)
-        let fit = group.isNull ? 1 : min(fitArea.width * fitWidth / group.width, fitArea.height * fitHeight / group.height)
-        let zoom = CGFloat(shot.zoom.map { min($0, fit * 1.0001) } ?? min(1, fit))
+        let zoom = group.isNull ? 1 : fittedZoom(group: group.size, canvas: canvasPoints, strip: baseStrip, requested: shot.zoom)
         // A zoomed-in panel gets a zoomed-in menu bar, so they read as one screen.
         let stripScale = min(max(zoom, 1), 2)
         let stripPoints = (baseStrip * stripScale).rounded()
@@ -103,6 +106,21 @@ public struct Composition: Equatable, Sendable {
 
         return Composition(size: size, pointScale: pointScale, windows: placed, stripHeight: stripPoints * pointScale,
                            statusItem: statusItem, statusItemPressed: pressed, callout: callout, zoom: zoom)
+    }
+
+    /// About three quarters of the canvas width, or less if the height runs out (the menu bar
+    /// strip grows with the zoom, so that's solved for), never past `maxMagnification`. A
+    /// shot's own `zoom` is a floor (small panels whose text needs it), still capped by the canvas.
+    static func fittedZoom(group: CGSize, canvas: CGSize, strip: CGFloat, requested: Double?) -> CGFloat {
+        let widthFit = canvas.width * fitWidth / group.width
+        var heightFit = canvas.height * fitHeight / group.height
+        for _ in 0..<4 {
+            let stripPoints = strip * min(max(heightFit, 1), 2)
+            heightFit = (canvas.height - stripPoints) * fitHeight / group.height
+        }
+        let fit = min(widthFit, heightFit)
+        let fill = min(canvas.width * targetWidth / group.width, fit, maxMagnification)
+        return min(max(CGFloat(requested ?? 0), fill), fit)
     }
 
     /// Margin kept between a callout and the canvas edge, in points.

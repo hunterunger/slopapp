@@ -7,16 +7,8 @@
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "teamId": null,
   "license": "MIT",
-  "colors": {
-    "forest": "#0F3D2E",
-    "leaf": "#3DBE74",
-    "mint": "#D4F2DF",
-    "cream": "#FAF6EC",
-    "ember": "#E5603D",
-    "ink": "#13201A"
-  },
   "nordic": {
-    "_note": "App icons and the website: matte Nordic colours on birch, botanical prints. Spec: brand/ICONS.md.",
+    "_note": "App icons, the website and the launcher's frame: matte Nordic colours on birch, botanical prints. Spec: brand/ICONS.md. `categories` maps each app category to its colour (the launcher's sidebar and category pages; SlopKit Brand.Nordic mirrors it).",
     "birch": "#F5F0E8",
     "oat": "#E4D9C6",
     "charcoal": "#2F2D2A",
@@ -28,21 +20,14 @@
     "fjord": "#5D7E9A",
     "heather": "#8C7EA0",
     "rosewood": "#A9665C",
-    "lingonberry": "#B9473B"
-  },
-  "candy": {
-    "_note": "The launcher's own palette (its icon and frame). The website and app icons use nordic.",
-    "strawberry": "#F0407A",
-    "tangerine": "#F28A0C",
-    "lime": "#6CCB2F",
-    "lagoon": "#0A9DBF",
-    "blueberry": "#2F6FE4",
-    "grape": "#8A4BD1",
-    "ice": "#F3F6F9",
-    "graphite": "#1C1F24",
-    "iconGradient": [
-      "#F0407A",
-      "#F28A0C"
-    ]
+    "lingonberry": "#B9473B",
+    "categories": {
+      "Hub": "pine",
+      "Utilities": "fjord",
+      "Productivity": "ochre",
+      "Media": "clay",
+      "Design": "heather",
+      "Developer": "sage"
+    }
   }
 }

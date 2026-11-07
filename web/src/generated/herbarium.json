@@ -131,6 +131,17 @@
     "print": "/prints/ruler.webp",
     "source": "https://commons.wikimedia.org/wiki/File:K%C3%B6hler%27s_Medizinal-Pflanzen_in_naturgetreuen_Abbildungen_mit_kurz_erl%C3%A4uterndem_Texte_(Plate_93)_(8232775772).jpg"
   },
+  "slopapp": {
+    "app": "Slopapp",
+    "plant": "Tilia cordata",
+    "common": "small-leaved linden",
+    "plate": "15",
+    "tile": "#6B7A45",
+    "icon": "/icons/slopapp.webp",
+    "iconDark": "/icons/slopapp-dark.webp",
+    "print": "/prints/slopapp.webp",
+    "source": "https://commons.wikimedia.org/wiki/File:K%C3%B6hler%27s_Medizinal-Pflanzen_in_naturgetreuen_Abbildungen_mit_kurz_erl%C3%A4uterndem_Texte_(Plate_15)_(7118312783).jpg"
+  },
   "snapper": {
     "app": "Snapper",
     "plant": "Malva sylvestris",

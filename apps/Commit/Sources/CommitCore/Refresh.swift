@@ -126,26 +126,23 @@ public struct RepoEventClassifier: Sendable {
 }
 
 /// An FSEvents stream on a repository's folders (directory-level events, ~0.25 s latency).
-/// Events from our own writes are skipped by event id (`ignoreEvents(through:)`).
 public final class FileWatcher: @unchecked Sendable {
     public typealias Handler = @Sendable ([String]) -> Void
 
     private var stream: FSEventStreamRef?
     private let queue = DispatchQueue(label: "Commit file watcher", qos: .utility)
     private let handler: Handler
-    private let ignoredThrough = OSAllocatedUnfairLock<FSEventStreamEventId>(initialState: 0)
 
     public init(paths: [String], latency: TimeInterval = 0.25, handler: @escaping Handler) {
         self.handler = handler
         var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(),
                                            retain: nil, release: nil, copyDescription: nil)
-        let callback: FSEventStreamCallback = { _, info, count, paths, _, ids in
+        let callback: FSEventStreamCallback = { _, info, count, paths, _, _ in
             guard let info else { return }
             let watcher = Unmanaged<FileWatcher>.fromOpaque(info).takeUnretainedValue()
             let cfPaths = unsafeBitCast(paths, to: NSArray.self)
-            let floor = watcher.ignoredThrough.withLock { $0 }
             var changed: [String] = []
-            for i in 0..<count where ids[i] > floor {
+            for i in 0..<count {
                 if let path = cfPaths[i] as? String { changed.append(path) }
             }
             if !changed.isEmpty { watcher.handler(changed) }
@@ -157,12 +154,6 @@ public final class FileWatcher: @unchecked Sendable {
             FSEventStreamSetDispatchQueue(stream, queue)
             FSEventStreamStart(stream)
         }
-    }
-
-    /// Skip events up to now (call right after one of our own writes finishes).
-    public func ignoreEventsUntilNow() {
-        let current = FSEventsGetCurrentEventId()
-        ignoredThrough.withLock { $0 = max($0, current) }
     }
 
     public func stop() {

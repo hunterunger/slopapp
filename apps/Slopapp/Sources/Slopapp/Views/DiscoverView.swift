@@ -62,7 +62,7 @@ struct CategoryRow: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(activeState == .inactive ? AnyShapeStyle(.secondary) : AnyShapeStyle(Flavour.forCategory(name).ink))
+                .foregroundStyle(activeState == .inactive ? AnyShapeStyle(.secondary) : AnyShapeStyle(Tone.category(name).ink))
                 .accessibilityLabel("See All \(name)")
             }
             AppGrid(items: Array(apps.prefix(columns * 2)), columns: columns, store: store, navigation: navigation)
@@ -70,7 +70,7 @@ struct CategoryRow: View {
     }
 }
 
-/// A category's name with its flavour in front (the dot hangs in the margin, so the title
+/// A category's name with its colour in front (the dot hangs in the margin, so the title
 /// stays on the page's leading edge).
 struct CategoryTitle: View {
     let name: String
@@ -79,7 +79,7 @@ struct CategoryTitle: View {
         Text(name).font(.largeTitle)
             .accessibilityAddTraits(.isHeader)
             .overlay(alignment: .leading) {
-                FlavourDot(flavour: Flavour.forCategory(name), size: 12)
+                CategoryDot(tone: .category(name), size: 12)
                     .alignmentGuide(.leading) { $0.width + Spacing.m }
             }
     }
@@ -117,7 +117,7 @@ struct FeaturedCarousel: View {
                             withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) { current = item.id }
                         }
                     } label: {
-                        FeaturedBanner(item: item, flavour: BannerPalette.forIndex(index), store: store)
+                        FeaturedBanner(item: item, plate: .forBanner(index), store: store)
                             .frame(width: bannerWidth)
                     }
                     .buttonStyle(.plain)
@@ -135,7 +135,7 @@ struct FeaturedCarousel: View {
         .scrollTargetBehavior(.viewAligned)
         .scrollPosition(id: $current, anchor: .leading)
         .scrollIndicators(.never)
-        .frame(height: 220 + 2 * Self.shadowRoom)
+        .frame(height: FeaturedBanner.height + 2 * Self.shadowRoom)
         .padding(.vertical, -Self.shadowRoom)
         // Full width of the panel (the page's margins hold the peeking neighbours).
         .padding(.horizontal, -PageLayout.margin)
@@ -147,128 +147,87 @@ struct FeaturedCarousel: View {
     }
 }
 
-/// Banner flavours, alternating so neighbours differ (the launcher's strawberry first).
-enum BannerPalette {
-    static let order: [Flavour] = [.strawberry, .lagoon, .tangerine, .grape, .lime, .blueberry]
-    static func forIndex(_ index: Int) -> Flavour { order[index % order.count] }
-}
-
-/// A banner's colours for one appearance. Light mode: bright candy with graphite text on
-/// tangerine, lime and lagoon; white on blueberry, grape and the strawberry → tangerine hero
-/// (deepened, like the website's primary button). Dark mode: every flavour as a deep jewel
-/// tone with white text. The side under the text is darkened (or not) until it measures at
-/// least 5.2:1 (headroom for the sheen), so contrast is computed, not hoped for.
-struct BannerColors {
-    let lead: Color
-    let trail: Color
-    let text: Color
-    let isDeep: Bool
-
-    init(_ flavour: Flavour, dark: Bool) {
-        let base = flavour.nsBase
-        if dark || !flavour.carriesDarkText {
-            var fraction: CGFloat = dark ? 0.38 : 0
-            var lead = base.blended(withFraction: fraction, of: .black) ?? base
-            while Contrast.ratio(.white, lead) < 5.2, fraction < 0.8 {
-                fraction += 0.03
-                lead = base.blended(withFraction: fraction, of: .black) ?? base
-            }
-            self.lead = Color(nsColor: lead)
-            // The hero runs into tangerine, the icon's other end.
-            let trailBase = flavour == .strawberry ? Flavour.tangerine.nsBase : base
-            trail = Color(nsColor: trailBase.blended(withFraction: flavour == .strawberry ? (dark ? 0.4 : 0.2) : (dark ? 0.1 : 0),
-                                                     of: .black) ?? trailBase)
-            text = .white
-            isDeep = true
-        } else {
-            lead = flavour.base
-            trail = flavour.base.mixed(with: .white, by: 0.15)
-            text = Brand.Candy.graphite
-            isDeep = false
-        }
-    }
-}
-
-/// One banner: a small uppercase line, the app's pitch large, its name and category, and
-/// its icon large on the right. Candy glass: a saturated gradient, a sheen across the top
-/// like light on moulded plastic, a light rim and a soft shadow in its own colour.
+/// One banner, mounted like a herbarium sheet: a print panel in one of the Nordic colours, the
+/// app's label on a paper card at the left (a small uppercase line, the pitch, name and
+/// category), and its icon on the print at the right in a clear (unprinted) zone.
 struct FeaturedBanner: View {
     let item: CatalogItem
-    let flavour: Flavour
+    let plate: Plate
     let store: Store
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Text from the left edge, icon art from the right.
-    private static let inset: CGFloat = 40
-    private static let iconSize: CGFloat = 176
+    static let height: CGFloat = 220
+    private static let iconSize: CGFloat = 168
+    /// The card sits this far inside the panel; the icon keeps this much print-free margin.
+    private static let mat: CGFloat = Spacing.m
+    private static let radius: CGFloat = Radius.xxl
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Self.radius, style: .continuous)
         let dark = colorScheme == .dark
-        let colors = BannerColors(flavour, dark: dark)
-        HStack(alignment: .center, spacing: Spacing.xxl) {
-            VStack(alignment: .leading, spacing: Spacing.s) {
-                Text(item.isInstalled ? "ON THIS MAC" : "FREE DOWNLOAD")
-                    .font(.caption.weight(.semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(colors.text)
-                Text(item.app.tagline.trimmingTrailingPeriod)
-                    .font(.largeTitle.weight(.semibold))
-                    .foregroundStyle(colors.text)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text([item.app.name, item.app.category].compactMap { $0 }.joined(separator: " · "))
-                    .font(.title3)
-                    .foregroundStyle(colors.text)
-                    .padding(.top, 2)
-            }
-            .padding(.leading, Self.inset)
-            Spacer(minLength: Spacing.xxl)
-            AppIconView(item: item, icons: store.icons, size: Self.iconSize, alignsArt: true)
-                .shadow(color: .black.opacity(dark ? 0.45 : 0.22), radius: dark ? 12 : 16, y: dark ? 6 : 9)
-                .rotationEffect(.degrees(-7))
-                .offset(y: 22)
-                // The tile's art as far from the right edge as the text is from the left.
-                .padding(.trailing, Self.inset)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background {
-            ZStack {
-                // The lead colour holds under the whole text block; the gradient happens behind
-                // the icon.
-                shape.fill(LinearGradient(stops: [.init(color: colors.lead, location: 0), .init(color: colors.lead, location: 0.55),
-                                                  .init(color: colors.trail, location: 1)],
-                                          startPoint: .leading, endPoint: .trailing))
-                // Frosted ice behind the icon, like the white inner panel of a coloured case.
-                Circle()
-                    .fill(Color.white.opacity(dark ? 0.07 : 0.16))
-                    .frame(width: 260, height: 260)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .offset(x: 30, y: 20)
-                // The case's thickness: a little shade along the bottom edge.
-                LinearGradient(colors: [.clear, Color.black.opacity(dark ? 0.22 : 0.10)],
-                               startPoint: UnitPoint(x: 0.5, y: 0.6), endPoint: .bottom)
-                GeometryReader { geometry in
-                    // The sheen: a wide ellipse catching the light along the top.
-                    Ellipse()
-                        .fill(LinearGradient(colors: [Color.white.opacity(dark ? 0.12 : 0.24), Color.white.opacity(0)],
-                                             startPoint: .top, endPoint: .bottom))
-                        // Ends above the text (the eyebrow starts about a quarter of the way down).
-                        .frame(width: geometry.size.width * 1.3, height: geometry.size.height * 0.7)
-                        .offset(x: -geometry.size.width * 0.15, y: -geometry.size.height * 0.45)
-                }
+        GeometryReader { geometry in
+            let layout = Layout(size: geometry.size, iconSize: Self.iconSize, mat: Self.mat)
+            ZStack(alignment: .topLeading) {
+                PrintPanel(plate: plate, shape: shape, clearZones: [layout.iconZone])
+                card
+                    .frame(width: layout.card.width, height: layout.card.height)
+                    .offset(x: layout.card.minX, y: layout.card.minY)
+                AppIconView(item: item, icons: store.icons, size: Self.iconSize, alignsArt: true)
+                    .shadow(color: .black.opacity(dark ? 0.4 : 0.18), radius: dark ? 6 : 8, y: dark ? 3 : 4)
+                    .offset(x: layout.icon.minX, y: layout.icon.minY)
             }
         }
-        .clipShape(shape)
-        // A light rim (1 pt clipped to the inside: 0.5 pt on the pixel grid).
-        .overlay { shape.stroke(Color.white.opacity(dark ? 0.16 : 0.45), lineWidth: 1).clipShape(shape).allowsHitTesting(false) }
+        .frame(height: Self.height)
         .contentShape(shape)
-        // Depth: a soft shadow in the banner's own colour (darker and tighter in dark mode),
-        // cast by a plain shape behind it, so the banner itself isn't rendered offscreen.
+        // Matte: a soft neutral shadow, cast by a plain shape behind the banner so the banner
+        // itself isn't rendered offscreen.
         .background {
-            shape.fill(colors.lead)
-                .shadow(color: dark ? .black.opacity(0.5) : flavour.base.opacity(0.32), radius: dark ? 8 : 10, y: dark ? 4 : 5)
+            shape.fill(Color(nsColor: plate.tone.panel))
+                .shadow(color: .black.opacity(dark ? 0.45 : 0.12), radius: dark ? 6 : 8, y: dark ? 3 : 4)
+        }
+    }
+
+    /// The label: text on paper, like a herbarium sheet's.
+    private var card: some View {
+        let shape = RoundedRectangle(cornerRadius: Radius.nested(in: Self.radius, padding: Self.mat), style: .continuous)
+        return VStack(alignment: .leading, spacing: Spacing.s) {
+            Text(item.isInstalled ? "ON THIS MAC" : "FREE DOWNLOAD")
+                .font(.caption.weight(.semibold))
+                .tracking(0.9)
+                .foregroundStyle(Color(nsColor: Herbarium.muted))
+            Text(item.app.tagline.trimmingTrailingPeriod)
+                .font(.title.weight(.medium))
+                .fontDesign(.serif)
+                .foregroundStyle(Color(nsColor: Herbarium.text))
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+                .fixedSize(horizontal: false, vertical: true)
+            Text([item.app.name, item.app.category].compactMap { $0 }.joined(separator: " · "))
+                .font(.callout)
+                .foregroundStyle(Color(nsColor: Herbarium.muted))
+                .lineLimit(1)
+                .padding(.top, 2)
+        }
+        .padding(.horizontal, Spacing.xxl + Spacing.xs)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(Color(nsColor: Herbarium.paper), in: shape)
+    }
+
+    /// Where the card and the icon go in a banner of `size`.
+    struct Layout {
+        let card: CGRect
+        /// The icon view's frame (its art, since it lays out by the art).
+        let icon: CGRect
+        let iconZone: ClearZone
+
+        @MainActor init(size: CGSize, iconSize: CGFloat, mat: CGFloat) {
+            // The card takes about half the banner; the icon is centred in the rest.
+            let cardWidth = min(max(size.width * 0.5, 300), 520)
+            card = CGRect(x: mat, y: mat, width: cardWidth, height: max(0, size.height - 2 * mat))
+            let art = AppIconView.artSide(iconSize)
+            let centre = CGPoint(x: card.maxX + (size.width - card.maxX) / 2, y: size.height / 2)
+            icon = CGRect(x: (centre.x - art / 2).rounded(), y: (centre.y - art / 2).rounded(), width: art, height: art)
+            iconZone = ClearZone(rect: icon.insetBy(dx: -mat, dy: -mat), radius: Radius.iconTile(side: art) + mat)
         }
     }
 }

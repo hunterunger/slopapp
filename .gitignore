@@ -25,5 +25,3 @@ web/public/feed.json
 docs/build-log.md
 .claude/settings.local.json
 
-# Owner reference images (not ours to publish)
-brand/reference-*.png

@@ -127,16 +127,18 @@ struct SidebarBackground: NSViewRepresentable {
 /// The inset, rounded content area beside the sidebar, its corners concentric with the
 /// window's (SlopKit `windowConcentric`).
 struct ContentPanel<Content: View>: View {
+    /// The panel's surface (the launcher passes its Nordic paper).
+    var fill: Color = Color(nsColor: .textBackgroundColor)
     @ViewBuilder var content: Content
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // A hairline keeps the white panel distinct from the light sidebar; in dark mode
+            // A hairline keeps the paper panel distinct from the light sidebar; in dark mode
             // the darker panel stands out on its own.
             .windowConcentric(
-                fill: Color(nsColor: .textBackgroundColor),
+                fill: fill,
                 inset: WindowChrome.panelInset,
                 hairline: Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.35 : 0.6)
             )

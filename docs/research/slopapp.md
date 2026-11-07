@@ -1104,3 +1104,116 @@ to sRGB (`magick -profile "sRGB Profile.icc"`). Read raw, the candy colours look
 `/tmp/slopapp-polish/slopapp/candy/`: `before-*-{light,dark}.png`;
 `key-{discover,installed,updates,allapps,category}-{light,dark}.png` (key window);
 `inactive-*-{light,dark}.png`; `banner-{0-strawberry,1-lagoon,2-tangerine,3-grape,4-lime}-{light,dark}.png`.
+
+## Nordic herbarium pass (2026-11-07)
+
+The owner approved moving the launcher's frame from candy to the Nordic herbarium look the
+website and the app icons now use (brand/BRAND.md, Nordic). Mid-pass the owner dropped all
+legacy branding: the launcher's icon was redrawn in the herbarium style by the icon pass (moss
+tile, `apps/Slopapp/Icon.py`), and the candy and forest palettes were removed everywhere
+(`brand.json`, SlopKit `Brand`, the website's types).
+
+### What changed
+
+| Part | Candy (before) | Nordic (now) |
+|---|---|---|
+| Shell | sidebar material + strawberry → tangerine wash, plastic highlight | sidebar material + birch wash (night in dark mode); thinner wash behind other windows |
+| Content panel | `textBackgroundColor` | paper: birch 60% toward white; night 18% deeper in dark mode |
+| Sidebar symbols, selection | strawberry ink, candy-glass pill | pine (sage lifted toward birch in dark), pine-tinted slot (stronger with keyboard focus) |
+| Category dots | glossy candy sweets | flat dots in the category's Nordic colour, deepened to 3:1 |
+| "See All" | category candy ink | category tone, deepened (light) / lifted (dark) to 4.5:1 on paper |
+| Updates count, "2 Updates" | tangerine candy capsule, graphite text | pine capsule, paper text (6.8:1 light, 8.5:1 dark) |
+| "Up to Date" | strawberry ink | pine ink (6.8:1 / 8.5:1) |
+| Featured banners | saturated gradient, sheen, rim, tilted icon, coloured glow | print panel (panel colour + Köhler plate 30% darker), a paper card with the label (system serif headline), the icon upright on the print in a 12 pt clear zone, soft neutral shadow |
+
+- One source of truth: `Brand.Nordic` in SlopKit (hex values and `category(_:)`), mirrored from
+  `brand.json` (`nordic`, plus a new `nordic.categories`). A SlopKit test checks the two match.
+  `Brand.Candy`, the forest tokens (`Brand.forest`, `leaf`, `mint`, `cream`, `ember`, `ink`) and
+  the launcher's `Candy.swift` are gone, with brand.json's `candy` and `colors` blocks (nothing
+  else used them; `web/src/lib/catalog.ts` now types `nordic` instead).
+- Category colours (no website mapping existed: its cards show the category as a label):
+  Utilities fjord, Productivity ochre, Media clay, Design heather, Developer sage, Hub pine;
+  later categories get a stable pick from the six panel colours.
+- Banners cycle through the website's six plate/colour pairings: sage + hops, ochre +
+  peppermint, fjord + fern, rosewood + coffee, heather + oak, clay + mallow. The six prints
+  (the website's `web/public/prints/*.webp`, 616 KB together) ship in `Resources/Prints`.
+- Each print panel is drawn once per size and appearance into one bitmap
+  (`PrintRenderer`, last 8 kept), not as stacked SwiftUI masks (offscreen passes cost memory).
+
+### Decisions
+
+- **Paper, not white, for the page.** A pure white panel inside a warm birch shell looked cold
+  and pasted on; birch lifted toward white (the website's card colour) ties them together.
+  Text on it stays semantic (`labelColor` etc.); contrast drops by about 5% against white.
+- **Pine for the frame's marks, the user's accent for controls.** Install / Update buttons,
+  filter chips, card selection, focus rings, the heart and checkmarks keep the accent (design
+  system §1). The sidebar's selection is pine-tinted, like Finder's sidebar uses the accent.
+- **Card, not text on the print.** Several panel colours (fjord, heather) can't hold 4.5:1 text
+  in either charcoal or white without turning muddy, so the label sits on a paper card, as on
+  the website. The card is the clear zone; the icon gets its own 12 pt one.
+- **System serif for the banner headline only** (New York via `.fontDesign(.serif)`): it echoes
+  the website's editorial serif while staying a system font. Everything else is SF.
+- **No tilt, no gloss**: the herbarium style is matte and on the grid (0/45/90°).
+- **Banners don't grey out behind other windows**: they're artwork, like the icons on them.
+  The frame's accents (symbols, selection, dots, capsules, "See All") do.
+
+### Screenshots
+
+- `web/public/shots/{snapper,switchboard}/` re-composed (`scripts/shots.sh <Name> --compose-only`)
+  on Nordic backdrops: the app's icon tile colour (clay, fjord) over birch / sunk toward night.
+- Composer layout: windows fill about three quarters of the frame width as far as the height
+  allows, never past 2× (captures are 2×); a shot's `zoom` is now a floor. Snapper's hero and
+  history windows went from 80% to 75% of the width; its card pair from 1.5× to the height limit
+  (about 1.95×, 84% of the height); Switchboard's Settings windows from 1.45× to about 1.5–1.65×;
+  the picker from 1.8× to 2×. No showcase.json needed editing.
+- **Known gap:** Switchboard's picker is translucent glass and was captured over the old
+  blueberry backdrop, so it still carries that blue on the fjord wash; Snapper's card overlay
+  slightly carries the old tangerine. A recapture fixes it (`scripts/shots.sh <Name>`, needs the
+  owner away and an unlocked screen). `scripts/shots.sh` should also pass `--showcase` to
+  `shots backdrop` so the capture backdrop is the app's tile, not its category's colour (for
+  Switchboard they're the same fjord; for Snapper ochre instead of clay).
+
+### Gates
+
+- `scripts/check.sh Slopapp --perf`: PASS (SlopKit tests, lint, icon, 75 launcher tests, bundle,
+  smoke, catalog). Perf, owner away, load 10.9: launch 145 ms, first window 350 ms, idle CPU
+  0.033%, footprint 89.8 MB (< 120; 78–85 MB in the candy era). A first version that stacked
+  SwiftUI masks for the prints read 97 MB locked and 297 MB once (screen waking); drawing each
+  panel once into a bitmap fixed it.
+- tools/Shots: 21 tests pass (tile parsing from Icon.py, every specced app resolves a tile,
+  three-quarter fill, height-limited panels, magnification cap, zoom floor, growing strip).
+- SlopKit: 104 tests (new `NordicPaletteTests`: Brand.Nordic and the category map match brand.json).
+- `cd web && pnpm build`: passes after removing the forest/candy types.
+- `scripts/drive tree`: no `[unlabeled]` on Discover, Installed, Updates, Favorites, All Apps,
+  Productivity, Snapper's page with the gallery, the menu bar menu or Settings, light and dark.
+- Contrast (computed from the tokens, sRGB WCAG): pine capsule text 6.8:1 light / 8.5:1 dark;
+  "Up to Date" 6.8 / 8.5; banner headline 13.1 / 13.5; banner muted text ≥ 4.6 by construction;
+  sidebar symbols 6.2 / 7.4 on the shell, 5.1 / 4.8 on the selected slot; category dots ≥ 3.2
+  on the shell (ochre and sage were 2.0 / 2.3 before deepening); "See All" ≥ 4.5 on paper.
+
+### Walkthrough
+
+The screen was locked for the first hour (macOS hides windows from Accessibility and capture
+then), so the design was iterated with an offscreen render harness (a scratch copy of the
+package that caches the main window's view to PNG, with `controlActiveState` forced to key for
+the active look). Then, on the release build against `test-feed.sh` (plus a test-only Snapper
+entry with its shots and no download): every page, the gallery, the menu bar menu and Settings in
+light and dark, AX only. **Not tested: real key-window shots.** macOS 27's cooperative activation
+keeps a process launched by the driver from taking focus (`activate`, AX "Open Slopapp"), and the
+one real click to focus it was refused because the owner's T3 Code window covered it (never
+worked around). The owner was at the Mac for most of the session; twice they closed the test
+window that appeared, so later runs were short bursts after two idle minutes. The active-state
+colours were checked in the harness renders instead.
+
+Paths (scratchpad, not in the repo): before = `/tmp/slopapp-polish/slopapp/candy/key-*.png`;
+after = `/private/tmp/claude-501/-Users-hunterunger--t3-projects-slopapp/08137cdb-f2a0-4709-b1ca-aaf135e40f85/scratchpad/final-{light,dark}/` (harness, active), `/private/tmp/claude-501/-Users-hunterunger--t3-projects-slopapp/08137cdb-f2a0-4709-b1ca-aaf135e40f85/scratchpad/walk-light-inactive/` and
+`/private/tmp/claude-501/-Users-hunterunger--t3-projects-slopapp/08137cdb-f2a0-4709-b1ca-aaf135e40f85/scratchpad/key-dark/` (release build, inactive window), `/private/tmp/claude-501/-Users-hunterunger--t3-projects-slopapp/08137cdb-f2a0-4709-b1ca-aaf135e40f85/scratchpad/settings/`,
+`/private/tmp/claude-501/-Users-hunterunger--t3-projects-slopapp/08137cdb-f2a0-4709-b1ca-aaf135e40f85/scratchpad/walk-light/menubar-menu.png`.
+
+### For the owner
+
+- The banner headline uses the system serif (New York). Alternative: SF like the rest.
+- Banners keep their colour behind other windows (they're artwork); the frame's accents grey.
+- `brand/BRAND.md`'s Logo table still describes the launcher icon as strawberry → tangerine
+  glass, and `web/src/components/Logo.tsx` still draws the candy gradient (and names the deleted
+  `Assets/Untitled.svg`); both belong to the icon pass / website session.

@@ -5,15 +5,17 @@
 //   shots env <showcase.json> <data dir>           the scenes' extra environment, KEY=VALUE lines
 //   shots ids <ready.json>                         "id kind" per window to capture (exit 2 + message on a scene error)
 //   shots gate                                     exit 1 unless the display is awake, unlocked and Retina
-//   shots backdrop --category C --appearance A [--ready F]
+//   shots backdrop [--showcase F] [--category C] --appearance A [--ready F]
 //                                                  full-screen backdrop window of our own on the
 //                                                  primary screen, behind the app; runs until killed
-//   shots compose --showcase F --shot ID --ready R --captures DIR --category C --appearance A
+//   shots compose --showcase F --shot ID --ready R --captures DIR [--category C] --appearance A
 //                 [--menubar true|false] --out PNG
 //   shots manifest --slug S --app-version V --showcase F --dir D   write D/manifest.json
 //   shots capture --ready R --backdrop ID --dir D  each window composited over our backdrop (see Capture.swift)
 //
-// --brand <brand.json> overrides the palette file (default: brand/brand.json from the repo root).
+// The backdrop is the app's icon tile colour (apps/<Name>/Icon.py beside --showcase); --category
+// is the fallback for apps without an icon spec. --brand <brand.json> overrides the palette file
+// (default: brand/brand.json from the repo root).
 import AppKit
 import ShotsCore
 
@@ -48,13 +50,18 @@ var repoRoot: URL {
         .deletingLastPathComponent().deletingLastPathComponent()
 }
 
+/// The backdrop for one appearance: the app's icon tile colour (from apps/<Name>/Icon.py, next to
+/// its showcase.json) as a wash over birch or night. Without --showcase (or an icon spec), the
+/// category's Nordic colour.
 @MainActor func palette() throws -> BackdropPalette {
     let brand = option("--brand").map { URL(fileURLWithPath: $0) } ?? repoRoot.appendingPathComponent("brand/brand.json")
-    let candy = try Candy.load(brand: brand)
-    let flavour = candy.colour(Candy.flavour(forCategory: try required("--category")))
+    let nordic = try Nordic.load(brand: brand)
+    let appDirectory = option("--showcase").map { URL(fileURLWithPath: $0).standardizedFileURL.deletingLastPathComponent() }
+    let tile = try appDirectory.flatMap { Nordic.appTile(appDirectory: $0, repoRoot: repoRoot) }
+        ?? nordic.colour(forCategory: option("--category") ?? "")
     let appearance = try required("--appearance")
     guard ["light", "dark"].contains(appearance) else { throw Failure("--appearance must be light or dark") }
-    return BackdropPalette(flavour: flavour, candy: candy, dark: appearance == "dark")
+    return BackdropPalette(tile: tile, nordic: nordic, dark: appearance == "dark")
 }
 
 @MainActor func run() throws {

@@ -72,44 +72,68 @@ private func window(_ id: UInt32, _ kind: ReadyFile.Window.Kind = .window, _ rec
         #expect(RGB.black.mixed(with: .white, by: 2) == .white)
     }
 
-    @Test func categoriesMatchTheWebsite() {
-        #expect(Candy.flavour(forCategory: "Utilities") == "blueberry")
-        #expect(Candy.flavour(forCategory: "Productivity") == "tangerine")
-        #expect(Candy.flavour(forCategory: "Hub") == "strawberry")
-        // Unmapped: the sum of character codes picks one, like flavourFor() in catalog.ts.
-        let sum = "Games".unicodeScalars.reduce(0) { $0 + Int($1.value) }
-        #expect(Candy.flavour(forCategory: "Games") == Candy.flavourOrder[sum % 6])
-    }
+    private static let repoRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
 
     @Test func readsBrandJSON() throws {
-        let brand = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("brand/brand.json")
-        let candy = try Candy.load(brand: brand)
-        #expect(candy.colour("strawberry").hex == "#F0407A")
-        #expect(candy.graphite.hex == "#1C1F24")
+        let nordic = try Nordic.load(brand: Self.repoRoot.appendingPathComponent("brand/brand.json"))
+        #expect(nordic.birch.hex == "#F5F0E8")
+        #expect(nordic.night.hex == "#24231F")
+        #expect(nordic.colour(forCategory: "Utilities").hex == "#5D7E9A")
+        // Unknown categories fall back to pine.
+        #expect(nordic.colour(forCategory: "Games").hex == "#3F5E4E")
+    }
+
+    @Test func readsTheTileFromAnIconSpec() {
+        let generator = """
+        TILES = {
+            "ochre": "#D2A04C", "clay": "#C4704F",
+            "fjord": "#5D7E9A",
+        }
+        ACCENTS = {"lingonberry": "#B9473B"}
+        """
+        let tiles = Nordic.tiles(inGenerator: generator)
+        #expect(tiles.count == 3)
+        #expect(tiles["fjord"]?.hex == "#5D7E9A")
+        #expect(Nordic.tile(inSpec: ##"SPEC = Spec(name="Snapper", tile=TILES["clay"], main="#C4704F")"##, tiles: tiles)?.hex == "#C4704F")
+        #expect(Nordic.tile(inSpec: ##"SPEC = Spec(name="X", tile="#8EA58B")"##, tiles: tiles)?.hex == "#8EA58B")
+        #expect(Nordic.tile(inSpec: ##"SPEC = Spec(name="X", tile=TILES["nope"])"##, tiles: tiles) == nil)
+        #expect(Nordic.tile(inSpec: "no spec here", tiles: tiles) == nil)
+    }
+
+    @Test func findsTheRealAppsTiles() {
+        // Every app with an icon spec has a tile colour the composer can read.
+        let apps = Self.repoRoot.appendingPathComponent("apps")
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: apps.path)) ?? []
+        let specced = names.filter { FileManager.default.fileExists(atPath: apps.appendingPathComponent("\($0)/Icon.py").path) }
+        #expect(!specced.isEmpty)
+        for name in specced {
+            #expect(Nordic.appTile(appDirectory: apps.appendingPathComponent(name), repoRoot: Self.repoRoot) != nil, "\(name)")
+        }
     }
 
     @Test func darkBackdropIsDarkAndLightIsLight() {
-        let candy = Candy(colours: ["ice": RGB(hex: "#F3F6F9")!, "graphite": RGB(hex: "#1C1F24")!])
-        let flavour = RGB(hex: "#2F6FE4")!
-        let light = BackdropPalette(flavour: flavour, candy: candy, dark: false)
-        let dark = BackdropPalette(flavour: flavour, candy: candy, dark: true)
+        let nordic = Nordic(colours: ["birch": RGB(hex: "#F5F0E8")!, "night": RGB(hex: "#24231F")!])
+        let tile = RGB(hex: "#5D7E9A")!
+        let light = BackdropPalette(tile: tile, nordic: nordic, dark: false)
+        let dark = BackdropPalette(tile: tile, nordic: nordic, dark: true)
         #expect(light.top.luminance > 0.6)
         #expect(light.bottom.luminance > 0.35)
         #expect(dark.top.luminance < 0.08)
         #expect(dark.bottom.luminance < 0.05)
+        // A soft wash: the light backdrop is mostly birch, the dark one mostly night.
+        #expect(light.top.mixed(with: nordic.birch, by: 0).r > tile.r)
     }
 }
 
 @Suite struct CompositionTests {
-    @Test func aWindowThatFitsIsDrawnPixelForPixel() {
+    @Test func aWindowFillsThreeQuartersOfTheWidth() {
         let composition = Composition.layout(
             ready: ready([window(1, .window, CGRect(x: 900, y: 400, width: 1160, height: 720))]),
             shot: shot(), menuBar: false)
-        #expect(composition.zoom == 1)
         let rect = composition.windows[0].rect
-        #expect(rect.size == CGSize(width: 2320, height: 1440))
+        #expect(abs(rect.width - 2880 * Composition.targetWidth) <= 1)
         #expect(rect.midX == 1440)
         // A little above centre, for the shadow.
         #expect(rect.midY < 900 && rect.midY > 860)
@@ -128,13 +152,42 @@ private func window(_ id: UInt32, _ kind: ReadyFile.Window.Kind = .window, _ rec
     }
 
     @Test func zoomIsCappedByTheCanvas() {
-        let panel = window(1, .panel, CGRect(x: 0, y: 0, width: 300, height: 400))
+        // Three quarters of the width would be 1.35×; the shot asks for 1.5×, which fits.
+        let panel = window(1, .panel, CGRect(x: 0, y: 0, width: 800, height: 400))
         let zoomed = Composition.layout(ready: ready([panel]), shot: shot(zoom: 1.5), menuBar: false)
         #expect(zoomed.zoom == 1.5)
-        #expect(zoomed.windows[0].rect.size == CGSize(width: 900, height: 1200))
+        #expect(zoomed.windows[0].rect.size == CGSize(width: 2400, height: 1200))
         let capped = Composition.layout(ready: ready([panel]), shot: shot(zoom: 3), menuBar: false)
         #expect(capped.zoom < 3)
         #expect(capped.windows[0].rect.height <= 1800 * Composition.fitHeight + 1)
+    }
+
+    @Test func smallPanelsGrowUntilTheHeightRunsOut() {
+        // Too tall to reach three quarters of the width: as tall as the canvas allows.
+        let tall = Composition.layout(ready: ready([window(1, .panel, CGRect(x: 0, y: 0, width: 480, height: 508))]),
+                                      shot: shot(), menuBar: false)
+        #expect(tall.windows[0].rect.height <= 1800 * Composition.fitHeight + 1)
+        #expect(tall.windows[0].rect.height >= 1800 * Composition.fitHeight - 2)
+        // A tiny panel stops at the magnification limit, so it stays sharp.
+        let tiny = Composition.layout(ready: ready([window(1, .panel, CGRect(x: 0, y: 0, width: 200, height: 120))]),
+                                      shot: shot(), menuBar: false)
+        #expect(tiny.zoom == Composition.maxMagnification)
+        // A shot's own zoom is a floor, not a cap.
+        let floored = Composition.layout(ready: ready([window(1, .panel, CGRect(x: 0, y: 0, width: 200, height: 120))]),
+                                         shot: shot(zoom: 1.2), menuBar: false)
+        #expect(floored.zoom == Composition.maxMagnification)
+    }
+
+    @Test func theGrowingMenuBarStaysInTheHeight() {
+        let composition = Composition.layout(
+            ready: ready([window(1, .panel, CGRect(x: 16, y: 1214, width: 300, height: 166)),
+                          window(2, .panel, CGRect(x: 16, y: 1392, width: 300, height: 188)),
+                          window(9, .statusItem, CGRect(x: 0, y: 0, width: 34, height: 24))]),
+            shot: shot(), menuBar: true)
+        let bottom = composition.windows.map(\.rect.maxY).max() ?? 0
+        let top = composition.windows.map(\.rect.minY).min() ?? 0
+        #expect(top > composition.stripHeight)
+        #expect(bottom - top <= (1800 - composition.stripHeight) * Composition.fitHeight + 2)
     }
 
     @Test func windowsKeepTheirArrangement() {
@@ -151,11 +204,13 @@ private func window(_ id: UInt32, _ kind: ReadyFile.Window.Kind = .window, _ rec
         let composition = Composition.layout(
             ready: ready([window(1, .panel, CGRect(x: 1000, y: 600, width: 300, height: 360)),
                           window(9, .statusItem, CGRect(x: 2600, y: 0, width: 38, height: 30))]),
-            shot: shot(), menuBar: true)
-        #expect(composition.stripHeight == 60)
+            shot: shot(zoom: 1), menuBar: true)
+        // The strip and its icon grow with the zoom (a zoomed panel reads as a zoomed screen).
+        let scale = min(max(composition.zoom, 1), 2)
+        #expect(composition.stripHeight == (30 * scale).rounded() * 2)
         let item = composition.statusItem
         #expect(item?.window.id == 9)
-        #expect(item?.rect.size == CGSize(width: 76, height: 60))
+        #expect(item?.rect.size == CGSize(width: (38 * scale * 2).rounded(), height: (30 * scale * 2).rounded()))
         #expect(composition.windows.count == 1)
         // The panel is centred under the strip, not hanging from it.
         #expect(composition.statusItemPressed == false)
@@ -175,7 +230,7 @@ private func window(_ id: UInt32, _ kind: ReadyFile.Window.Kind = .window, _ rec
         let callout = Callout(x: 1000, y: 600, width: 100, height: 50, zoom: 2)
         let composition = Composition.layout(
             ready: ready([window(1, .window, CGRect(x: 0, y: 0, width: 1160, height: 720))]),
-            shot: shot(callout: callout), menuBar: false)
+            shot: shot(zoom: 1, callout: callout), menuBar: false)
         let placement = try #require(composition.callout)
         let rect = composition.windows[0].rect
         #expect(placement.source == CGRect(x: rect.minX + 2000, y: rect.minY + 1200, width: 200, height: 100))
@@ -188,7 +243,7 @@ private func window(_ id: UInt32, _ kind: ReadyFile.Window.Kind = .window, _ rec
 }
 
 @Suite struct RenderTests {
-    let candy = Candy(colours: ["ice": RGB(hex: "#F3F6F9")!, "graphite": RGB(hex: "#1C1F24")!])
+    let nordic = Nordic(colours: ["birch": RGB(hex: "#F5F0E8")!, "night": RGB(hex: "#24231F")!])
 
     private func solid(_ size: CGSize, _ colour: RGB) -> CGImage {
         let context = Render.canvas(size)!
@@ -206,7 +261,7 @@ private func window(_ id: UInt32, _ kind: ReadyFile.Window.Kind = .window, _ rec
     }
 
     @Test func composesAWindowWithItsShadowOnTheBackdrop() throws {
-        let palette = BackdropPalette(flavour: RGB(hex: "#F28A0C")!, candy: candy, dark: false)
+        let palette = BackdropPalette(tile: RGB(hex: "#C4704F")!, nordic: nordic, dark: false)
         let size = CGSize(width: 720, height: 450)
         let ready = ready([window(1, .window, CGRect(x: 0, y: 0, width: 150, height: 100))])
         let composition = Composition.layout(ready: ready, shot: shot(), menuBar: false, size: size, pointScale: 0.5)
@@ -225,11 +280,11 @@ private func window(_ id: UInt32, _ kind: ReadyFile.Window.Kind = .window, _ rec
     }
 
     @Test func darkAndLightBackdropsDiffer() throws {
-        let flavour = RGB(hex: "#2F6FE4")!
+        let tile = RGB(hex: "#5D7E9A")!
         let size = CGSize(width: 64, height: 40)
         func render(_ dark: Bool) -> CGImage {
             let context = Render.canvas(size)!
-            Render.backdrop(BackdropPalette(flavour: flavour, candy: candy, dark: dark), in: context, size: size)
+            Render.backdrop(BackdropPalette(tile: tile, nordic: nordic, dark: dark), in: context, size: size)
             return context.makeImage()!
         }
         let light = pixel(render(false), 32, 20), dark = pixel(render(true), 32, 20)

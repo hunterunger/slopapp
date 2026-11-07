@@ -85,5 +85,4 @@ Scripted tests never touch real settings, history, models, the clipboard or othe
 `DICTATE_LEGACY_*` (a fake previous install to import from).
 
 Design follows [`docs/design-system.md`](../../docs/design-system.md). The app icon is the house
-herbarium icon (`Icon.py`, generating `AppIcon.icon`; see `brand/ICONS.md`). The owner's earlier
-microphone artwork is kept at `brand/legacy/dictate-AppIcon.icon`.
+herbarium icon (`Icon.py`, generating `AppIcon.icon`; see `brand/ICONS.md`).

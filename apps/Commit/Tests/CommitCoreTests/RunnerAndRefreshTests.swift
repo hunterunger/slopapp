@@ -207,22 +207,6 @@ import Testing
         #expect(statusRuns.value == settled) // idle again: no more git
         print("COMMIT_PERF storm_seconds=\(String(format: "%.1f", stormSeconds)) status_runs=\(runs)")
     }
-
-    @Test func ourOwnWritesCanBeIgnored() async throws {
-        let repo = try TestRepo()
-        try repo.write("a.txt", "a\n")
-        try repo.commitAll("Start")
-        let events = Counter()
-        let watcher = FileWatcher(paths: [repo.root.path]) { _ in events.add() }
-        defer { watcher.stop() }
-        try await Task.sleep(for: .milliseconds(800)) // the commit's own events arrive first
-        events.reset()
-        try repo.write("a.txt", "b\n")
-        try await Task.sleep(for: .milliseconds(50))
-        watcher.ignoreEventsUntilNow()
-        try await Task.sleep(for: .milliseconds(700))
-        #expect(events.value == 0)
-    }
 }
 
 /// Wraps a runner and reports every command.

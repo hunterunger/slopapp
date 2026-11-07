@@ -13,7 +13,9 @@ let package = Package(
         // The app: SwiftUI views and wiring.
         .executableTarget(
             name: "Slopapp",
-            dependencies: ["SlopappCore", .product(name: "SlopKit", package: "SlopKit")]
+            dependencies: ["SlopappCore", .product(name: "SlopKit", package: "SlopKit")],
+            // The featured banners' botanical prints (the website's, web/public/prints/).
+            resources: [.copy("Resources/Prints")]
         ),
         .testTarget(name: "SlopappCoreTests", dependencies: ["SlopappCore"]),
     ],

@@ -14,7 +14,7 @@ struct MainWindow: View {
         HStack(spacing: 0) {
             Sidebar(store: store, navigation: navigation)
                 .frame(width: WindowChrome.sidebarWidth)
-            ContentPanel {
+            ContentPanel(fill: Color(nsColor: Herbarium.paper)) {
                 VStack(spacing: 0) {
                     ContentHeader(store: store, navigation: navigation)
                     PageStack(store: store, navigation: navigation)
@@ -25,7 +25,7 @@ struct MainWindow: View {
             .padding([.top, .trailing, .bottom], WindowChrome.panelInset)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background { CandyShell() }
+        .background { NordicShell() }
         .ignoresSafeArea()
         .storeWindowChrome()
         .navigationTitle(navigation.windowTitle { store.item($0)?.app.name })

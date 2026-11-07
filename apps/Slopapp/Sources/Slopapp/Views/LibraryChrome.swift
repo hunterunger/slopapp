@@ -152,17 +152,21 @@ private struct SidebarRow: View {
 
     private var isActive: Bool { activeState != .inactive }
 
+    /// Pine on the washed sidebar (lifted sage in dark mode), aimed at 4.5:1 on the wash so it
+    /// keeps well over the 3:1 symbols need on the selected slot too.
+    static let symbolInk = Color(nsColor: .readable(Herbarium.action, on: Herbarium.shellWash, target: 4.5))
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: Spacing.s) {
-                // Pages get the launcher's colour; categories their own flavour, as a dot in
+                // Pages get the launcher's pine; categories their own Nordic colour, as a dot in
                 // the icon's space so their names line up with the labels above.
                 Group {
                     if case .category(let name) = item {
-                        FlavourDot(flavour: Flavour.forCategory(name))
+                        CategoryDot(tone: .category(name))
                     } else if let symbol = item.symbol {
                         Image(systemName: symbol)
-                            .foregroundStyle(isActive ? AnyShapeStyle(Flavour.primary.sidebarInk) : AnyShapeStyle(.secondary))
+                            .foregroundStyle(isActive ? AnyShapeStyle(SidebarRow.symbolInk) : AnyShapeStyle(.secondary))
                     }
                 }
                 .frame(width: 20)
@@ -186,9 +190,10 @@ private struct SidebarRow: View {
     @ViewBuilder private var selection: some View {
         let shape = RoundedRectangle(cornerRadius: Radius.m, style: .continuous)
         if isSelected && isActive {
-            // Candy glass; a little more colour while the sidebar has keyboard focus, so
+            // A pine-tinted slot; a little more colour while the sidebar has keyboard focus, so
             // arrow-key users can see where they are.
-            CandyGlass(shape: shape, strength: isFocused ? 0.42 : 0.26)
+            let dark = colorScheme == .dark
+            shape.fill(Color(nsColor: Herbarium.action).opacity(isFocused ? (dark ? 0.30 : 0.22) : (dark ? 0.20 : 0.13)))
         } else if isSelected {
             // Behind other windows: grey, like every selection.
             shape.fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08))
@@ -198,26 +203,19 @@ private struct SidebarRow: View {
     }
 }
 
-/// The Updates count: a tangerine candy in the key window (graphite text: 6.8:1), grey behind.
+/// The Updates count: pine with paper text in the key window (7:1 or better), grey behind.
 struct CountBadge: View {
     let count: Int
     @Environment(\.controlActiveState) private var activeState
 
     var body: some View {
-        let active = activeState != .inactive
         Text("\(count)")
             .font(.caption.weight(.semibold))
             .monospacedDigit()
-            .foregroundStyle(active ? AnyShapeStyle(Brand.Candy.graphite) : AnyShapeStyle(.primary))
+            .foregroundStyle(.onActionCapsule(active: activeState != .inactive))
             .padding(.horizontal, Spacing.s)
             .padding(.vertical, 1)
-            .background {
-                if active {
-                    CandyGlass(shape: Capsule(), flavour: .tangerine, strength: 1)
-                } else {
-                    Capsule().fill(.quaternary)
-                }
-            }
+            .background { ActionCapsule() }
     }
 }
 
@@ -314,7 +312,7 @@ private struct SearchField: View {
     }
 }
 
-/// "✓ Up to Date" / "2 Updates" in the accent color; opens Updates.
+/// "✓ Up to Date" in pine / "2 Updates" on a pine capsule; opens Updates.
 private struct UpdateStatusButton: View {
     let store: Store
     let navigation: Navigation
@@ -336,17 +334,11 @@ private struct UpdateStatusButton: View {
             }
             .font(.body.weight(.medium))
             .foregroundStyle(style(status))
-            // Waiting updates are a tangerine candy; everything else is text.
+            // Waiting updates are a pine capsule; everything else is text.
             .padding(.horizontal, status.kind == .updates ? Spacing.s : 0)
             .frame(height: status.kind == .updates ? 24 : nil)
             .background {
-                if status.kind == .updates {
-                    if isActive {
-                        CandyGlass(shape: Capsule(), flavour: .tangerine, strength: 1)
-                    } else {
-                        Capsule().fill(.quaternary)
-                    }
-                }
+                if status.kind == .updates { ActionCapsule() }
             }
             .contentShape(Rectangle())
         }
@@ -359,8 +351,8 @@ private struct UpdateStatusButton: View {
 
     private func style(_ status: HeaderStatus) -> AnyShapeStyle {
         switch status.kind {
-        case .updates: isActive ? AnyShapeStyle(Brand.Candy.graphite) : AnyShapeStyle(.primary)
-        case .upToDate: isActive ? AnyShapeStyle(Flavour.primary.ink) : AnyShapeStyle(.secondary)
+        case .updates: .onActionCapsule(active: isActive)
+        case .upToDate: isActive ? AnyShapeStyle(Color(nsColor: .readable(Herbarium.action, on: Herbarium.paper))) : AnyShapeStyle(.secondary)
         default: AnyShapeStyle(.secondary)
         }
     }

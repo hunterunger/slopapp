@@ -2,43 +2,68 @@ import SwiftUI
 
 /// Slopapp brand values. Keep in sync with brand/brand.json.
 /// Apps use these only in the About view and icons, never in regular UI
-/// (see docs/design-system.md: the user's accent color wins).
+/// (see docs/design-system.md: the user's accent color wins). The launcher's frame is the
+/// one exception: it's drawn in `Nordic`.
 public enum Brand {
     public static let name = "Slopapp"
     public static let tagline = "Native Mac apps, made with care."
     public static let repoURL = URL(string: "https://github.com/hunterunger/slopapp")!
     public static let license = "MIT"
 
-    public enum Hex {
-        public static let forest: UInt32 = 0x0F3D2E
-        public static let leaf: UInt32 = 0x3DBE74
-        public static let mint: UInt32 = 0xD4F2DF
-        public static let cream: UInt32 = 0xFAF6EC
-        public static let ember: UInt32 = 0xE5603D
-        public static let ink: UInt32 = 0x13201A
-    }
+    /// The Nordic herbarium palette (brand.json `nordic`, brand/BRAND.md): matte, muted natural
+    /// colour on warm birch. App icons, the website and the Slopapp launcher's frame use it; the
+    /// apps themselves keep the system look and the user's accent colour.
+    public enum Nordic {
+        public enum Hex {
+            public static let birch: UInt32 = 0xF5F0E8
+            public static let oat: UInt32 = 0xE4D9C6
+            public static let charcoal: UInt32 = 0x2F2D2A
+            public static let night: UInt32 = 0x24231F
+            public static let pine: UInt32 = 0x3F5E4E
+            public static let sage: UInt32 = 0x8EA58B
+            public static let clay: UInt32 = 0xC4704F
+            public static let ochre: UInt32 = 0xD2A04C
+            public static let fjord: UInt32 = 0x5D7E9A
+            public static let heather: UInt32 = 0x8C7EA0
+            public static let rosewood: UInt32 = 0xA9665C
+            public static let lingonberry: UInt32 = 0xB9473B
+        }
 
-    public static let forest = Color(hex: Hex.forest) // lint:allow brand palette
-    public static let leaf = Color(hex: Hex.leaf) // lint:allow brand palette
-    public static let mint = Color(hex: Hex.mint) // lint:allow brand palette
-    public static let cream = Color(hex: Hex.cream) // lint:allow brand palette
-    public static let ember = Color(hex: Hex.ember) // lint:allow brand palette
-    public static let ink = Color(hex: Hex.ink) // lint:allow brand palette
+        /// Page background and light surfaces.
+        public static let birch = Color(hex: Hex.birch) // lint:allow brand palette
+        /// Quiet fills, empty specimen slots.
+        public static let oat = Color(hex: Hex.oat) // lint:allow brand palette
+        /// Text and the logo.
+        public static let charcoal = Color(hex: Hex.charcoal) // lint:allow brand palette
+        /// The dark-mode base.
+        public static let night = Color(hex: Hex.night) // lint:allow brand palette
+        /// Primary buttons and links.
+        public static let pine = Color(hex: Hex.pine) // lint:allow brand palette
+        public static let sage = Color(hex: Hex.sage) // lint:allow brand palette
+        public static let clay = Color(hex: Hex.clay) // lint:allow brand palette
+        public static let ochre = Color(hex: Hex.ochre) // lint:allow brand palette
+        public static let fjord = Color(hex: Hex.fjord) // lint:allow brand palette
+        public static let heather = Color(hex: Hex.heather) // lint:allow brand palette
+        public static let rosewood = Color(hex: Hex.rosewood) // lint:allow brand palette
+        public static let lingonberry = Color(hex: Hex.lingonberry) // lint:allow brand palette
 
-    /// The launcher's and website's palette (brand.json `candy`): translucent sugar-candy
-    /// plastic over frosted ice. Only the Slopapp launcher uses it; the apps keep the
-    /// system look and the user's accent colour.
-    public enum Candy {
-        public static let strawberry = Color(hex: 0xF0407A) // lint:allow brand palette
-        public static let tangerine = Color(hex: 0xF28A0C) // lint:allow brand palette
-        public static let lime = Color(hex: 0x6CCB2F) // lint:allow brand palette
-        public static let lagoon = Color(hex: 0x0A9DBF) // lint:allow brand palette
-        public static let blueberry = Color(hex: 0x2F6FE4) // lint:allow brand palette
-        public static let grape = Color(hex: 0x8A4BD1) // lint:allow brand palette
-        public static let ice = Color(hex: 0xF3F6F9) // lint:allow brand palette
-        public static let graphite = Color(hex: 0x1C1F24) // lint:allow brand palette
-        /// Every flavour, in the order they cycle (category tints, decorative accents).
-        public static let flavours: [Color] = [strawberry, tangerine, lime, lagoon, blueberry, grape]
+        /// The print-panel colours (each is also an app's icon tile), in the order they cycle.
+        public static let panels: [UInt32] = [Hex.sage, Hex.clay, Hex.ochre, Hex.fjord, Hex.heather, Hex.rosewood]
+
+        /// Each category's colour (brand.json `nordic.categories`): one per category, so a
+        /// category is the same colour wherever it's shown. Categories added later get a
+        /// stable pick from `panels`.
+        public static func category(_ name: String) -> UInt32 {
+            switch name {
+            case "Hub": Hex.pine
+            case "Utilities": Hex.fjord
+            case "Productivity": Hex.ochre
+            case "Media": Hex.clay
+            case "Design": Hex.heather
+            case "Developer": Hex.sage
+            default: panels[Int(name.unicodeScalars.reduce(UInt32(0)) { $0 &+ $1.value } % UInt32(panels.count))]
+            }
+        }
     }
 }
 

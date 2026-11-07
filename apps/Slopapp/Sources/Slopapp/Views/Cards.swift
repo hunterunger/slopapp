@@ -279,7 +279,7 @@ struct ChipStyle: ButtonStyle {
 struct PageHeader<Trailing: View>: View {
     let title: String
     var subtitle: String?
-    /// A category page: its flavour hangs in front of the title.
+    /// A category page: its colour hangs in front of the title.
     var isCategory = false
     @ViewBuilder var trailing: Trailing
 

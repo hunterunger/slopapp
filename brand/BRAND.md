@@ -32,19 +32,19 @@ Never "SlopApp" or "Slop App".
 
 | File | Use |
 |---|---|
-| [`apps/Slopapp/AppIcon.icon`](../apps/Slopapp/AppIcon.icon) | The source: the launcher's Icon Composer document. Two stacked rounded diamonds (stacked layers, the collection) in white glass on a strawberry `#F0407A` → tangerine `#F28A0C` gradient, top to bottom. Render sizes and the Dark/Clear/Tinted looks with `ictool`. |
+| [`apps/Slopapp/AppIcon.icon`](../apps/Slopapp/AppIcon.icon) | The source: the launcher's Icon Composer document. Built from `apps/Slopapp/Icon.py` in the herbarium finish ([`ICONS.md`](ICONS.md)): the owner's two stacked rounded diamonds (the collection), a birch sheet over an ochre one, on a moss tile with a linden print. Render sizes and the Dark/Clear/Tinted looks with `ictool`. |
 | [`logo.svg`](logo.svg) | Full-color tile for the web: favicon, site header, social. A flat SVG take on the icon: the same gradient, the top layer white, the lower layer white at 80%. |
 | [`mark-mono.svg`](mark-mono.svg) | One-color mark (`currentColor`): just the glyph, both layers. The website uses it in charcoal (birch in dark mode) as its logo. |
-| [`logo-legacy.svg`](logo-legacy.svg) | Retired. The old forest tile with slop poured over a grid. Keep for history; don't use. |
 
 Keep the glyph as drawn: two layers, no third, no outline, no tilt. On the tile, the glyph spans
 about three quarters of the width and sits centered.
 
 ## Color
 
-Two palettes, each with its own job.
+One palette, Nordic, for everything: the app icons (the launcher's too), the website and the
+launcher's frame.
 
-### Nordic (app icons and the website)
+### Nordic (app icons, the website and the launcher)
 
 Matte, muted natural colour on warm birch, with botanical prints from *Köhler's
 Medizinal-Pflanzen* (public domain, via the Biodiversity Heritage Library) clipped into crisp
@@ -64,43 +64,28 @@ website's subset under `nordic`.
   darker than the panel; everything placed on a print gets a clear margin. No textures
   elsewhere.
 - **Text:** charcoal on birch (12.1:1), white on pine (7.2:1). Muted text is `#6B655C` (5.1:1).
+- **Categories** each have a colour (`nordic.categories` in `brand.json`, mirrored by SlopKit's
+  `Brand.Nordic.category(_:)`): Utilities fjord, Productivity ochre, Media clay, Design heather,
+  Developer sage, Hub pine. Categories added later get a stable pick from the six panel colours.
+- **Dark mode is derived**, as in the icons: a tile or panel goes 66% toward night, its print
+  lifts 16% toward white; pine (too deep on night) becomes sage lifted 30% toward birch.
 
-### Candy (the launcher)
+#### In the launcher
 
-Translucent sugar-candy colour over frosted ice, after the coloured-plastic computers of the
-late nineties, done the 2026 way: system glass, colour and a little gloss. No pinstripes, no
-gel buttons, no textures. In `brand.json` under `candy`, and in SlopKit as `Brand.Candy`.
+The launcher's frame is Nordic (SlopKit `Brand.Nordic`; the launcher's `Views/Herbarium.swift`):
 
-| Token | Hex | Use |
-|---|---|---|
-| strawberry | `#F0407A` | The primary: top of the icon gradient. Launcher selection, sidebar symbols, the hero banner. Hub category |
-| tangerine | `#F28A0C` | Bottom of the icon gradient. Waiting-updates capsule and count. Productivity |
-| lime | `#6CCB2F` | Developer |
-| lagoon | `#0A9DBF` | Media |
-| blueberry | `#2F6FE4` | Utilities |
-| grape | `#8A4BD1` | Design |
-| ice | `#F3F6F9` | Frosted white surfaces (website page background) |
-| graphite | `#1C1F24` | Dark text on candy; dark surfaces |
-
-- **Icon gradient:** strawberry → tangerine, top to bottom.
-- **One primary, the rest for categories.** Strawberry (with the gradient) is the brand
-  colour; the other flavours only tell categories apart. The mapping is the same on the
-  website and in the launcher (above).
-- **Text on candy:** graphite on tangerine (6.8:1), lime (8.2:1) and lagoon (5.3:1); white on
-  blueberry (4.7:1) and grape (5.3:1). White on strawberry or tangerine needs the deepened
-  gradient `#C8265C` → `#B9430A` (the website's primary button; the launcher computes the
-  same darkening). Never put white text on the plain candy colours.
-- **Dark mode** is deeper and jewel-like over graphite, not neon: the launcher's shell turns
-  strawberry → grape, banners deepen until white text clears 5:1.
-- **Where it's used:** the launcher's icon and frame (sidebar shell, selection, category dots,
-  the featured banners, the updates capsule). Not on the website, not in the apps, and not in
-  the launcher's content: cards, app pages and text keep system colours and the user's accent.
-
-### Forest (retired)
-
-The palette of the first app icons (Lucide glyphs on a forest-green tile). Retired: app icons are
-Nordic herbarium now, see [`ICONS.md`](ICONS.md). Its tokens (forest, leaf, mint, cream, ember, ink)
-stay in `brand.json` and SlopKit's `Brand` for older code; don't use them for anything new.
+- **Shell:** the system sidebar material, washed with birch (night in dark mode), so the glass
+  setting still applies. The content panel is paper: birch lifted toward white, or night
+  deepened a little. Behind other windows the wash thins and every colour below goes grey.
+- **Pine** marks the sidebar's symbols and selection, the Updates count, the "2 Updates"
+  capsule (paper text, 7:1+) and "Up to Date".
+- **Category dots** in the category's colour; "See All" in the same hue, deepened to 4.5:1.
+- **Featured banners** are print panels: one of the six panel colours with its Köhler plate
+  (the website's pairings: sage hops, ochre peppermint, fjord fern, rosewood coffee, heather
+  oak, clay mallow), a paper card holding the text (the headline in the system serif), and the
+  app's icon on the print in a clear zone. Matte: a soft neutral shadow, no gloss, no tilt.
+- Content (cards, app pages, text) keeps semantic colours, and buttons, chips, focus rings and
+  checkmarks keep the user's accent.
 
 ## Type
 
