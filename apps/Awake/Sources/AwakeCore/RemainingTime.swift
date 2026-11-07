@@ -11,4 +11,13 @@ public enum RemainingTime {
         let minutes = totalMinutes % 60
         return minutes == 0 ? "\(hours) hr left" : "\(hours) hr \(minutes) min left"
     }
+
+    /// For the menu bar, next to the icon: "1h 05m", "45m", "<1m".
+    public static func compact(_ seconds: TimeInterval) -> String {
+        if seconds < 60 { return "<1m" }
+        let totalMinutes = Int((seconds / 60).rounded(.up))
+        if totalMinutes < 60 { return "\(totalMinutes)m" }
+        let minutes = totalMinutes % 60
+        return "\(totalMinutes / 60)h " + (minutes < 10 ? "0\(minutes)m" : "\(minutes)m")
+    }
 }

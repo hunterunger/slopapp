@@ -65,3 +65,38 @@ final class ManualScheduler: Scheduler {
         now = target
     }
 }
+
+/// Fake system: every monitor is a `StaticMonitor` the test can change with `send`.
+@MainActor
+final class FakeSystem {
+    let power = StaticMonitor(PowerState(isOnAC: true, batteryPercent: 80))
+    let displays = StaticMonitor(0)
+    let apps = StaticMonitor([AppRef]())
+    let locked = StaticMonitor(false)
+
+    var monitors: SystemMonitors {
+        SystemMonitors(power: power, externalDisplays: displays, runningApps: apps, screenLocked: locked)
+    }
+
+    static let xcode = AppRef(bundleID: "com.apple.dt.Xcode", name: "Xcode")
+    static let keynote = AppRef(bundleID: "com.apple.iWork.Keynote", name: "Keynote")
+}
+
+/// A throwaway defaults domain, deleted when the test that owns it ends. The suite name is
+/// a path under /tmp/awake-test, so nothing lands in ~/Library/Preferences.
+final class TestDefaults: @unchecked Sendable {
+    static let directory = "/tmp/awake-test/defaults"
+    let name: String
+    let defaults: UserDefaults
+
+    init() {
+        try? FileManager.default.createDirectory(atPath: Self.directory, withIntermediateDirectories: true)
+        name = "\(Self.directory)/\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: name)!
+    }
+
+    deinit {
+        defaults.removePersistentDomain(forName: name)
+        try? FileManager.default.removeItem(atPath: name + ".plist")
+    }
+}

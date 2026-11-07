@@ -1,16 +1,18 @@
+import Foundation
 import Testing
 @testable import AwakeCore
 
 @Suite struct AwakeDurationTests {
     @Test func presetTitles() {
         #expect(AwakeDuration.presets.map(\.title) == [
-            "15 Minutes", "1 Hour", "2 Hours", "4 Hours", "Until Turned Off",
+            "Indefinitely", "10 Minutes", "30 Minutes", "1 Hour", "2 Hours", "4 Hours", "8 Hours", "12 Hours",
         ])
     }
 
     @Test func oddTitles() {
         #expect(AwakeDuration.minutes(1).title == "1 Minute")
         #expect(AwakeDuration.minutes(90).title == "1 hr 30 min")
+        #expect(AwakeDuration.minutes(45).title == "45 Minutes")
     }
 
     @Test(arguments: [
@@ -35,6 +37,30 @@ import Testing
     }
 }
 
+@Suite struct NextOccurrenceTests {
+    var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    func date(_ day: Int, _ hour: Int, _ minute: Int) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute))!
+    }
+
+    @Test func laterToday() {
+        #expect(NextOccurrence.of(hour: 17, minute: 30, after: date(3, 9, 15), calendar: calendar) == date(3, 17, 30))
+    }
+
+    @Test func earlierMeansTomorrow() {
+        #expect(NextOccurrence.of(hour: 8, minute: 0, after: date(3, 9, 15), calendar: calendar) == date(4, 8, 0))
+    }
+
+    @Test func theCurrentMinuteMeansTomorrow() {
+        #expect(NextOccurrence.of(hour: 9, minute: 15, after: date(3, 9, 15), calendar: calendar) == date(4, 9, 15))
+    }
+}
+
 @Suite struct RemainingTimeTests {
     @Test(arguments: [
         (0.0, "Less than a minute left"),
@@ -49,5 +75,12 @@ import Testing
     ])
     func formats(seconds: Double, text: String) {
         #expect(RemainingTime.string(seconds) == text)
+    }
+
+    @Test(arguments: [
+        (30.0, "<1m"), (60.0, "1m"), (2700.0, "45m"), (3600.0, "1h 00m"), (3900.0, "1h 05m"), (43_200.0, "12h 00m"),
+    ])
+    func compact(seconds: Double, text: String) {
+        #expect(RemainingTime.compact(seconds) == text)
     }
 }
