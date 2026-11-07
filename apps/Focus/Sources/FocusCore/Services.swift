@@ -93,3 +93,18 @@ public final class ProcessActivity: ActivityToken {
         self.token = nil
     }
 }
+
+/// Hides distracting apps while a focus session runs (opt-in). Only ever hides: nothing is
+/// quit, and hidden apps come back when the user switches to them after the session.
+@MainActor
+public protocol AppHiding: AnyObject {
+    /// Hide these apps now and whenever one comes to the front. Nil: stop hiding.
+    func block(_ bundleIDs: Set<String>?)
+}
+
+/// For previews and tests that don't care.
+@MainActor
+public final class NoAppHiding: AppHiding {
+    public init() {}
+    public func block(_ bundleIDs: Set<String>?) {}
+}

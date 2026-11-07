@@ -298,10 +298,255 @@ Shortcut at start/end, global Start/Pause shortcut, App Intents.
 - No permissions needed. The global shortcut is unset; setting one needs the recorder
   (keyboard) and `key --global`.
 
+## Parity pass (2026-11-03)
+
+Per `docs/parity-pass.md`. Session isn't installed and the screen was locked, so the
+original was studied from stayinsession.com (home, Learn guides, URL-scheme and export docs,
+changelog), the Mac App Store listing (description, version history to 2.13.48) and the
+Learn guide's screenshots (downloaded to `/tmp/focus-parity/`, not committed). UI was verified
+with an offscreen render hook (`FOCUS_SNAPSHOT_DIR`), unit tests and headless runs of the
+release build.
+
+### What the original looks like
+
+- **Main window**: a left column with the timer and a right column that's a notes pane
+  during a session and a day calendar (hour grid, sessions as coloured blocks, a red "now"
+  line) otherwise. An icon rail switches Timer / Analytics / Settings (⌘1, ⌘2…).
+- **Timer column**: daily-target dots, a heading asking for your focus, a category pill
+  (dot + name + chevron), an intention field with suggestions from past sessions (each with
+  its category pill), a round clock face with minute ticks you drag to set the length, the
+  time, a "15:05 → 15:30" capsule flanked by −5 / +5, and round buttons (pause, finish/stop).
+  "@category" and "30m"/"1h" typed in the intention set the category and length.
+- **After a session**: an overflow phase counting up; reflection with Focused / Neutral /
+  Distracted and notes; ⌘↩ submits. Breaks show a big countdown; an optional always-on-top
+  rest window.
+- **Analytics**: Day/Week/Month with ‹ › navigation; tiles (total focus, average a day, most
+  focused time, total break, focus/break ratio), mood counts, a daily distribution bar chart
+  with an average line, a category distribution table, and a session log grouped by day with
+  category/notes filters; export to CSV/JSON.
+- **Menu bar**: remaining minutes; pause/finish/abandon. A "mini player" floating window.
+- **Settings**: General (daily target, intention suggestions, auto-start, reflection,
+  sleep behaviour), Notification, Background sound, Calendar, per-profile Session/Website
+  blocker/App blocker, Slack, Menubar & Dock, Window, Window tracker, Shortcuts, AppleScript,
+  Keyboard shortcuts, Account.
+
+### Gap table
+
+| Item (original) | Status | Notes |
+|---|---|---|
+| Main window: timer left, notes/day calendar right | **Done** | `FocusWindow` (AppKit-hosted, opens on demand, ⌘0, reopen from Finder/Dock). Shows in the Dock with a full menu bar while open |
+| Section switcher (Timer / Analytics, ⌘1 ⌘2) | **Done** | Toolbar segmented control + View menu ⌘1/⌘2 |
+| Big round clock with minute ticks, drag to set length | **Done** | `FocusDial`: ring + 60 ticks + knob; drags snap to 5 min (5–60); VoiceOver adjustable |
+| "Start → end" capsule with −5 / +5 | **Done** | Works idle (changes the length) and running (`shorten`/`extend`) |
+| Daily target dots | **Done** | Settings ▸ General ▸ Daily goal (default 8, None hides) |
+| Category pill + categories with colours | **Done** | Menu pill everywhere; Settings ▸ Categories (add, rename, colour grid, drag to reorder, delete with confirmation). Defaults Work/Study/Personal |
+| Intention field + suggestions from past sessions | **Done** | Word-start matches first, ↑↓/Return/Esc, picks the suggestion's category |
+| "@category" and "30m/1h" in the intention | **Done** | `IntentionParser`; length applies to that one session only |
+| Notes pane during a session, recent notes | **Done** | Saved with the run and the log |
+| Day calendar with session blocks and now line | **Done** | `DayTimeline` (logged sessions, breaks, the live block) |
+| Reflection (mood + notes), ⌘↩ submits | **Done** | Window, menu bar panel and break screen; ⌘↩ = start focus *or* save reflection, like the original. Skipped for sessions under a minute; cleared when the next session starts |
+| Finish vs abandon | **Done (adapted)** | Finish = counts now, break follows. Stop = stop (still counts at 80%). No "abandon without logging": partial time is part of the day's total |
+| Analytics: Day/Week/Month, tiles, moods, chart, categories, log, filters | **Done** | `StatsReport` + Swift Charts. Category filter, Notes Only, context menu to change mood/category or delete (confirmed) |
+| Export CSV | **Done** | ⇧⌘E and toolbar button; RFC 4180, formula-safe |
+| Export JSON | Deferred (S, 1 h) | CSV covers spreadsheets/time logging; history.jsonl is already JSON |
+| Break screen / always-on-top rest window | **Done** | Optional full-screen cover on every display, Esc/Hide/Back to Work, reflection inline. Off by default |
+| App blocker | **Done (hide only)** | Settings ▸ Hide Apps: hides listed apps when a session starts and whenever one is activated/launched during it, with a short HUD. Never quits. Not during breaks or pauses |
+| Website blocker | Skipped | Needs a browser extension (Safari/Chrome) or a hosts-file/network filter (root). Use a Focus mode filter via Automation |
+| Menu bar timer + controls | **Done, richer** | `.window` panel: category, goal dots, small dial, heading, start→end, today, intention field, controls, ±5, reflection, footer |
+| Mini player (floating window) | **Done (adapted)** | Window ▸ Float on Top keeps the main window above others |
+| Keyboard shortcuts | **Done** | Timer menu (see README), Settings ▸ Shortcuts lists them; global Start/Pause and Show Window recorders |
+| Global shortcut to show the window | **Done** | Unset by default |
+| Apple Focus / DND, Shortcuts, AppleScript automation | **Done (existing)** | Run a shortcut at start/end. AppleScript hooks: skipped (Shortcuts covers it) |
+| Overflow (count up past zero) | Deferred (M, half a day) | Needs a new phase in `TimerMachine`, menu bar text for overtime, and stats rules; auto-start breaks covers the common flow |
+| Pre-end warning, presence reminder | Deferred (S–M, 2–3 h) | Extra tick target in `reschedule()` + a quiet notification; low everyday value |
+| Calendar logging (EventKit) | Deferred (M, half a day) | Needs a calendar permission prompt (can't be approved in testing) and writes to the owner's calendar; would be opt-in with a dedicated "Focus" calendar |
+| URL scheme | Deferred (S, 2 h) | Possible through `app.json` `infoPlist` (CFBundleURLTypes) + `application(_:open:)`; registering a scheme wasn't worth doing untested on a locked screen |
+| Background sounds | Skipped | Needs sound assets (can't copy theirs; synthesizing good ambience is its own project) |
+| Window tracker, Slack, sync, widgets, Live Activities, todos | Skipped | Accessibility snooping / network / accounts / WidgetKit extension (no SwiftPM support) / iOS-only |
+| "When Mac goes to sleep" option | Skipped | Our sleep handling is already correct and quiet |
+
+### Decisions
+
+| Decision | Why |
+|---|---|
+| Stay menu-bar-first (`LSUIElement`); the window opens on demand and the app becomes a Dock app while it's open | Keeps launch/idle budgets and the 1-click flow; matches the original's window when you want it |
+| Window hosted by AppKit, not a SwiftUI `Window` scene | A `Window` scene can open itself at launch on macOS 14 |
+| Breaks are now logged (kind = short/long break) | Needed for total break, focus/break ratio and the timeline; they never count as sessions |
+| History log stays append-only; edits/deletes append a line with the same id (last wins) | No rewrites of a user's history file; old lines get a stable id from their start time |
+| Ring-and-ticks dial in the category colour, not a pie wedge with a hand | Same structure (minute face, drag to set), our own look; avoids the original's signature red clock |
+| Mood icons are arrows (↑ → ↓) in green/grey/orange | The original uses emoji; arrows match its own "1↑ · 0→ · 0↓" notation without copying artwork |
+| Category colours from a fixed list of system colours, plus "Accent" | Adapts to dark mode/contrast; no hardcoded hex |
+| Typed length ("45m") applies to that session only | Doesn't silently change the default |
+| ⌘↩ starts a session or saves the waiting reflection | Same as the original; one key for "go on" |
+| Settings window 580 pt wide | Seven toolbar tabs don't fit SlopKit's 480 pt |
+| Hide Apps: with `FOCUS_TEST_LOG` it only logs unless `FOCUS_HIDE_REAL=1` | Tests never touch the owner's apps |
+
+### Deviations from the design system
+
+- **Menu bar archetype uses `.window`** (rich content: dial, intention field, reflection),
+  320 pt wide. The reflection + offered-break state is ~560 pt tall (over the 480 pt
+  guideline) because it stacks reflection, dial and controls; it doesn't scroll.
+- **Colours beyond the accent**: category colours (system colours), green for breaks, mood
+  tints. Needed to match the original's colour-coded categories.
+- **Settings width 580 pt** instead of 480 (seven tabs).
+- **Break screen** is a full-screen cover (opt-in, dismissable with Esc), not a HUD.
+
+### Shared components built in-app (candidates for SlopKit)
+
+- `PanelRow` / `PanelFooter` (`MenuPanel.swift`): menu-like rows and the Settings/About/Quit
+  footer for `.window`-style menu bar panels.
+- `DotImage` (`CategoryViews.swift`): non-template colour dots for menus.
+- `Radius` (`DayTimeline.swift`): corner radius tokens.
+- `DockPresence` (`FocusWindow.swift`): Dock icon while a window is open (Snapper has a twin).
+
+### Gates (2026-11-03)
+
+- `scripts/check.sh Focus --perf`: **PASS**. 110 Swift Testing tests in 12 suites (32 new:
+  machine parity 6, controller parity 14, stats 6, intentions 4, export 1, history log 1).
+  Launch 127 ms, first status item 288 ms, idle CPU 0.006 % (median 0.036 %), footprint
+  22.2 MB.
+- Offscreen renders (release build, light + dark), all looked at:
+  `/tmp/focus-test/renders/` — `main-idle`, `main-focus` (notes), `main-focus-timeline`,
+  `main-reflection`, `main-break`, `stats-day|week|month`, `panel-idle|focus|reflection`,
+  `break-screen`, `settings-general|timer|categories|blocking|shortcuts`, each `-light`/`-dark`.
+  Offscreen artefacts: prominent buttons render unaccented (window not key), toolbar
+  (Timer/Stats switch, Export) isn't drawn, Settings tabs show as a segmented control.
+- Headless release run (`FOCUS_SECONDS_PER_MINUTE=1 FOCUS_START=1`, test log): hiding on at
+  start, off at the break; notification + sound at the end; break screen shown/hidden;
+  focus and break logged; reflection pending persisted in `state.json`.
+- Real app hiding: launched Chess myself, listed `com.apple.Chess` in a test data dir,
+  `FOCUS_HIDE_REAL=1`: `isHidden` false → true once the session started; Chess quit after.
+
+### On-screen checks still owed (screen locked)
+
+1. `scripts/drive` walkthrough of the panel (`.window` style) and the Focus window, light and
+   dark; `drive tree` for `[unlabeled]` controls (all custom buttons have labels in code).
+2. Toolbar Timer/Stats switch and Export button render; Dock icon appears/disappears with the
+   window; Timer/View/Window menus and their shortcuts (⌘↩, ⌘P, ⇧⌘↩, ⌘., ⌥⌘→, ⇧⌘. ⇧⌘,, ⌘L,
+   ⌘1, ⌘2, ⌘0, ⇧⌘E).
+3. Intention field: ↑/↓ reach the suggestion list (`onKeyPress` on a focused `TextField`),
+   Return picks, Esc dismisses; suggestion overlay isn't clipped.
+4. Dragging the dial knob; the colour grid popover in Settings ▸ Categories; drag to reorder.
+5. Break screen live: covers every display, Esc hides it, focus returns; the panel closes when
+   "Open Focus Window" is chosen.
+6. Hide Apps: HUD appears when switching to a hidden app mid-session.
+7. Notification banners/buttons (needs the owner to allow notifications once).
+
+## Polish pass (2026-11-05)
+
+Per `docs/polish-pass.md` (+ the mid-pass Golden Gate / light-dark addition). All shots from
+the release build with test data only: `FOCUS_DATA_DIR=/tmp/focus-test/<state>`,
+`FOCUS_TEST_LOG`, `FOCUS_SAMPLE_HISTORY=1` (new: five weeks of made-up sessions in an empty
+*test* folder), `FOCUS_SECONDS_PER_MINUTE=2` for reflection/break states,
+`SLOP_APPEARANCE=light|dark`. The owner's defaults domain was exported first and re-imported
+at the end. Scripts: `/tmp/focus-test/scripts/shoot-all.sh` (every surface, one mode),
+`realpanel.sh` (the real status-item panel, owner-idle gated).
+
+New test hooks: `FOCUS_SAMPLE_HISTORY=1` (needs `FOCUS_DATA_DIR`), `FOCUS_BREAK_WINDOW=1`
+(break screen as one opaque 1100 x 760 normal-level window, so a screenshot can never contain
+anything behind it), `FOCUS_PANEL_WINDOW=1` (the menu bar panel's view live in a plain
+window, for driving when the status item can't be clicked).
+
+### Defects found and fixed (before → after)
+
+| # | Surface | Defect (before) | After |
+|---|---|---|---|
+| 1 | Lint | 5 corner literals (`cornerRadius: 5` ×3, `2` ×2), 11 spacing literals; a private `Radius` enum (6/10) shadowing SlopKit's | 0 / 0. SlopKit `Radius` everywhere: cards `l` 12, fields/mood buttons `m` 8, timeline blocks `xs` 4, suggestion highlight `nested(in: m, padding: 4)` = 4, chart bars `xs`, session colour bar a `Capsule` |
+| 2 | Main window, Stats, panel | SwiftUI `Divider` 1 pt (pane split, stats header and columns, timeline hour lines, panel separators) | Pane split measured 1 px `#EAEAEA` (0.5 pt); `Hairline` everywhere, `SelfSizingHairline` in the panel (see SlopKit issue) |
+| 3 | Dial | Time readout 8.3 pt above the dial centre (caption pulled the group up: colon centre 332.3 vs dial 340.5) | Digits on the centre (colon 362.3 vs dial 361.5; caption hangs below, hidden twin above). Ring centred: track 86.5–103.5 / 256.5–273.5 → centre 180.0 = pane centre; stroke 17.25 pt both sides |
+| 4 | Main window | Dial and controls jumped between states: dial centre 362 pt idle → 340 pt focusing; controls 598 → 589 pt | Fixed 116 pt header slot and a fixed-height control slot: dial centre 361.5 pt and controls 589 pt in idle, focusing and paused |
+| 5 | Day timeline | Opened scrolled to midnight (scroll ran before layout), so today's sessions and the now line were off-screen | Scrolls to three hours before now; now line visible on open |
+| 6 | Day timeline | White text on 80 % category fills (white on green ≈ 2:1); hour labels nudged with a −6 pt offset | Tinted blocks with a 3 pt colour edge and primary/secondary text (passes in both modes); labels centred on their line with an alignment guide |
+| 7 | Categories | "No Category" was the accent (blue, same as Work) in rows, timeline and picker, but gray in the chart and table | Gray everywhere categories are compared (`dataTint`); the dial keeps the accent |
+| 8 | Stats chart | Stack order random per bar and per launch (dictionary order) | Legend order on every bar |
+| 9 | Stats chart | "avg 2h 25m" annotation drawn over the Friday bar; accent-blue average line | Average in the card header with a dashed key; gray rule |
+| 10 | Stats chart | Y ticks at 1h 40m / 3h 20m / 5h | Round steps from `ChartAxis.scale` (unit-tested): 0m–4h by 1h, 15 min steps for light weeks |
+| 11 | Stats chart | Gridlines 1 pt, mixed dashed (x) and solid (y) | One device pixel in `separatorColor`, solid, both axes |
+| 12 | Stats chart | Empty period: no y axis, bare dashed lines, x labels 17 pt lower than with data | 0–1h axis kept (nothing moves), "No focus time in this period." in the plot |
+| 13 | Stats chart | Bars announced as "Nov 2, 2026 at 12 AM to …" with no value | Day/hour label + "Work, 1h 30m" value |
+| 14 | Mood buttons | Selected: white label on green fill (≈ 2:1) | Tint wash + 2 pt ring in the mood colour, primary label |
+| 15 | Intention suggestions | List drawn over the field in the live window (fixed 46 pt offset); 1 pt border | Placed under the field by a geometry reader at any text size (4 pt gap); row text lines up with the field's text at 12 pt; hairline border; highlight concentric (4 pt in 8 pt, 4 pt inset) |
+| 16 | Menu bar item | Width shrank when 10m → 9m (and 10:00 → 9:59), shifting the items to its left | Width reserved for "00m" / "00:00" (`TimeText.widthTemplate`, unit-tested) |
+| 17 | Contrast | `.tertiary` text: notes hint, break-screen Esc line, panel shortcut keys (≈ 1.9:1) | System placeholder colour for the notes placeholder (same as every text field), `.secondary` for the others |
+| 18 | Notes pane | Earlier-today rows stretched to fill the pane (colour bar 145 pt tall) | Rows at their own height |
+| 19 | Window | Side pane showed Today when the window opened on a running session | Notes while focusing, Today otherwise, also on open |
+| 20 | Settings ▸ Categories | Category List with `minHeight: 200`: 3 rows then ~128 pt of empty section; doubled full-width line above Add Category | List sized to its rows (31 pt pitch, scrolls past 8), last separator hidden; empty state text |
+| 21 | Settings ▸ Shortcuts | Key combos in a monospaced font (⌘↩ and ⌘P didn't line up) | System font, secondary |
+| 22 | Notifications | Denied state only in the panel, as two caption lines | Panel: bell-slash notice with what still happens + link. Settings ▸ General: a Notifications row (On / Not asked yet / off with "Open Notification Settings…") |
+| 23 | Break screen | Two prominent buttons while a reflection waits (Save and Back to Work); translucent `background.opacity(0.6)` card on the glass; `.padding(40)` | Back to Work is prominent only without a reflection; system `.regularMaterial` card; `Spacing.xxl` |
+| 24 | Dial in the menu bar panel | Ticks invisible in the real glass panel (Canvas `.tertiary` went vibrant) | Resolved `tertiaryLabelColor` / `quaternaryLabelColor`: ticks visible (real panel shot) |
+| 25 | Panel | "Short break" caption touched the ring at 104 pt; long "Today:" line truncated | Caption scales to 80 %; today line wraps |
+| 26 | Colour swatches | Selected swatch marked with a white checkmark (invisible on yellow/mint); 1 pt border | 2 pt primary ring around the selected swatch, hairline swatch edge |
+
+### Golden Gate + light/dark
+
+- **Menus are text only**: the menu bar panel's footer rows lost their decorative symbols
+  (Open Focus Window, Stats, Settings…, About, Quit). Category menus keep their colour dots
+  (information); "No Category" got a gray dot so the list is consistent.
+- **Toolbar**: the standard toolbar (segmented Timer/Stats, Export) on the system glass; no
+  drawn strips. Stats header sits below it in content with a hairline.
+- **No sidebar** in Focus (two panes split by a hairline), so the sidebar rules don't apply.
+- **Inactive windows**: system controls grey out; the custom round Pause/Resume button now
+  does too (`appearsActive`). The dial ring, goal dots and category colours stay coloured:
+  they're progress/data, like a progress bar. Inactive shot: `main-idle-inactive-light.png`.
+- **Glass**: only system materials (break screen `fullScreenUI` + `regularMaterial` card;
+  the system menu bar window). Real-panel radius measured 17.1 pt; the row hover highlight is
+  concentric (`17 − 8 = 9`).
+- **Light and dark**: every surface shot in both (`*-light.png` / `*-dark.png`). No drawn
+  pure black/white surfaces (white only as text/icons on accent fills, like system
+  buttons). Placeholder text: light #8E8E8E on #F7F7F7 (the system placeholder colour, 3.1:1,
+  accepted as for every field), dark #AEAEAF on #36383A (5.5:1). No layer colours in Focus.
+
+### Gates
+
+- `scripts/lint.sh Focus`: pass (was 5 failures, 11 warnings).
+- `scripts/check.sh Focus --perf`: PASS. 114 tests in 13 suites (+4: chart axis ×3, width
+  template). Perf (busy machine, load 4.4): launch 158 ms, first status item 320 ms, idle CPU
+  0.002 % lowest, footprint 21.1 MB. The final `check.sh` run landed at load 17 (other agents
+  building) and read 0.375 % lowest; a re-run straight after (load 16) passed: launch 151 ms,
+  status item 275 ms, idle CPU 0.002 % lowest, 21.0 MB. Nothing in this pass adds idle work.
+- `drive tree`: no `[unlabeled]` in the main window (timer, stats), every Settings tab, the
+  panel window or the real status-item panel. Window buttons 16x16.
+
+### Screenshots
+
+`/tmp/slopapp-polish/focus/before/` (inventory before fixes) and
+`/tmp/slopapp-polish/focus/after/`: `main-idle|main-suggest|main-focus|main-focus-timeline|
+main-paused|main-reflection|main-break|main-offered|main-idle-inactive`, `stats-day|week|
+month|empty`, `panel-idle|focus|reflection|break|offered-denied` (panel test window),
+`realpanel-idle-light` and `realpanel-paused-light-1` (the real status-item panel),
+`break-screen` (windowed hook), `settings-general|general-denied|timer|categories|hide-apps|
+shortcuts|automation|about`, `status-idle|focus|paused`, each `-light` and `-dark` unless
+named otherwise.
+
+### Not done / owed
+
+- **Real panel in dark mode**: not shot — the owner came back (HID idle < 60 s) between
+  runs. The panel test window covers its layout in dark.
+- **Hover** on the panel rows and swatches: needs the real pointer to hover; designed in code
+  (accent row, white text), not seen.
+- **Drag to reorder categories** and dragging the dial knob: real-mouse drags, owner active.
+- In the offered-break state (auto-start breaks off) −5/+5 change the next *focus* length while
+  the dial shows the break: left as it was (behaviour, not finish); worth a look in a blind test.
+
+### SlopKit issue
+
+- `Hairline` in a window that sizes itself to its content (`NSHostingController` with
+  `.preferredContentSize`, the way `MenuBarExtra(.window)` panels are hosted) crashed AppKit's
+  constraint pass at launch (`_updateConstraintsForSubtreeIfNeeded…` exception), reproducibly;
+  `Divider` didn't. Focus uses an in-app `SelfSizingHairline` (`MenuPanel.swift`: lays out
+  1 pt, draws the top half with `scaleEffect`) in the panel, a candidate for SlopKit.
+  **Resolved 2026-11-06:** SlopKit's `Hairline` now always lays out 1 pt and draws one device
+  pixel, so Focus uses it in the panel and `SelfSizingHairline` is gone.
+
 ## Sources
 
 - [Session website](https://www.stayinsession.com/)
 - [Session Learn (help index)](https://www.stayinsession.com/learn)
+- [Session: getting started guide (parity pass)](https://www.stayinsession.com/learn/getting-started-with-session-pomodoro-app)
+- [Session URL scheme](https://www.stayinsession.com/learn/session-url-scheme)
+- [Session export data](https://www.stayinsession.com/learn/export-data)
+- [Session changelog](https://www.stayinsession.com/changelog)
 - [Session on the Mac App Store](https://apps.apple.com/us/app/session-pomodoro-focus-timer/id1521432881)
 - [Session on Setapp](https://setapp.com/apps/session)
 - [Product Hunt reviews](https://www.producthunt.com/posts/session-3/reviews)

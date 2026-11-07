@@ -29,7 +29,10 @@ enum StatusImage {
             .withSymbolConfiguration(config) ?? NSImage()
         let glyphSize = glyph.size
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
-        let textSize = text.map { ($0 as NSString).size(withAttributes: attributes) } ?? .zero
+        // Width reserved for the widest text of the same shape ("9m" reserves "00m", "9:59"
+        // reserves "00:00"), so the item doesn't narrow when 10m becomes 9m and push the
+        // menu bar items to its left.
+        let textSize = text.map { (TimeText.widthTemplate(for: $0) as NSString).size(withAttributes: attributes) } ?? .zero
         let gap: CGFloat = text == nil ? 0 : 4
         let height = ceil(max(glyphSize.height, font.ascender - font.descender))
         let width = ceil(glyphSize.width + gap + textSize.width)

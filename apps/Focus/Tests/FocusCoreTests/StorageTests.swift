@@ -42,7 +42,7 @@ struct StorageTests {
         try handle.seekToEnd()
         try handle.write(contentsOf: Data("{not json\n".utf8))
         try handle.close()
-        try store.append(SessionRecord(startedAt: t0, endedAt: t0.addingTimeInterval(1), planned: 60, focused: 60, completed: true, label: "b"))
+        try store.append(SessionRecord(startedAt: t0.addingTimeInterval(1), endedAt: t0.addingTimeInterval(1), planned: 60, focused: 60, completed: true, label: "b"))
         #expect(store.records(since: t0.addingTimeInterval(-10)).map(\.label) == ["a", "b"])
     }
 

@@ -7,8 +7,21 @@ public protocol FocusStorage: AnyObject {
     func loadSettings() -> TimerSettings?
     func saveSettings(_ settings: TimerSettings) throws
     func append(_ record: SessionRecord) throws
-    /// Records that ended on or after `since`, oldest first.
+    /// Records that ended on or after `since`, oldest first, latest version of each,
+    /// deleted ones left out.
     func records(since: Date) -> [SessionRecord]
+    /// Every record, as `records(since:)`.
+    func allRecords() -> [SessionRecord]
+}
+
+extension SessionRecord {
+    /// The current version of each record from log lines in the order written: the last line
+    /// for an id wins, deleted ones are dropped. Sorted by end time.
+    public static func latest(_ lines: [SessionRecord]) -> [SessionRecord] {
+        var byID: [String: SessionRecord] = [:]
+        for line in lines { byID[line.id] = line }
+        return byID.values.filter { !$0.deleted }.sorted { ($0.endedAt, $0.id) < ($1.endedAt, $1.id) }
+    }
 }
 
 /// Files in one folder: `state.json`, `settings.json` and `history.jsonl` (one session per
@@ -60,7 +73,13 @@ public final class FileStorage: FocusStorage {
             if record.endedAt < stopBefore { break }
             if record.endedAt >= since { found.append(record) }
         }
-        return found.sorted { $0.endedAt < $1.endedAt }
+        return SessionRecord.latest(found.reversed())
+    }
+
+    public func allRecords() -> [SessionRecord] {
+        guard let data = try? Data(contentsOf: historyURL) else { return [] }
+        let lines = data.split(separator: 0x0A).compactMap { try? decoder.decode(SessionRecord.self, from: Data($0)) }
+        return SessionRecord.latest(lines)
     }
 
     private func load<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
@@ -109,5 +128,6 @@ public final class MemoryStorage: FocusStorage {
         if failWrites { throw WriteError() }
         history.append(record)
     }
-    public func records(since: Date) -> [SessionRecord] { history.filter { $0.endedAt >= since } }
+    public func records(since: Date) -> [SessionRecord] { SessionRecord.latest(history).filter { $0.endedAt >= since } }
+    public func allRecords() -> [SessionRecord] { SessionRecord.latest(history) }
 }

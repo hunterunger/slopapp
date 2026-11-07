@@ -27,10 +27,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observe(local, .NSSystemClockDidChange) { controller.refresh() }
         observe(local, .NSSystemTimeZoneDidChange) { controller.refresh() }
         observe(local, .NSCalendarDayChanged) { controller.refresh() }
-        // Opening the menu: show exact numbers, and notice a permission change.
-        observe(local, NSMenu.didBeginTrackingNotification) {
-            controller.refresh()
-            Task { await controller.refreshPermission() }
+        DockPresence.start()
+        AppModel.breakScreen.start()
+        if TestHooks.openWindowAtLaunch { FocusWindow.show() }
+        PanelTestWindow.showIfAsked()
+        if Snapshots.runIfAsked() {
+            NSApp.terminate(nil)
         }
     }
 
@@ -41,8 +43,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observers.append((center, token))
     }
 
+    /// Opening Focus again (Finder, Spotlight, the Dock) brings up its window, like the original.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        standard.applicationShouldHandleReopen(sender, hasVisibleWindows: flag)
+        let handled = standard.applicationShouldHandleReopen(sender, hasVisibleWindows: flag)
+        if !flag { FocusWindow.show() }
+        return handled
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {

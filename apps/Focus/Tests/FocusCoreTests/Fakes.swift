@@ -122,6 +122,13 @@ actor FakeShortcuts: ShortcutRunner {
     }
 }
 
+@MainActor
+final class FakeBlocker: AppHiding {
+    private(set) var calls: [Set<String>?] = []
+    var current: Set<String>? { calls.last ?? nil }
+    func block(_ bundleIDs: Set<String>?) { calls.append(bundleIDs) }
+}
+
 /// Everything a controller test needs, wired together.
 @MainActor
 struct Rig {
@@ -131,6 +138,7 @@ struct Rig {
     let shortcuts: FakeShortcuts
     let scheduler: ManualScheduler
     let activity = FakeActivity()
+    let blocker = FakeBlocker()
     var reduceMotion = false
     let controller: FocusController
 
@@ -151,7 +159,7 @@ struct Rig {
         let s = scheduler
         controller = FocusController(
             storage: storage, notifier: notifier, sound: sound, shortcuts: shortcuts,
-            scheduler: scheduler, activity: activity, clock: { s.now }, calendar: utc,
+            scheduler: scheduler, activity: activity, blocker: blocker, clock: { s.now }, calendar: utc,
             reduceMotion: { reduceMotion }
         )
     }

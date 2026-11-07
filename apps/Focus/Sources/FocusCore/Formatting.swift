@@ -19,6 +19,17 @@ public enum TimeText {
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
 
+    /// The text whose width the menu bar item reserves for `text`: every digit as 0, at least
+    /// two before the first separator ("9m" → "00m", "9:59" → "00:00"), so the item doesn't
+    /// narrow when 10m becomes 9m.
+    public static func widthTemplate(for text: String) -> String {
+        var template = String(text.map { $0.isNumber ? "0" : $0 })
+        // Hours ("1:05:00") stay one digit: a session never runs ten hours.
+        let hasHours = template.filter { $0 == ":" }.count >= 2
+        if !hasHours, template.prefix(while: { $0 == "0" }).count == 1 { template.insert("0", at: template.startIndex) }
+        return template
+    }
+
     /// "18 min left", "1 hr 5 min left", "1 min left".
     public static func left(_ seconds: TimeInterval, unit: TimeInterval = 60) -> String {
         "\(duration(minutes: max(1, minutesLeft(seconds, unit: unit)))) left"

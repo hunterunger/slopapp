@@ -45,7 +45,7 @@ final class SystemNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate
         return await permission()
     }
 
-    private static let logger = Logger(subsystem: "app.slopapp.focus", category: "notifications")
+    nonisolated private static let logger = Logger(subsystem: "app.slopapp.focus", category: "notifications")
 
     func post(_ content: AlertContent) {
         let note = UNMutableNotificationContent()

@@ -111,7 +111,10 @@ struct TimerMachineTests {
     @Test func breakEndingGoesIdleByDefault() {
         var m = started(.shortBreak)
         let events = m.advance(settings: settings, unit: 60, now: t0.addingTimeInterval(minutes(5)), lateAfter: late)
-        #expect(events == [.ended(.shortBreak), .alert(.breakDone(focusStarted: false, late: false))])
+        let rest = SessionRecord(startedAt: t0, endedAt: t0.addingTimeInterval(minutes(5)), planned: minutes(5),
+                                 focused: minutes(5), completed: true, label: nil, kind: .shortBreak)
+        #expect(events == [.ended(.shortBreak), .recorded(rest), .alert(.breakDone(focusStarted: false, late: false))])
+        #expect(!rest.counted, "breaks never count as sessions")
         #expect(m.state.run == nil)
     }
 
@@ -155,9 +158,13 @@ struct TimerMachineTests {
         #expect(m.state.cycleCount == 1)
     }
 
-    @Test func stoppingABreakLogsNothing() {
+    @Test func stoppingABreakLogsItAsABreak() {
         var m = started(.shortBreak)
-        #expect(m.stop(now: t0.addingTimeInterval(minutes(1))) == [.ended(.shortBreak)])
+        let events = m.stop(now: t0.addingTimeInterval(minutes(1)))
+        guard case .recorded(let record) = events.last else { Issue.record("no record"); return }
+        #expect(events.first == .ended(.shortBreak))
+        #expect(record.kind == .shortBreak && record.focused == minutes(1) && !record.counted)
+        #expect(m.state.cycleCount == 0)
     }
 
     @Test func addingTimeWorksRunningAndPaused() {
@@ -175,7 +182,8 @@ struct TimerMachineTests {
         var m = started(.shortBreak)
         let now = t0.addingTimeInterval(minutes(2))
         let events = m.skipBreak(settings: settings, unit: 60, now: now)
-        #expect(events == [.ended(.shortBreak), .started(.focus)])
+        #expect(events.count == 3)
+        #expect(events.first == .ended(.shortBreak) && events.last == .started(.focus))
         #expect(m.state.run?.startedAt == now)
         // Skipping during focus does nothing.
         #expect(m.skipBreak(settings: settings, unit: 60, now: now).isEmpty)

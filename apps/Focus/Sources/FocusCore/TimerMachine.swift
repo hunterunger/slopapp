@@ -42,8 +42,7 @@ public struct TimerMachine: Sendable {
         if let run = state.run, run.phase == phase, !run.isPaused { return [] }
         var events = endCurrentRun(at: now)
         state.pendingBreak = nil
-        let label = phase == .focus ? state.label : nil
-        state.run = Run(phase: phase, length: settings.length(of: phase, unit: unit), startedAt: now, label: label)
+        state.run = makeRun(phase, settings: settings, unit: unit, startedAt: now)
         events.append(.started(phase))
         return events
     }
@@ -65,6 +64,7 @@ public struct TimerMachine: Sendable {
         run.pausedRemaining = run.remaining(at: now)
         run.endsAt = nil
         run.lastSeen = now
+        run.pausedAt = now
         state.run = run
         return []
     }
@@ -74,6 +74,8 @@ public struct TimerMachine: Sendable {
         run.endsAt = now.addingTimeInterval(left)
         run.pausedRemaining = nil
         run.lastSeen = now
+        run.pausedTotal = run.paused(at: now)
+        run.pausedAt = nil
         state.run = run
         return []
     }
@@ -82,6 +84,52 @@ public struct TimerMachine: Sendable {
     public mutating func stop(now: Date) -> [Event] {
         state.pendingBreak = nil
         return endCurrentRun(at: now)
+    }
+
+    /// Ends a focus session now as done: it counts, and the break follows as if it had run
+    /// to zero (started or offered, per the settings). Nothing is announced: the user did it.
+    public mutating func finish(settings: TimerSettings, unit: TimeInterval, now: Date) -> [Event] {
+        guard let run = state.run, run.phase == .focus else { return [] }
+        state.run = nil
+        var events: [Event] = [.ended(.focus), .recorded(makeRecord(for: run, endedAt: now, completed: true))]
+        countSession(endedAt: now)
+        let nextBreak = takeNextBreak(settings: settings)
+        if settings.autoStartBreaks {
+            state.run = makeRun(nextBreak, settings: settings, unit: unit, startedAt: now)
+            events.append(.started(nextBreak))
+        } else {
+            state.pendingBreak = nextBreak
+        }
+        return events
+    }
+
+    /// Takes time off whatever is running or paused, if more than that is left.
+    public mutating func shorten(by seconds: TimeInterval, now: Date) -> [Event] {
+        guard var run = state.run, seconds > 0, run.remaining(at: now) > seconds else { return [] }
+        run.planned -= seconds
+        if let left = run.pausedRemaining {
+            run.pausedRemaining = left - seconds
+        } else if let endsAt = run.endsAt {
+            run.endsAt = endsAt.addingTimeInterval(-seconds)
+        }
+        state.run = run
+        return []
+    }
+
+    /// The category for this and the next sessions. Nil: no category.
+    public mutating func setCategory(_ id: String?) {
+        state.categoryID = id
+        if var run = state.run, run.phase == .focus {
+            run.categoryID = id
+            state.run = run
+        }
+    }
+
+    /// Notes for the running focus session.
+    public mutating func setNotes(_ notes: String) {
+        guard var run = state.run, run.phase == .focus else { return }
+        run.notes = notes.isEmpty ? nil : notes
+        state.run = run
     }
 
     /// Adds time to whatever is running or paused.
@@ -138,14 +186,12 @@ public struct TimerMachine: Sendable {
         var events: [Event] = [.ended(run.phase)]
 
         if run.phase == .focus {
-            let record = SessionRecord(startedAt: run.startedAt, endedAt: endsAt, planned: run.planned,
-                                       focused: run.planned, completed: true, label: run.label)
-            events.append(.recorded(record))
+            events.append(.recorded(makeRecord(for: run, endedAt: endsAt, completed: true)))
             countSession(endedAt: endsAt)
             let nextBreak = takeNextBreak(settings: settings)
             var breakStarted = false
             if settings.autoStartBreaks {
-                let breakRun = Run(phase: nextBreak, length: settings.length(of: nextBreak, unit: unit), startedAt: endsAt)
+                let breakRun = makeRun(nextBreak, settings: settings, unit: unit, startedAt: endsAt)
                 if let breakEnd = breakRun.endsAt, breakEnd > now {
                     var running = breakRun
                     running.lastSeen = now
@@ -158,9 +204,10 @@ public struct TimerMachine: Sendable {
             }
             events.append(.alert(.focusDone(nextBreak: nextBreak, breakStarted: breakStarted, late: late)))
         } else {
+            events.append(.recorded(makeRecord(for: run, endedAt: endsAt, completed: true)))
             var focusStarted = false
             if settings.autoStartFocus, !late {
-                var focusRun = Run(phase: .focus, length: settings.length(of: .focus, unit: unit), startedAt: endsAt, label: state.label)
+                var focusRun = makeRun(.focus, settings: settings, unit: unit, startedAt: endsAt)
                 focusRun.lastSeen = now
                 state.run = focusRun
                 focusStarted = true
@@ -176,11 +223,25 @@ public struct TimerMachine: Sendable {
     private mutating func endCurrentRun(at now: Date) -> [Event] {
         guard let run = state.run else { return [] }
         state.run = nil
-        guard run.phase == .focus else { return [.ended(run.phase)] }
-        let record = SessionRecord(startedAt: run.startedAt, endedAt: now, planned: run.planned,
-                                   focused: run.elapsed(at: now), completed: false, label: run.label)
+        let record = makeRecord(for: run, endedAt: now, completed: false)
+        guard run.phase == .focus else { return [.ended(run.phase), .recorded(record)] }
         if record.counted { countSession(endedAt: now) }
         return [.ended(.focus), .recorded(record)]
+    }
+
+    private func makeRun(_ phase: Phase, settings: TimerSettings, unit: TimeInterval, startedAt: Date) -> Run {
+        let isFocus = phase == .focus
+        return Run(phase: phase, length: settings.length(of: phase, unit: unit), startedAt: startedAt,
+                   label: isFocus ? state.label : nil, categoryID: isFocus ? state.categoryID : nil)
+    }
+
+    /// The log line for a phase that ended at `endedAt`.
+    private func makeRecord(for run: Run, endedAt: Date, completed: Bool) -> SessionRecord {
+        let ranToZero = completed && run.endsAt.map { endedAt >= $0 } ?? false
+        return SessionRecord(startedAt: run.startedAt, endedAt: endedAt, planned: run.planned,
+                             focused: ranToZero ? run.planned : run.elapsed(at: endedAt), completed: completed,
+                             label: run.label, kind: run.phase, categoryID: run.categoryID,
+                             paused: run.paused(at: endedAt), notes: run.notes)
     }
 
     private mutating func countSession(endedAt: Date) {

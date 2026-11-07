@@ -27,6 +27,10 @@ public final class FocusController {
     public private(set) var saveError: String?
     /// True for the "on" beats of the attention blink (when notifications can't show).
     public private(set) var isFlashing = false
+    /// Goes up whenever the history changes, so views showing it know to reload.
+    public private(set) var historyVersion = 0
+    /// The user closed this break's break screen.
+    public private(set) var breakScreenDismissed = false
 
     /// Length of a minute in seconds. 60, except in accelerated tests (`FOCUS_SECONDS_PER_MINUTE`).
     public let unit: TimeInterval
@@ -38,6 +42,9 @@ public final class FocusController {
     @ObservationIgnored private let shortcuts: any ShortcutRunner
     @ObservationIgnored private let scheduler: any Scheduler
     @ObservationIgnored private let activity: any ActivityToken
+    @ObservationIgnored private let blocker: any AppHiding
+    @ObservationIgnored private var blocking: Set<String>?
+    @ObservationIgnored private var historyCache: (version: Int, records: [SessionRecord])?
     @ObservationIgnored private let clock: @MainActor () -> Date
     @ObservationIgnored private let calendar: Calendar
     @ObservationIgnored private let reduceMotion: @MainActor () -> Bool
@@ -60,6 +67,7 @@ public final class FocusController {
         shortcuts: any ShortcutRunner,
         scheduler: any Scheduler,
         activity: any ActivityToken,
+        blocker: any AppHiding = NoAppHiding(),
         clock: @escaping @MainActor () -> Date = { Date() },
         calendar: Calendar = .current,
         unit: TimeInterval = 60,
@@ -71,6 +79,7 @@ public final class FocusController {
         self.shortcuts = shortcuts
         self.scheduler = scheduler
         self.activity = activity
+        self.blocker = blocker
         self.clock = clock
         self.calendar = calendar
         self.unit = unit
@@ -105,6 +114,39 @@ public final class FocusController {
     public var runningPhase: Phase? { state.run?.phase }
     public var isPaused: Bool { state.run?.isPaused ?? false }
     public var label: String? { state.label }
+    public var categoryID: String? { state.categoryID }
+    public var category: Category? { settings.category(id: state.categoryID) }
+    public var pendingReflection: SessionRecord? { state.pendingReflection }
+    /// Notes for the running focus session.
+    public var notes: String { state.run?.phase == .focus ? state.run?.notes ?? "" : "" }
+
+    /// The break screen should be up: it's on, a break is running, and it wasn't dismissed.
+    public var showsBreakScreen: Bool {
+        settings.breakScreen && (state.run?.phase.isBreak ?? false) && !breakScreenDismissed
+    }
+
+    /// Today's sessions and breaks, newest first.
+    public var todayRecords: [SessionRecord] {
+        records.filter { calendar.isDate($0.endedAt, inSameDayAs: now) }.reversed()
+    }
+
+    /// Every record in the log (latest version of each), oldest first. Read from disk once per
+    /// history change.
+    public func history() -> [SessionRecord] {
+        if let cache = historyCache, cache.version == historyVersion { return cache.records }
+        let all = storage.allRecords()
+        historyCache = (historyVersion, all)
+        return all
+    }
+
+    /// Past intentions matching what's typed so far.
+    public func suggestions(for query: String, limit: Int = 5) -> [IntentionSuggestion] {
+        IntentionSuggestions.make(query: query, records: history(), limit: limit)
+    }
+
+    /// The clock as the controller last saw it (views showing a running timer use their own).
+    public var currentDate: Date { now }
+    public var calendarInUse: Calendar { calendar }
 
     /// Overdue by more than this and the end counts as missed (the Mac was asleep).
     var lateAfter: TimeInterval { max(unit, 1) }
@@ -114,6 +156,172 @@ public final class FocusController {
     public func startFocus() {
         perform { m, s, u, now in m.start(.focus, settings: s, unit: u, now: now) }
         askPermissionOnce()
+    }
+
+    /// Starts a session from what was typed in the intention field: "Draft intro @work 45m"
+    /// sets the intention and category, and makes this one session 45 minutes.
+    public func startFocus(intention: String) {
+        let parsed = IntentionParser.parse(intention, categories: settings.categories)
+        perform { m, s, u, now in
+            m.setLabel(parsed.text)
+            if let id = parsed.categoryID { m.setCategory(id) }
+            var once = s
+            if let minutes = parsed.minutes { once.focusMinutes = minutes }
+            if m.state.run?.phase == .focus { _ = m.stop(now: now) }
+            return m.start(.focus, settings: once, unit: u, now: now)
+        }
+        askPermissionOnce()
+    }
+
+    /// Ends the running session now as done; the break follows.
+    public func finish() {
+        perform { m, s, u, now in m.finish(settings: s, unit: u, now: now) }
+    }
+
+    /// Takes five minutes off whatever is running, if more than that is left.
+    public func removeTime() {
+        let seconds = TimeInterval(TimerSettings.minutesAdded) * unit
+        perform { m, _, _, now in m.shorten(by: seconds, now: now) }
+    }
+
+    public var canRemoveTime: Bool {
+        guard let run = state.run else { return false }
+        return run.remaining(at: clock()) > TimeInterval(TimerSettings.minutesAdded) * unit
+    }
+
+    public func setCategory(_ id: String?) {
+        perform { m, _, _, _ in
+            m.setCategory(id)
+            return []
+        }
+    }
+
+    public func setNotes(_ notes: String) {
+        perform { m, _, _, _ in
+            m.setNotes(notes)
+            return []
+        }
+    }
+
+    // MARK: - Reflection
+
+    /// Saves how the last session went and clears the prompt.
+    public func reflect(mood: Mood?, notes: String) {
+        guard var record = state.pendingReflection else { return }
+        record.mood = mood
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        record.notes = trimmed.isEmpty ? nil : trimmed
+        save(record)
+        perform { m, _, _, _ in
+            m.state.pendingReflection = nil
+            return []
+        }
+    }
+
+    public func skipReflection() {
+        perform { m, _, _, _ in
+            m.state.pendingReflection = nil
+            return []
+        }
+    }
+
+    /// Changes a past record (mood, notes, intention, category) from Stats.
+    public func update(_ record: SessionRecord) {
+        var changed = record
+        changed.categoryName = settings.category(id: record.categoryID)?.name ?? record.categoryName
+        save(changed)
+        updateDisplay()
+    }
+
+    /// Removes a record from the history (the log keeps a line saying so).
+    public func delete(_ record: SessionRecord) {
+        var gone = record
+        gone.deleted = true
+        save(gone)
+        updateDisplay()
+    }
+
+    private func save(_ record: SessionRecord) {
+        do {
+            try storage.append(record)
+        } catch {
+            saveError = Self.saveErrorText
+        }
+        records = SessionRecord.latest(records + [record])
+        historyVersion += 1
+    }
+
+    // MARK: - Categories
+
+    @discardableResult
+    public func addCategory(name: String, color: CategoryColor) -> Category {
+        let category = Category(name: Self.uniqueName(name, among: settings.categories.map(\.name)), color: color)
+        updateSettings { $0.categories.append(category) }
+        return category
+    }
+
+    public func updateCategory(_ category: Category) {
+        updateSettings { settings in
+            guard let index = settings.categories.firstIndex(where: { $0.id == category.id }) else { return }
+            var c = category
+            c.name = c.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if c.name.isEmpty { c.name = settings.categories[index].name }
+            settings.categories[index] = c
+        }
+    }
+
+    /// Past sessions keep the category's name; the current selection falls back to none.
+    public func deleteCategory(id: String) {
+        updateSettings { $0.categories.removeAll { $0.id == id } }
+        if state.categoryID == id { setCategory(nil) }
+    }
+
+    public func moveCategories(from source: IndexSet, to destination: Int) {
+        updateSettings { settings in
+            let moving = source.map { settings.categories[$0] }
+            let before = source.filter { $0 < destination }.count
+            for index in source.reversed() { settings.categories.remove(at: index) }
+            settings.categories.insert(contentsOf: moving, at: max(0, min(destination - before, settings.categories.count)))
+        }
+    }
+
+    static func uniqueName(_ name: String, among names: [String]) -> String {
+        let base = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New Category" : name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard names.contains(base) else { return base }
+        var n = 2
+        while names.contains("\(base) \(n)") { n += 1 }
+        return "\(base) \(n)"
+    }
+
+    // MARK: - Break screen
+
+    public func dismissBreakScreen() {
+        breakScreenDismissed = true
+    }
+
+    // MARK: - App hiding
+
+    public func addBlockedApp(_ app: BlockedApp) {
+        updateSettings { settings in
+            guard !settings.blockedApps.contains(where: { $0.bundleID == app.bundleID }) else { return }
+            settings.blockedApps.append(app)
+            settings.blockedApps.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+    }
+
+    public func removeBlockedApp(bundleID: String) {
+        updateSettings { $0.blockedApps.removeAll { $0.bundleID == bundleID } }
+    }
+
+    /// Hide listed apps while a focus session is running (not paused, not on a break).
+    private func applyBlocking() {
+        let run = machine.state.run
+        let wanted: Set<String>? = settings.hideApps && !settings.blockedApps.isEmpty
+            && run?.phase == .focus && run?.isPaused == false
+            ? Set(settings.blockedApps.map(\.bundleID)) : nil
+        guard wanted != blocking else { return }
+        blocking = wanted
+        blocker.block(wanted)
     }
 
     /// Starts the offered break, or a short one if none is offered.
@@ -185,6 +393,7 @@ public final class FocusController {
         } else {
             updateDisplay()
         }
+        applyBlocking()
     }
 
     /// Looks at the clock again. Call on wake, clock or time zone changes, a new day, and
@@ -232,18 +441,22 @@ public final class FocusController {
     private func commit(_ events: [TimerMachine.Event], announce: Bool) {
         for event in events {
             switch event {
-            case .recorded(let record):
-                records.append(record)
-                do {
-                    try storage.append(record)
-                } catch {
-                    saveError = Self.saveErrorText
+            case .recorded(var record):
+                if record.isFocus {
+                    record.categoryName = settings.category(id: record.categoryID)?.name
+                }
+                save(record)
+                // Ask how it went, for anything longer than a minute.
+                if record.isFocus, settings.askReflection, record.focused >= unit {
+                    machine.state.pendingReflection = record
                 }
             case .started(.focus):
                 if announce { notifier.clearDelivered() }
+                machine.state.pendingReflection = nil
                 runShortcut(settings.startShortcut)
             case .started:
                 if announce { notifier.clearDelivered() }
+                breakScreenDismissed = false
             case .ended(.focus):
                 runShortcut(settings.endShortcut)
             case .alert(let alert):
@@ -268,6 +481,7 @@ public final class FocusController {
         pruneRecords()
         updateDisplay()
         reschedule()
+        applyBlocking()
     }
 
     private func deliver(_ alert: Alert) {
