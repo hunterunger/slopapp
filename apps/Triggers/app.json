@@ -1,0 +1,16 @@
+{
+  "slug": "triggers",
+  "name": "Triggers",
+  "tagline": "Your own gestures, shortcuts and actions.",
+  "replaces": [
+    "BetterTouchTool"
+  ],
+  "category": "Utilities",
+  "icon": "pointer",
+  "menuBarOnly": true,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.triggers"
+}

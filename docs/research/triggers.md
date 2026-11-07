@@ -706,3 +706,191 @@ One section per round, newest last. See docs/dev-cycle.md step 5.
 - The doc's other recommendations stand: window actions through shared SlopKit layout code, Run
   Shortcut instead of shell/AppleScript actions, no hyper key or keyboard tap in v1, three-finger
   physical click no earlier than v1.1 and only if latency holds.
+
+## macOS 27 spikes (2026-11-07, macOS 27.2 build 26B123, MacBook Pro Mac16,5)
+
+Spike code lives outside the repo (`/tmp/triggers-test/spikes/`); the throwaway test target is
+`/tmp/triggers-test/target/TriggersTestTarget.app` (source `main.swift` next to it).
+
+| # | Question | Result | What we build on it |
+|---|---|---|---|
+| 1 | Does MultitouchSupport need a permission? | **No TCC check at all.** An ad-hoc signed, hardened-runtime `.app` launched through LaunchServices (so it inherits nothing from the terminal), with Accessibility untrusted: `dlopen` ok; every symbol we use resolves (`MTDeviceCreateList`, `MTRegisterContactFrameCallback`, `…WithRefcon`, `MTDeviceStart/Stop/IsRunning/IsBuiltIn/GetFamilyID/GetSensorSurfaceDimensions/GetDeviceID`); one device (built-in, family 111, surface 15600×9600, driver 4); `MTDeviceStart` returns 0 and the device reports running. `tccd` logged nothing for the process (no `kTCCServiceListenEvent`). Frames only arrive while fingers touch, so **frame delivery without permission is an owner hand test** (the editor's recognize-only pad shows it). | Runtime `dlopen`/`dlsym`, no linking. The C struct is declared in a tiny C target so the compiler checks its 96-byte layout (`_Static_assert`). Frames are validated (positions 0…1, states 0…7, ≤ 20 contacts); garbage switches gestures off. |
+| 2 | Do Carbon hotkeys fire while a password field holds secure input? | **Yes.** Test target frontmost with its `NSSecureTextField` focused (`kCGSSessionSecureInputPID` = the target's pid); ⌃⌥⌘J posted at the HID level (owner idle 1159 s) fired the separate listener's `RegisterEventHotKey` handler, which saw `IsSecureEventInputEnabled() == true`. The key didn't reach the target (consumed by the hotkey, as expected). | Key-combo triggers via `KeyboardShortcuts`/Carbon as planned; no "paused while a password field is active" state needed. |
+| 3 | Can touches be read from public gesture events instead? | **Not run unattended** (needs real fingers). Not needed: spike 1 shows the private source loads and starts on 27.2. | No fallback source in v1; `TouchFrameSource` keeps the door open. |
+| 4 | Touch frame rate | **Owner hand test** (needs real fingers). Public reports say ~8 ms (≈120 Hz) on Force Touch trackpads. | The recognizer is budgeted per frame (p99 ≤ 20 µs) independent of rate; Settings › Advanced › Export Diagnostics records the measured mean/min/max frame interval from the last touch session, so the owner's hand test gives the number. |
+
+## Build notes (2026-11-07, steps 3–4)
+
+### What was built
+
+`apps/Triggers` (menu bar utility + library window). Core in `Sources/TriggersCore`, no system
+calls: `GestureRecognizer` (frames → 3/4-finger taps and swipes, per-device state, palm and
+landing-window rules, no allocation per frame), `RoutingTable` (app › Browsers › All Apps,
+all-apps off per app, pass-through, O(1) lookups, per-front-app hotkeys and mouse routes),
+`MouseTapDecider` (the tap's whole decision; down/up pairing; our own posted events marked and
+passed), `ConflictChecker` + `SystemGestureSettings` (reads the two trackpad domains and the
+Dock's, never writes), `ConfigCodec` (versioned JSON, refuses newer files, import merge),
+`Starter`s, `RecentLog`, `KeyPostPlan`, `WindowLayout.swift` (halves, maximize, center, next
+display, flips, min-size settle; written to move into SlopKit), `TriggerEngine` (tells each
+source when to run, routes, recursion guard, dispatch latency), `LatencyStats`, `ReplayTimeline`
+and `SyntheticTouches`. `Sources/TriggersTouchShim` declares the private contact struct in C with
+a `_Static_assert` on its 96-byte size.
+
+App: `TouchSource.swift` (the only file that knows MultitouchSupport exists: `dlopen`/`dlsym`,
+frame validation, recognizer under an uncontended lock on the framework's thread, rescans on
+wake and on IOKit add/remove), `MouseTap.swift` (session tap on its own thread, mask
+other-mouse down/up/dragged only, timeouts re-enabled once then give up with a fix-it,
+`CGGetEventTapList` stats), `Hotkeys.swift` (Carbon hotkeys, system shortcut list via
+`CopySymbolicHotKeys`, layout-aware names), `Performer.swift` (the only production code that
+posts; test-mode guard built in), editor (`EditorView`, `TriggerSheet`, `ActionEditor`), status
+menu, Settings, `TestHooks`, offscreen `Snapshots`.
+
+### Decisions made while building
+
+- **The whole New/Edit sheet is "recording".** While it's open nothing performs, hotkeys are
+  unregistered (so an existing combo can be pressed and recorded) and the tap's routes are
+  empty (so buttons reach the sheet). This is the recognize-only pad the owner can use to check
+  their hardware. A new sheet starts listening; conflict notes and Add wait until an input is
+  actually recorded or picked (otherwise a new sheet opened with a bogus duplicate warning).
+- **Mouse buttons and key combos are recorded with a local event monitor** in the sheet, not
+  the tap: no permission needed to record, and the tap stays minimal.
+- **Posting keys presses and releases the modifiers as their own events**, then restores what
+  the person still holds from the trigger. Found the hard way: one spike key post with modifier
+  flags (SlopDrive `key --global`, which sends only the key) left left-⌘⌥⌃ marked as held in the
+  window server's HID state until I released them (owner idle 34 min, screen locked; key-ups
+  only). Every gesture afterwards read as ⌃⌥⌘-gesture. `KeyPostPlan` now ends with the system's
+  modifier state where it started; tests check it. **Lead: SlopDrive's `key --global` with
+  modifiers can leave modifiers stuck (tools/ is out of my scope).**
+- **First-post warm-up.** The first `CGEvent` in a process costs ~44 ms and the first post ~8 ms
+  (measured); Triggers creates and posts a no-op flags event to itself 1 s after launch, so the
+  first real trigger isn't slow (first press then arrived 2.6 ms after recognition).
+- **Delete** is the standard Edit › Delete (`onDeleteCommand`), not a ⌫ key equivalent, which
+  would take Backspace from the search field.
+- **Browsers group and pass-through ("Do Nothing") shipped** (cheap, as the doc hoped). Picking
+  a menu item can read the scope app's real menus through Accessibility ("Read Menus") or take a
+  typed path ("File › Export…", matched case-insensitively, "..." = "…").
+- **Starters follow the owner's list:** three-finger tap → middle click; four-finger swipe right
+  → Back / left → Forward in browsers; buttons 4/5 → Back/Forward in browsers and Finder. On
+  default macOS settings the four-finger horizontal swipe also switches full-screen apps; the
+  starter row says so up front.
+- **Shared code built in-app:** `WindowLayout.swift` (pure layout math for SlopKit/Tiles) and
+  `AppPresence` (Snapper's regular-while-a-window-is-open pattern, now in a second app). SlopKit
+  wasn't edited.
+- **Icon:** the tile is a laptop palm rest; the keyboard's bottom row peeks in at the top, the
+  trackpad (printed) runs off the bottom, three fingertips (lingonberry) swipe up with short
+  trails. New tile colour **bilberry `#5B5A84`** added to `TILES` (all 20 were taken). Plate:
+  monkshood (*Aconitum napellus*, Köhler plate 72), for leaves divided like spread fingers.
+  `export_web.py` not run (writes into `web/`, outside this brief).
+- **App name clash:** the core's binding type is `TriggerBinding` (SwiftUI owns `Binding`).
+
+### Deferred (with reasons)
+
+- **System actions** (Mission Control, App Exposé, Spaces, Notification Center) and **media
+  keys** (both *should*): each needs per-action verification on macOS 27 and some depend on the
+  person's own shortcuts; v1.1.
+- **Ignore gestures while typing** (*later*): needs a keyboard tap, out by owner decision.
+- **Three-finger physical click**, Magic Mouse, hyper key: owner decisions.
+- **Custom app groups**, Recent list inside the editor (it's in the status menu), App Intents.
+- `scripts/perf.sh` tap-stats extension: `scripts/` is outside this brief; the same numbers come
+  from the in-app self-test (`tapSelfTest` hook) and Export Diagnostics instead.
+
+### Gates and measurements
+
+| Gate | Result |
+|---|---|
+| Unit tests | **84 tests in 9 suites, all pass** (recognizer 19, router + tap decider 16, engine 15, model/conflicts/store/layout/bench 34) |
+| `scripts/check.sh Triggers --perf` | **Pass**: lint, icon, tests, universal release bundle, smoke, catalog |
+| Launch / first status item | 130 ms / 272 ms (budgets 300 / 600) |
+| Idle CPU / footprint | 0.006% (lowest window) / 21.9 MB (budgets 0.2% / 50 MB) |
+| Recognizer per frame | Benchmark (debug, 100k frames): p99 ≤ 1 µs, max 26 µs. Release, through the live `TouchProcessor` path: mean 0.7 µs, p99 ≤ 5 µs, max 3.8 µs. Budget p99 ≤ 20 µs |
+| CPU while touching | 10 s of 120 Hz two-finger scrolling replayed through the real processor on a background thread: 0.18% vs 0.03% idle, about **0.15% above baseline** (budget 1%). Real fingers: owner hand test |
+| Event tap callback | Real tap, 100 posted presses of an unused button (22) swallowed by a test-target binding: our callback n=200, mean 0.6 µs, **p99 ≤ 5 µs, max 14.4 µs** (budget p99 50 µs, max 1 ms), no timeouts. 100 presses → 100 Test › Ping in the target; 0 raw button events reached it |
+| Tap mask | `CGGetEventTapList`: one tap, mask `0xe000000` = other-mouse down/up/dragged only, enabled. Its latency counters read 0.0 µs for these events, so our histogram is the number of record |
+| Recognized → dispatched | replay: mean 18–27 µs, max 80 µs (budget 10 ms) |
+| Key posted | first press after launch: post done 1.2 ms after recognition, arrived in the test target 2.6 ms after (budget 15 ms); later presses 0.2–0.9 ms |
+| Window move | **not measured**: the screen was locked (see below) |
+| Typing latency | unchanged by construction: no keyboard tap (mask check above) |
+
+### Walkthrough (replay, test target, in-process)
+
+The Mac's screen locked (display asleep) at 16:13, ten minutes into the session, and stayed
+locked. While locked, macOS hides windows from Accessibility, so `scripts/drive tree` / `shot`
+and window moves can't run. What ran instead:
+
+- **Replay walkthrough** (`TRIGGERS_REPLAY`, `TRIGGERS_ACT_ONLY_IN` + `TRIGGERS_FRONT_APP` = the
+  throwaway test target, `--direct` for Accessibility, `TRIGGERS_NO_INPUT=1`): three-finger tap →
+  ⌃⌥X arrived in the target with exactly ⌃⌥ flags; four-finger tap → middle click arrived as
+  button 2; button 4 → Test › Ping chosen; ⌃⌥⌘J → Test › Nested › Deep Ping chosen; three-finger
+  swipe down → Open URL (faked, logged); swipe up (All Apps) → Run Shortcut (faked, logged);
+  button 5 → passed through by the target's "Do Nothing" over an All Apps binding; two-finger tap
+  → nothing; window moves → "No window to move" (Accessibility shows no windows while locked).
+- **Pause**: nothing performs. **All-apps off in the target**: its own bindings run, the All Apps
+  swipe doesn't. **Recording**: every input named, nothing performed. **Resume**: all fire.
+- **Offscreen snapshots** (`TRIGGERS_SNAPSHOT_DIR`, light and dark) reviewed: first-run empty
+  state with starters and the live conflict note, New Trigger sheet (listening), Edit sheet
+  with the Mission Control note and Press Keys, menu-item sheet, info bars (paused, Accessibility,
+  gestures unavailable), Settings General. The sidebar and table render as placeholders
+  offscreen, so those need a real screenshot. Paths: `/tmp/triggers-test/snap/*.png`.
+- **Not tested: owner active.** The screen unlocked at about 17:00 with the owner at the Mac.
+  After two waits of up to 10 minutes each, the walkthrough script
+  (`/tmp/triggers-test/walk/walk.sh`, which re-checks idle ≥ 60 s before every step) aborted
+  both times on the first step because the owner was active again. Still to do on an idle,
+  unlocked Mac: `scripts/drive tree Triggers` / `--menubar` unlabeled check, window screenshots
+  light/dark (including an inactive window), the status menu screenshot, and window moves with
+  their latency (`/tmp/triggers-test/walk/windows.sh`). A static review found no icon-only
+  control without an accessibility label.
+
+### Gap review (v1 scope)
+
+| v1 item | Status |
+|---|---|
+| Status menu (status line, Edit, Pause, Turn Off in app, Recent, footer; paused icon) | Built; replay-verified via hooks. Screenshot pending unlock |
+| Editor (sidebar, table with on/off, search, undo, empty state + starters) | Built; empty state reviewed offscreen; sidebar/table screenshot pending unlock |
+| Sheet with record-by-doing + picker fallback, never performs | Built; recording verified by replay |
+| Trackpad taps/swipes, modifiers, per device, sleep/wake | Built and unit-tested; real fingers = owner hand test |
+| Mouse buttons with modifiers, swallow only on match | Built; real tap verified with the self-test |
+| Key combos per front app (Carbon) | Built; replay-verified; secure input spike passed |
+| Scope precedence, all-apps off, Browsers, pass-through | Built; tests + replay |
+| Actions: keys, clicks, menu item, open, Shortcut, window moves | Built; all but window moves verified in the test target; window moves need an unlocked screen |
+| Conflict notes from real trackpad settings and duplicates, Settings buttons | Built; tests + snapshot |
+| Accessibility bar, fix-it item, live re-check, badges, tap torn down on revocation | Built; unit test for teardown; real revocation = owner hand test |
+| Gestures-unavailable state | Built (`TRIGGERS_GESTURES_UNAVAILABLE`); snapshot reviewed |
+| Settings General + About (+ Shortcuts, Advanced) | Built; snapshot reviewed |
+| Core tests | 84 |
+| Test mode, replay, throwaway target | Built and used |
+| Performance | All measured budgets pass (window moves pending) |
+
+### Design review (§10)
+
+Passing on code and offscreen review: 1 (starters are one click; a trigger is one sheet), 2
+(system controls, accent colour, no hex, both modes on snapshots), 3 (every editor action in
+File/Edit/Trigger menus with shortcuts; status menu has the rest), 4 (Esc cancels the sheet, or
+stops listening first; ⌘, and ⌘Q from the footer), 5, 6 (title-case menus and buttons, sentence-
+case labels, errors say what to do), 7 (first-run and per-scope empty states with one action), 8
+(Accessibility asked only when an enabled trigger needs it; live re-check; no prompt at
+launch), 9 (undo for every change, including delete and remove app), 10 (no network), 11, 13
+(listening animation off with Reduce Motion), 15 (lint), 20 (hairlines), 21 (status text uses
+`.textOrange`), 24 (sheet has fixed slots; nothing reflows when the recorded input changes width).
+**Pending an unlocked screen:** 12 (`drive tree` unlabeled check), 14 (window frame
+persistence), 16 (window buttons), 17–19 and 22–23 (measure on real screenshots), 25 (sidebar
+colour icons, inactive window), 26 (live appearance flip).
+
+### Owner hand tests (real hardware; nothing else can do these)
+
+1. Editor › New Trigger: tap and swipe with three and four fingers in every direction; check each
+   is named right (up versus down is the one direction assumption the code makes: the frame's y
+   grows upwards) and the live finger count follows your fingers. Rest two fingers and tap a
+   third: no three-finger tap. Type with palms on the pad: nothing.
+2. Add the three starters. Three-finger tap a link in a browser → new tab. Four-finger swipe
+   right/left in a browser → Back/Forward (macOS also switches desktops unless that's off).
+   Mouse buttons 4/5 in Safari and Finder → Back/Forward; unchanged in other apps.
+3. A key combo that opens an app (e.g. ⌃⌥N → Notes), and one scoped to a single app (only works
+   there). Try one with a password field focused.
+4. Window moves on a real window: halves, maximize, center, minimize, next display (two
+   displays if you have them), and an app with a minimum size.
+5. Pause/resume from the menu (icon changes); Turn Off in <App>.
+6. With a mouse-button trigger on: turn Accessibility off for Triggers in System Settings.
+   Input must not freeze; the bar appears. Turn it back on: buttons work again without a restart.
+7. Sleep the Mac, wake it: gestures still work. Unplug/replug a Magic Trackpad if you have one.
+8. Settings › Advanced › Export Diagnostics after some touching: the `frame_interval` line is
+   spike 4's answer (trackpad frame rate); `touch_devices` lists the trackpads used.
