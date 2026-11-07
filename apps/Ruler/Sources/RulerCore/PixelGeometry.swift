@@ -5,7 +5,7 @@
 // line after the last one, so `maxX - minX` is the width in pixels.
 
 /// One pixel position (top-left origin).
-public struct PixelPoint: Hashable, Sendable {
+public struct PixelPoint: Hashable, Sendable, Codable {
     public var x: Int
     public var y: Int
 
@@ -16,7 +16,7 @@ public struct PixelPoint: Hashable, Sendable {
 }
 
 /// A rect between pixel boundaries (top-left origin, half-open: pixels `minX..<maxX`).
-public struct PixelRect: Hashable, Sendable, CustomStringConvertible {
+public struct PixelRect: Hashable, Sendable, Codable, CustomStringConvertible {
     public var minX: Int
     public var minY: Int
     public var maxX: Int
@@ -60,9 +60,25 @@ public struct PixelRect: Hashable, Sendable, CustomStringConvertible {
 }
 
 /// Which way a guide line runs.
-public enum GuideAxis: String, Sendable, Hashable {
+public enum GuideAxis: String, Sendable, Hashable, Codable {
     /// A horizontal line: its position is a y boundary.
     case horizontal
     /// A vertical line: its position is an x boundary.
     case vertical
+}
+
+extension PixelRect {
+    /// The smallest rect containing both.
+    public func union(_ other: PixelRect) -> PixelRect {
+        PixelRect(minX: min(minX, other.minX), minY: min(minY, other.minY),
+                  maxX: max(maxX, other.maxX), maxY: max(maxY, other.maxY))
+    }
+
+    /// Grown by `amount` on every side (negative shrinks).
+    public func outsetBy(_ amount: Int) -> PixelRect { insetBy(-amount) }
+}
+
+extension GuideAxis {
+    /// The other axis.
+    public var other: GuideAxis { self == .horizontal ? .vertical : .horizontal }
 }

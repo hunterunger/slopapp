@@ -58,7 +58,7 @@ public enum TestSceneLayout {
         Shape(id: "onDark", kind: .onDark, frame: CGRect(x: 300, y: 380, width: 100, height: 40), caption: nil, isExact: true),
         Shape(id: "tiny2", kind: .tiny, frame: CGRect(x: 520, y: 370, width: 2, height: 2), caption: nil, isExact: true),
         Shape(id: "tiny1", kind: .tiny, frame: CGRect(x: 540, y: 370, width: 1, height: 1), caption: "2 × 2 and 1 × 1", isExact: true),
-        Shape(id: "text", kind: .text, frame: CGRect(x: 600, y: 350, width: 260, height: 50), caption: nil, isExact: false),
+        Shape(id: "text", kind: .text, frame: CGRect(x: 600, y: 410, width: 260, height: 50), caption: nil, isExact: false),
     ]
 
     public static func shape(_ id: String) -> Shape? { shapes.first { $0.id == id } }

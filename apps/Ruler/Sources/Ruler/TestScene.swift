@@ -113,3 +113,46 @@ final class TestSceneView: NSView {
         }
     }
 }
+
+/// Test-only capture source (`RULER_FAKE_CAPTURE=1` with `RULER_TEST_SCENE=1`): instead of
+/// recording the screen, draws the test scene's own content where its window sits on each
+/// display, transparent everywhere else. No Screen Recording, nothing but the scene, and it
+/// works while the screen is locked, so scripted checks of the drawing can run any time.
+@MainActor
+final class SceneRenderCapturer: ScreenCapturing {
+    nonisolated var hasPermission: Bool { true }
+
+    nonisolated func snapshot(displays: [CGDirectDisplayID], excluding: CaptureExclusions) async throws -> [CGDirectDisplayID: CGImage] {
+        try await MainActor.run { try Self.render(displays) }
+    }
+
+    nonisolated func captureWindow(_ id: CGWindowID, includeShadow: Bool) async throws -> CGImage {
+        throw CaptureError.windowNotFound
+    }
+
+    private static func render(_ displays: [CGDirectDisplayID]) throws -> [CGDirectDisplayID: CGImage] {
+        var result: [CGDirectDisplayID: CGImage] = [:]
+        for id in displays {
+            guard let screen = NSScreen.screens.first(where: { $0.displayID == id }) else { throw CaptureError.displayNotFound }
+            let scale = screen.backingScaleFactor
+            let width = Int(screen.frame.width * scale), height = Int(screen.frame.height * scale)
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw CaptureError.displayNotFound }
+            if let window = TestScene.window, window.isVisible, let view = TestScene.view,
+               let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                let content = window.convertToScreen(view.convert(view.bounds, to: nil))
+                let local = CGRect(x: (content.minX - screen.frame.minX) * scale, y: (content.minY - screen.frame.minY) * scale,
+                                   width: content.width * scale, height: content.height * scale)
+                if let image = rep.cgImage {
+                    context.interpolationQuality = .none
+                    context.draw(image, in: local)
+                }
+            }
+            guard let image = context.makeImage() else { throw CaptureError.displayNotFound }
+            result[id] = image
+        }
+        return result
+    }
+}

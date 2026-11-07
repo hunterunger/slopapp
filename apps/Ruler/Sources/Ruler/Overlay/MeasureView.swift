@@ -7,6 +7,10 @@ import SlopKit
 /// every mouse move: the frozen screen, placed measurements, the live hover distance, the
 /// box being dragged, the crosshair, the magnifier, a key hint and toasts.
 ///
+/// Labels follow one rule each, so they never pile up: the live readout is a single
+/// "W × H" pill down-right of the pointer; an area's size sits in its middle; a held
+/// distance's number sits on its line; the magnifier takes a corner clear of all of them.
+///
 /// Coordinates: the view is in AppKit points (origin bottom-left). Measurements live in the
 /// frozen image's pixels (origin top-left); `pixelPoint`/`localRect` convert.
 @MainActor
@@ -33,23 +37,38 @@ final class MeasureView: NSView {
     var board = Board()
     /// The pointer in view coordinates, or nil when it's on another display.
     var pointer: CGPoint?
-    private var drag: SelectionDrag?
-    private var dragIsFree = false
-    private var dragIsRightButton = false
+    /// In the background the measurements stay on screen over the live display; nothing
+    /// else is drawn.
+    private(set) var isBackground = false
+
+    private enum Gesture {
+        /// Drawing a new box.
+        case box(SelectionDrag, free: Bool, right: Bool)
+        /// Dragging a placed area's side or corner.
+        case resize(id: Int, handle: AreaHandle, original: PixelRect)
+        /// Dragging a guide.
+        case guide(id: Int, axis: GuideAxis, original: Int)
+    }
+
+    private var gesture: Gesture?
     private var modifiers: NSEvent.ModifierFlags = []
     private(set) var hoveredItem: BoardItem?
+    private(set) var hoveredHandle: (id: Int, handle: AreaHandle)?
     private(set) var hoverSpans: PixelRect?
-    var isDragging: Bool { drag != nil }
+    var isDragging: Bool { gesture != nil }
+    private var isBoxDrag: Bool { if case .box = gesture { true } else { false } }
 
     // MARK: Layers
 
     private let backdrop = CALayer()
     private let imageLayer = CALayer()
     private let boardLayer = CALayer()
+    /// The board's labels, above every line (the live hover lines included) so no line ever
+    /// runs through a number; below the live pill and the magnifier.
+    private let boardLabelLayer = CALayer()
     private let hoverHalo = CAShapeLayer()
     private let hoverLine = CAShapeLayer()
-    private let hoverWidthBadge = BadgeLayer()
-    private let hoverHeightBadge = BadgeLayer()
+    private let hoverPill = BadgeLayer()
     private let crossHalo = CAShapeLayer()
     private let crossLine = CAShapeLayer()
     private let dragFill = CAShapeLayer()
@@ -57,19 +76,29 @@ final class MeasureView: NSView {
     private let dragBadge = BadgeLayer()
     private let loupe = LoupeLayer()
     private let hintBadge = BadgeLayer()
+    private let statusBadge = BadgeLayer()
     private let toastBadge = BadgeLayer()
     private var toastGeneration = 0
+    private var accentObserver: NSObjectProtocol?
     private var drawnBoard: BoardSignature?
+    /// Frames of the board's labels, so the magnifier can stay clear of them.
+    private var boardLabelFrames: [CGRect] = []
+    /// Set while drawing a screenshot: no hover highlight.
+    private var isRenderingScreenshot = false
 
     private struct BoardSignature: Equatable {
         var board: Board
         var hovered: BoardItem?
         var unit: MeasureUnit
         var scale: CGFloat
-        var accent: NSColor
+        var color: NSColor
+        var designScale: Double
+        var showUnits: Bool
+        var ratio: AspectRatioStyle?
+        var hasPixels: Bool
     }
 
-    static let hint = "Drag to measure   Click: element   ⌘: free box   H V: guides   P: pin   ⇧: crosshair   Return: copy   Right-click: more   Esc: done"
+    static let hint = "Drag: measure   Click: element   H V: guides   P: hold   ⇧: crosshair   S C: screenshot   Return: copy   Right-click: more   ?: hide   Esc: done"
 
     init(frame: CGRect, screen: NSScreen, overlay: MeasureOverlay, testMode: Bool) {
         displayID = screen.displayID
@@ -89,29 +118,37 @@ final class MeasureView: NSView {
         imageLayer.contentsGravity = .resize
         imageLayer.magnificationFilter = .nearest
         boardLayer.frame = bounds
-        for halo in [hoverHalo, crossHalo] {
-            halo.fillColor = nil
-            halo.lineWidth = 3 / backingScale
-        }
-        for line in [hoverLine, crossLine] {
-            line.fillColor = nil
-            line.lineWidth = 1 / backingScale
-        }
+        boardLabelLayer.frame = bounds
+        // Hover lines are filled pixel rects (CrispStroke), so they're crisp at any scale.
+        hoverHalo.strokeColor = nil
+        hoverLine.strokeColor = nil
+        crossHalo.fillColor = nil
+        crossLine.fillColor = nil
+        crossLine.lineWidth = 1 / backingScale
+        crossHalo.lineWidth = 3 / backingScale
         dragFill.strokeColor = nil
         dragOutline.fillColor = nil
-        dragOutline.lineWidth = 1 / backingScale
+        dragOutline.lineWidth = 1
         dragOutline.lineDashPattern = [4, 3]
         toastBadge.opacity = 0
         hintBadge.text = Self.hint
-        let layers: [CALayer] = [backdrop, imageLayer, boardLayer, hoverHalo, hoverLine, crossHalo, crossLine,
-                                 dragFill, dragOutline, hoverWidthBadge, hoverHeightBadge, dragBadge, loupe, hintBadge, toastBadge]
+        let layers: [CALayer] = [backdrop, imageLayer, boardLayer, crossHalo, crossLine, hoverHalo, hoverLine,
+                                 dragFill, dragOutline, boardLabelLayer, hoverPill, dragBadge, loupe, statusBadge, hintBadge, toastBadge]
         for layer in layers {
             layer.contentsScale = backingScale
             root.addSublayer(layer)
         }
-        for badge in [hoverWidthBadge, hoverHeightBadge, dragBadge, hintBadge, toastBadge] { badge.setScale(backingScale) }
+        for badge in [hoverPill, dragBadge, hintBadge, statusBadge, toastBadge] { badge.outlined(scale: backingScale) }
         loupe.setScale(backingScale)
         updateColors()
+
+        // The accent (and system colours) can change while measuring; redraw in the new ones.
+        accentObserver = NotificationCenter.default.addObserver(forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.updateColors()
+                self?.refresh(force: true)
+            }
+        }
 
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
@@ -131,31 +168,78 @@ final class MeasureView: NSView {
         refresh(force: true)
     }
 
-    private var accent: NSColor { NSColor.controlAccentColor }
+    private var model: AppModel { overlay.model }
+    private var lineColor: NSColor { model.lineColor.color }
 
+    /// A colour for this view's own appearance (the test-mode backdrop only).
     private func cg(_ color: NSColor) -> CGColor {
         var result = color.cgColor
         effectiveAppearance.performAsCurrentDrawingAppearance { result = color.cgColor }
         return result
     }
 
+    /// A colour for the measuring chrome. It sits on arbitrary screen content, so like
+    /// SlopKit's `OverlayPalette` it uses the dark appearance's system colours and looks the
+    /// same in light and dark mode.
+    private func overlay(_ color: NSColor) -> CGColor {
+        var result = color.cgColor
+        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance { result = color.cgColor }
+        return result
+    }
+
     private func updateColors() {
         backdrop.backgroundColor = cg(.underPageBackgroundColor)
-        let halo = cg(NSColor.white.withAlphaComponent(0.85))
-        let line = cg(accent)
-        hoverHalo.strokeColor = halo
-        crossHalo.strokeColor = halo
-        hoverLine.strokeColor = line
+        let line = overlay(lineColor)
+        hoverLine.fillColor = line
         crossLine.strokeColor = line
         dragOutline.strokeColor = line
-        dragFill.fillColor = cg(accent.withAlphaComponent(0.12))
+        dragFill.fillColor = overlay(lineColor.withAlphaComponent(0.12))
+    }
+
+    /// A halo that separates lines from what's under them: light on light pixels, dark on
+    /// dark ones (where the line color already stands out). From `OverlayPalette`, never
+    /// pure white or black.
+    private func halo(at pixel: PixelPoint?) -> CGColor {
+        let light = OverlayPalette.paper.cgColor
+        guard let pixel, let c = edges?.color(at: pixel) else { return light }
+        let luminance = 0.299 * Double(c.r) + 0.587 * Double(c.g) + 0.114 * Double(c.b)
+        return luminance < 60 ? OverlayPalette.ink.withAlphaComponent(0.5).cgColor : light
     }
 
     func releaseImages() {
+        if let accentObserver { NotificationCenter.default.removeObserver(accentObserver) }
+        accentObserver = nil
         snapshot = nil
         edges = nil
         loupe.isHidden = true
         loupe.removeFromSuperlayer()
+    }
+
+    // MARK: Background mode
+
+    /// Keeps only the measurements, over the live screen, and lets clicks through.
+    func enterBackground() {
+        gesture = nil
+        pointer = nil
+        isBackground = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        backdrop.isHidden = true
+        imageLayer.isHidden = true
+        CATransaction.commit()
+        snapshot = nil
+        edges = nil
+        refresh(force: true)
+    }
+
+    func leaveBackground() {
+        isBackground = false
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        backdrop.isHidden = !testMode
+        imageLayer.isHidden = false
+        CATransaction.commit()
+        refresh(force: true)
     }
 
     // MARK: Geometry
@@ -166,9 +250,11 @@ final class MeasureView: NSView {
         return CGFloat(snapshot.width) / bounds.width
     }
 
-    var readout: Readout { Readout(scale: Double(scale), unit: overlay.model.unit) }
+    var readout: Readout {
+        Readout(scale: Double(scale), unit: model.unit, designScale: model.designScale, showsUnit: model.showUnits)
+    }
 
-    private var imageBounds: PixelRect {
+    var imageBounds: PixelRect {
         edges?.bounds ?? PixelRect(x: 0, y: 0, width: Int((bounds.width * scale).rounded()), height: Int((bounds.height * scale).rounded()))
     }
 
@@ -176,6 +262,13 @@ final class MeasureView: NSView {
         let b = imageBounds
         let x = Int((point.x * scale).rounded(.down)), y = Int(((bounds.height - point.y) * scale).rounded(.down))
         return PixelPoint(x: min(max(x, 0), b.maxX - 1), y: min(max(y, 0), b.maxY - 1))
+    }
+
+    /// The pixel boundary nearest a point (for dragging sides and guides).
+    private func boundary(local point: CGPoint) -> PixelPoint {
+        let b = imageBounds
+        let x = Int((point.x * scale).rounded()), y = Int(((bounds.height - point.y) * scale).rounded())
+        return PixelPoint(x: min(max(x, 0), b.maxX), y: min(max(y, 0), b.maxY))
     }
 
     var pointerPixel: PixelPoint? { pointer.map(pixelPoint(local:)) }
@@ -188,9 +281,16 @@ final class MeasureView: NSView {
     private func localX(_ x: Int) -> CGFloat { CGFloat(x) / scale }
     private func localY(_ y: Int) -> CGFloat { bounds.height - CGFloat(y) / scale }
 
-    private func localRect(_ r: PixelRect) -> CGRect {
+    func localRect(_ r: PixelRect) -> CGRect {
         CGRect(x: localX(r.minX), y: localY(r.maxY), width: CGFloat(r.width) / scale, height: CGFloat(r.height) / scale)
     }
+
+    /// Where labels may go: the display minus the menu bar / notch strip.
+    private var labelArea: CGRect {
+        bounds.insetBy(dx: 4, dy: 4).divided(atDistance: safeTop, from: .maxYEdge).remainder
+    }
+
+    private var slop: Int { Int((4 * scale).rounded()) }
 
     // MARK: Mouse
 
@@ -202,7 +302,36 @@ final class MeasureView: NSView {
     }
 
     override func resetCursorRects() { addCursorRect(bounds, cursor: .crosshair) }
-    override func cursorUpdate(with event: NSEvent) { NSCursor.crosshair.set() }
+    override func cursorUpdate(with event: NSEvent) { currentCursor.set() }
+
+    /// Crosshair, or a resize cursor over an area's side or corner and over guides.
+    private var currentCursor: NSCursor {
+        if isBackground { return .arrow }
+        let handle: AreaHandle?
+        switch gesture {
+        case .resize(_, let h, _): handle = h
+        case .guide(_, let axis, _): return axis == .vertical ? .resizeLeftRight : .resizeUpDown
+        case .box: return .crosshair
+        case nil:
+            if modifiers.contains(.command) { return .crosshair }
+            if case .guide(let id) = hoveredItem, let guide = board.guide(id) {
+                return guide.axis == .vertical ? .resizeLeftRight : .resizeUpDown
+            }
+            handle = hoveredHandle?.handle
+        }
+        guard let handle else { return .crosshair }
+        if !handle.isCorner { return handle.movesLeft || handle.movesRight ? .resizeLeftRight : .resizeUpDown }
+        if #available(macOS 15.0, *) {
+            let position: NSCursor.FrameResizePosition = switch handle {
+            case .topLeft: .topLeft
+            case .topRight: .topRight
+            case .bottomLeft: .bottomLeft
+            default: .bottomRight
+            }
+            return .frameResize(position: position, directions: .all)
+        }
+        return .crosshair
+    }
 
     override func mouseMoved(with event: NSEvent) {
         pointerMoved(to: convert(event.locationInWindow, from: nil), modifiers: event.modifierFlags)
@@ -214,7 +343,7 @@ final class MeasureView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
-        guard drag == nil else { return }
+        guard gesture == nil else { return }
         pointer = nil
         refresh()
     }
@@ -222,8 +351,23 @@ final class MeasureView: NSView {
     func pointerMoved(to point: CGPoint, modifiers flags: NSEvent.ModifierFlags) {
         pointer = point
         modifiers = flags
-        if drag != nil { drag?.update(to: point, moving: overlay.isSpaceHeld) }
+        switch gesture {
+        case .box(var drag, let free, let right):
+            drag.update(to: point, moving: overlay.isSpaceHeld)
+            gesture = .box(drag, free: free, right: right)
+        case .resize(let id, let handle, let original):
+            let rect = handle.resize(original, to: boundary(local: point), keepAspect: flags.contains(.shift), minimum: max(1, Int(scale.rounded())))
+            board.resizeArea(id, to: rect)
+            refresh(force: true)
+        case .guide(let id, let axis, _):
+            let b = boundary(local: point)
+            board.moveGuide(id, to: axis == .vertical ? b.x : b.y)
+            refresh(force: true)
+        case nil:
+            break
+        }
         refresh()
+        currentCursor.set()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -231,7 +375,26 @@ final class MeasureView: NSView {
             rightMouseDown(with: event)
             return
         }
-        beginDrag(at: convert(event.locationInWindow, from: nil), event: event, right: false)
+        let point = convert(event.locationInWindow, from: nil)
+        window?.makeKey()
+        pointer = point
+        modifiers = event.modifierFlags
+        let pixel = pixelPoint(local: point)
+        if !modifiers.contains(.command) {
+            if let (id, handle) = board.handle(at: pixel, slop: slop), let area = board.area(id) {
+                overlay.recordUndo(self)
+                gesture = .resize(id: id, handle: handle, original: area.rect)
+                refresh()
+                return
+            }
+            if case .guide(let id) = board.item(at: pixel, slop: slop), let guide = board.guide(id) {
+                overlay.recordUndo(self)
+                gesture = .guide(id: id, axis: guide.axis, original: guide.position)
+                refresh()
+                return
+            }
+        }
+        beginBox(at: point, right: false)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -239,11 +402,16 @@ final class MeasureView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        endDrag(at: convert(event.locationInWindow, from: nil))
+        endGesture(at: convert(event.locationInWindow, from: nil))
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        beginDrag(at: convert(event.locationInWindow, from: nil), event: event, right: true)
+        let point = convert(event.locationInWindow, from: nil)
+        window?.makeKey()
+        pointer = point
+        modifiers = event.modifierFlags
+        Diagnostics.record("right down")
+        beginBox(at: point, right: true)
     }
 
     override func rightMouseDragged(with event: NSEvent) {
@@ -251,41 +419,63 @@ final class MeasureView: NSView {
     }
 
     override func rightMouseUp(with event: NSEvent) {
-        endDrag(at: convert(event.locationInWindow, from: nil))
+        Diagnostics.record("right up gesture=\(gesture != nil)")
+        endGesture(at: convert(event.locationInWindow, from: nil))
     }
 
-    private func beginDrag(at point: CGPoint, event: NSEvent, right: Bool) {
-        window?.makeKey()
+    /// Starts a right-button press at the pointer, as if it had just gone down here (used
+    /// when a right-click closed the context menu, so the next menu still opens).
+    func beginRightPressAtPointer() {
+        guard let window else { return }
+        let point = convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+        guard bounds.contains(point) else { return }
         pointer = point
-        modifiers = event.modifierFlags
-        drag = SelectionDrag(anchor: point)
-        dragIsRightButton = right
-        dragIsFree = right
+        beginBox(at: point, right: true)
+    }
+
+    private func beginBox(at point: CGPoint, right: Bool) {
+        gesture = .box(SelectionDrag(anchor: point), free: right, right: right)
         refresh()
     }
 
-    private func endDrag(at point: CGPoint) {
-        guard var drag else { return }
-        drag.update(to: point, moving: overlay.isSpaceHeld)
-        let rect = drag.rect(modifiers: selectionModifiers, bounds: bounds)
-        let free = dragIsFree || modifiers.contains(.command)
-        let right = dragIsRightButton
-        self.drag = nil
+    private func endGesture(at point: CGPoint) {
+        guard let gesture else { return }
+        self.gesture = nil
         pointer = point
-        if SelectionGeometry.isUsable(rect) {
-            placeArea(drawn: rect, free: free)
-        } else if right {
-            refresh()
-            overlay.showContextMenu(at: point, in: self)
-        } else {
-            refresh()
-            measureElementUnderPointer()
+        switch gesture {
+        case .resize(let id, _, _):
+            refresh(force: true)
+            if let area = board.area(id) { areaPlaced(area.id, snapped: false) }
+        case .guide(let id, let axis, _):
+            if let guide = board.guide(id) { board.moveGuide(id, to: overlay.snappedGuidePosition(axis, guide.position, in: self, excluding: id)) }
+            refresh(force: true)
+        case .box(var drag, let free, let right):
+            drag.update(to: point, moving: overlay.isSpaceHeld)
+            let rect = drag.rect(modifiers: selectionModifiers, bounds: bounds)
+            if SelectionGeometry.isUsable(rect), overlay.capturesNextBox, let pixels = pixelRect(local: rect).intersection(imageBounds) {
+                refresh()
+                overlay.captureBox(pixels, in: self)
+            } else if SelectionGeometry.isUsable(rect) {
+                placeArea(drawn: rect, free: free || modifiers.contains(.command))
+            } else if right {
+                refresh()
+                overlay.showContextMenu(at: point, in: self)
+            } else {
+                refresh()
+                measureElementUnderPointer()
+            }
         }
+        currentCursor.set()
     }
 
     func cancelDrag() {
-        drag = nil
-        refresh()
+        switch gesture {
+        case .resize(let id, _, let original): board.resizeArea(id, to: original)
+        case .guide(let id, _, let original): board.moveGuide(id, to: original)
+        default: break
+        }
+        gesture = nil
+        refresh(force: true)
     }
 
     private var selectionModifiers: SelectionModifiers {
@@ -308,7 +498,7 @@ final class MeasureView: NSView {
         }
         var id = 0
         overlay.change(self) { id = $0.addArea(drawnPixels, settled: false) }
-        let tolerance = overlay.model.tolerance
+        let tolerance = model.tolerance
         let started = Diagnostics.now()
         Task { @MainActor [weak self] in
             let found = await Task.detached(priority: .userInitiated) {
@@ -338,12 +528,12 @@ final class MeasureView: NSView {
         overlay.announce(readout.spokenSize(width: r.width, height: r.height))
     }
 
-    /// What Return copies: the hovered area or pin, else the last one placed, else the
-    /// live hover distance.
-    func copyableSize() -> (width: Int, height: Int)? {
-        if let hoveredItem, let size = board.size(of: hoveredItem) { return size }
-        if let last = board.lastMeasured, let size = board.size(of: last) { return size }
-        return hoverSpans.map { ($0.width, $0.height) }
+    /// What Return copies: the hovered area or held distance, else the last one placed, else
+    /// the live hover distance.
+    func copyableReading() -> Reading? {
+        if let hoveredItem, let reading = board.reading(of: hoveredItem) { return reading }
+        if let last = board.lastMeasured, let reading = board.reading(of: last) { return reading }
+        return hoverSpans.map { .size(width: $0.width, height: $0.height) }
     }
 
     // MARK: Keys
@@ -365,6 +555,7 @@ final class MeasureView: NSView {
     func modifiersChanged(_ flags: NSEvent.ModifierFlags) {
         modifiers = flags
         refresh()
+        if pointer != nil { currentCursor.set() }
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -380,8 +571,10 @@ final class MeasureView: NSView {
         CATransaction.setDisableActions(true)
         toastBadge.text = message
         let size = toastBadge.preferredFrameSize()
-        let hintTop = hintBadge.isHidden ? bounds.minY + 24 : hintBadge.frame.maxY
-        let y = hintBadge.frame.minY > bounds.midY ? hintBadge.frame.minY - 12 - size.height : hintTop + 12
+        // Just above the hint (or where it would be), below it when the hint is at the top.
+        let hintAtTop = !hintBadge.isHidden && hintBadge.frame.minY > bounds.midY
+        let y = hintAtTop ? hintBadge.frame.minY - Spacing.m - size.height
+            : (hintBadge.isHidden ? Self.chromeInset : hintBadge.frame.maxY + Spacing.m)
         toastBadge.frame = CGRect(x: (bounds.midX - size.width / 2).rounded(), y: y.rounded(), width: size.width, height: size.height)
         toastBadge.removeAllAnimations()
         toastBadge.opacity = 1
@@ -401,100 +594,77 @@ final class MeasureView: NSView {
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
 
-        let model = overlay.model
-        let pixel = pointerPixel
-        let slop = Int((3 * scale).rounded())
-        hoveredItem = drag == nil ? pixel.flatMap { board.item(at: $0, slop: slop) } : nil
+        let pixel = isBackground ? nil : pointerPixel
+        if gesture == nil, let pixel {
+            hoveredItem = board.item(at: pixel, slop: Int((3 * scale).rounded()))
+            hoveredHandle = modifiers.contains(.command) ? nil : board.handle(at: pixel, slop: slop)
+            if let handle = hoveredHandle { hoveredItem = .area(handle.id) }
+        } else if gesture == nil {
+            hoveredItem = nil
+            hoveredHandle = nil
+        }
         if let pixel, let edges {
             hoverSpans = edges.spans(at: pixel, tolerance: model.tolerance, limits: board.limits(for: pixel, in: edges.bounds))
         } else {
             hoverSpans = nil
         }
 
-        let signature = BoardSignature(board: board, hovered: hoveredItem, unit: model.unit, scale: scale, accent: accent)
+        let signature = BoardSignature(board: board, hovered: hoveredItem, unit: model.unit, scale: scale, color: lineColor,
+                                       designScale: model.designScale, showUnits: model.showUnits,
+                                       ratio: model.readoutRatioStyle.areas, hasPixels: edges != nil)
         if force || signature != drawnBoard {
+            updateColors()
             drawBoard()
             drawnBoard = signature
         }
 
-        let showCrosshair = drag == nil && modifiers.contains(.shift) && pixel != nil && edges != nil
+        let showCrosshair = gesture == nil && modifiers.contains(.shift) && pixel != nil && edges != nil
         drawCrosshair(showCrosshair ? pixel : nil)
-        drawHover(showCrosshair || drag != nil ? nil : hoverSpans, at: pixel)
+        // Inside an area whose edges are the span, the area's own label already says it.
+        var redundant = false
+        if case .area(let id) = hoveredItem, let area = board.area(id), area.rect == hoverSpans { redundant = true }
+        drawHover(showCrosshair || gesture != nil || redundant ? nil : hoverSpans, at: pixel)
         drawDrag()
         updateLoupe(pixel)
         layoutHint()
+        layoutStatus()
         updateAccessibility()
     }
 
-    private func dimensionPath(_ spans: PixelRect, at point: PixelPoint, horizontal: Bool, vertical: Bool) -> CGPath {
-        let path = CGMutablePath()
-        let half = 0.5 / scale
-        let tick: CGFloat = 4
-        let cy = localY(point.y) - half, cx = localX(point.x) + half
-        if horizontal {
-            let x0 = localX(spans.minX) + half, x1 = localX(spans.maxX) - half
-            path.move(to: CGPoint(x: x0, y: cy)); path.addLine(to: CGPoint(x: x1, y: cy))
-            for x in [x0, x1] { path.move(to: CGPoint(x: x, y: cy - tick)); path.addLine(to: CGPoint(x: x, y: cy + tick)) }
-        }
-        if vertical {
-            let y0 = localY(spans.minY) - half, y1 = localY(spans.maxY) + half
-            path.move(to: CGPoint(x: cx, y: y0)); path.addLine(to: CGPoint(x: cx, y: y1))
-            for y in [y0, y1] { path.move(to: CGPoint(x: cx - tick, y: y)); path.addLine(to: CGPoint(x: cx + tick, y: y)) }
-        }
-        return path
+    /// A dimension line with T ends along one axis, as filled pixel rects (see `CrispStroke`):
+    /// the line into `line`, its one-pixel halo into `halo`.
+    private func addDimension(line: CGMutablePath, halo: CGMutablePath, axis: GuideAxis, at: Int, start: Int, end: Int,
+                              emphasized: Bool = false) {
+        let shape = CrispStroke.dimension(axis: axis, at: at, start: start, end: end, scale: Double(scale), emphasized: emphasized)
+        for r in shape.line { line.addRect(localRect(r)) }
+        for r in shape.halo { halo.addRect(localRect(r)) }
     }
 
-    private func spanText(_ length: Int, start: Int, end: Int, limit: Int) -> String {
-        let touchesEdge = (start == 0) != (end == limit)
-        return readout.length(length) + (touchesEdge ? " to edge" : "")
-    }
-
-    /// Puts the width label above the horizontal line and the height label beside the
-    /// vertical one, keeping both on screen and off each other.
-    private func placeSpanLabels(_ spans: PixelRect, at point: PixelPoint, width: BadgeLayer, height: BadgeLayer) {
-        let limits = imageBounds
-        width.text = spanText(spans.width, start: spans.minX, end: spans.maxX, limit: limits.maxX)
-        height.text = spanText(spans.height, start: spans.minY, end: spans.maxY, limit: limits.maxY)
-        let cy = localY(point.y), cx = localX(point.x)
-        let area = bounds.insetBy(dx: 4, dy: 4).divided(atDistance: safeTop, from: .maxYEdge).remainder
-        let ws = width.preferredFrameSize(), hs = height.preferredFrameSize()
-        let midX = (localX(spans.minX) + localX(spans.maxX)) / 2
-        var wf = CGRect(x: midX - ws.width / 2, y: cy + 6, width: ws.width, height: ws.height)
-        if wf.maxY > area.maxY { wf.origin.y = cy - 6 - ws.height }
-        let midY = (localY(spans.minY) + localY(spans.maxY)) / 2
-        var hf = CGRect(x: cx + 8, y: midY - hs.height / 2, width: hs.width, height: hs.height)
-        if hf.maxX > area.maxX { hf.origin.x = cx - 8 - hs.width }
-        wf = clamp(wf, to: area)
-        hf = clamp(hf, to: area)
-        if wf.intersects(hf) {
-            hf.origin.y = wf.minY > cy ? cy - 8 - hs.height : cy + 8
-            hf = clamp(hf, to: area)
-        }
-        width.frame = wf.integral
-        height.frame = hf.integral
-    }
-
-    private func clamp(_ rect: CGRect, to area: CGRect) -> CGRect {
-        var r = rect
-        r.origin.x = min(max(r.minX, area.minX), area.maxX - r.width)
-        r.origin.y = min(max(r.minY, area.minY), area.maxY - r.height)
-        return r
+    /// The centre (in view points) and thickness of a pixel band, for stroking a straight
+    /// line exactly over it: rows for a horizontal line, columns for a vertical one.
+    private func strokeGeometry(_ band: Range<Int>, axis: GuideAxis) -> (center: CGFloat, width: CGFloat) {
+        let mid = (CGFloat(band.lowerBound) + CGFloat(band.count) / 2) / scale
+        return (axis == .horizontal ? bounds.height - mid : mid, CGFloat(band.count) / scale)
     }
 
     private func drawHover(_ spans: PixelRect?, at point: PixelPoint?) {
-        guard let spans, let point else {
+        guard let spans, let point, !isBackground else {
             hoverHalo.path = nil
             hoverLine.path = nil
-            hoverWidthBadge.isHidden = true
-            hoverHeightBadge.isHidden = true
+            hoverPill.isHidden = true
             return
         }
-        let path = dimensionPath(spans, at: point, horizontal: true, vertical: true)
-        hoverHalo.path = path
-        hoverLine.path = path
-        hoverWidthBadge.isHidden = false
-        hoverHeightBadge.isHidden = false
-        placeSpanLabels(spans, at: point, width: hoverWidthBadge, height: hoverHeightBadge)
+        let line = CGMutablePath(), haloPath = CGMutablePath()
+        addDimension(line: line, halo: haloPath, axis: .horizontal, at: point.y, start: spans.minX, end: spans.maxX)
+        addDimension(line: line, halo: haloPath, axis: .vertical, at: point.x, start: spans.minY, end: spans.maxY)
+        hoverHalo.fillColor = halo(at: point)
+        hoverHalo.path = haloPath
+        hoverLine.path = line
+        hoverPill.isHidden = false
+        hoverPill.text = readout.sizeLabel(width: spans.width, height: spans.height, ratio: model.readoutRatioStyle.distances)
+        if let pointer {
+            hoverPill.frame = LabelLayout.cursorPill(size: hoverPill.preferredFrameSize(), pointer: pointer, bounds: labelArea).integral
+        }
     }
 
     private func drawCrosshair(_ point: PixelPoint?) {
@@ -507,23 +677,27 @@ final class MeasureView: NSView {
         let half = 0.5 / scale
         path.move(to: CGPoint(x: 0, y: localY(point.y) - half)); path.addLine(to: CGPoint(x: bounds.maxX, y: localY(point.y) - half))
         path.move(to: CGPoint(x: localX(point.x) + half, y: 0)); path.addLine(to: CGPoint(x: localX(point.x) + half, y: bounds.maxY))
+        crossHalo.strokeColor = halo(at: point)
         crossHalo.path = path
         crossLine.path = path
     }
 
     private func drawDrag() {
-        guard let drag else {
+        guard case .box(let drag, let free, _) = gesture else {
             dragFill.path = nil
             dragOutline.path = nil
             dragBadge.isHidden = true
             return
         }
-        let rect = drag.rect(modifiers: selectionModifiers, bounds: bounds)
+        // Outline the whole pixels the box will measure, not the raw pointer rect (which can
+        // sit between pixels and draw soft edges).
+        let pixels = pixelRect(local: drag.rect(modifiers: selectionModifiers, bounds: bounds))
+        let rect = localRect(pixels)
         dragFill.path = CGPath(rect: rect, transform: nil)
-        dragOutline.path = CGPath(rect: rect.insetBy(dx: -0.5 / scale, dy: -0.5 / scale), transform: nil)
-        let pixels = pixelRect(local: rect)
-        let free = dragIsFree || modifiers.contains(.command)
-        dragBadge.text = readout.size(width: pixels.width, height: pixels.height) + (free ? "" : "  ·  snaps on release")
+        dragOutline.path = CGPath(rect: rect.insetBy(dx: -0.5, dy: -0.5), transform: nil)
+        let isFree = free || modifiers.contains(.command)
+        let note = overlay.capturesNextBox ? "  ·  screenshot" : isFree ? "" : "  ·  snaps on release"
+        dragBadge.text = readout.sizeLabel(width: pixels.width, height: pixels.height) + note
         let size = dragBadge.preferredFrameSize()
         dragBadge.frame = CGRect(origin: SelectionGeometry.labelOrigin(size: size, for: rect, bounds: bounds), size: size).integral
         dragBadge.isHidden = false
@@ -531,9 +705,11 @@ final class MeasureView: NSView {
 
     private func drawBoard() {
         boardLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
-        let halo = cg(NSColor.white.withAlphaComponent(0.85))
-        let line = cg(accent)
+        boardLabelLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
+        let line = overlay(lineColor)
         let px = 1 / scale
+        let hovered = isRenderingScreenshot ? nil : hoveredItem
+        var labels: [(BadgeLayer, CGRect)] = []
 
         func stroke(_ path: CGPath, width: CGFloat, color: CGColor, dash: [NSNumber]? = nil) {
             let layer = CAShapeLayer()
@@ -545,99 +721,181 @@ final class MeasureView: NSView {
             layer.lineDashPattern = dash
             boardLayer.addSublayer(layer)
         }
+        func fill(_ path: CGPath, color: CGColor) {
+            let layer = CAShapeLayer()
+            layer.contentsScale = backingScale
+            layer.path = path
+            layer.fillColor = color
+            boardLayer.addSublayer(layer)
+        }
         func badge(_ text: String) -> BadgeLayer {
             let b = BadgeLayer()
-            b.setScale(backingScale)
+            b.outlined(scale: backingScale)
             b.text = text
-            boardLayer.addSublayer(b)
             return b
         }
 
-        // Guides, then the gaps between neighbouring guides.
+        // Guides: an even band of pixels centred on the boundary they mark, dashed; solid and
+        // a pixel bolder each side when hovered (it can be dragged).
+        let guideWidth = CGFloat(CrispStroke.band(straddling: 0, scale: Double(scale)).count) * px
         for guide in board.guides {
-            let hovered = hoveredItem == .guide(guide.id)
+            let isHovered = hovered == .guide(guide.id)
             let path = CGMutablePath()
+            let probe: PixelPoint
             switch guide.axis {
             case .vertical:
                 let x = localX(guide.position)
                 path.move(to: CGPoint(x: x, y: 0)); path.addLine(to: CGPoint(x: x, y: bounds.maxY))
+                probe = PixelPoint(x: min(guide.position, imageBounds.maxX - 1), y: imageBounds.height / 2)
             case .horizontal:
                 let y = localY(guide.position)
                 path.move(to: CGPoint(x: 0, y: y)); path.addLine(to: CGPoint(x: bounds.maxX, y: y))
+                probe = PixelPoint(x: imageBounds.width / 2, y: min(guide.position, imageBounds.maxY - 1))
             }
-            stroke(path, width: 3 * px, color: halo)
-            stroke(path, width: (hovered ? 2 : 1) * px, color: line, dash: hovered ? nil : [6, 3])
+            let width = guideWidth + (isHovered ? 2 * px : 0)
+            stroke(path, width: width + 2 * px, color: halo(at: probe))
+            stroke(path, width: width, color: line, dash: isHovered ? nil : [6, 3])
         }
+
+        // Gaps between neighbouring guides (and to the display edges, dotted): vertical guides'
+        // gaps in a row under the menu bar, horizontal guides' in a column at the left edge,
+        // each on a point-wide pixel band, with its number threaded on it.
+        let limits = imageBounds
         for axis in [GuideAxis.vertical, .horizontal] {
-            for gap in board.guideGaps(axis) {
+            let gaps = board.guideGaps(axis, limit: axis == .vertical ? limits.maxX : limits.maxY)
+            guard !gaps.isEmpty else { continue }
+            let badges = gaps.map { badge(readout.lengthLabel($0.length)) }
+            let sizes = badges.map { $0.preferredFrameSize() }
+            // Placed so the labels start `chromeInset` below the menu bar / from the left edge.
+            let lineAxis: GuideAxis = axis == .vertical ? .horizontal : .vertical
+            let offset = Self.chromeInset + (axis == .vertical ? (sizes.map(\.height).max() ?? 0) : (sizes.map(\.width).max() ?? 0)) / 2
+            let pixel = axis == .vertical
+                ? Int(((safeTop + offset) * scale).rounded(.down))
+                : Int((offset * scale).rounded(.down))
+            let (center, width) = strokeGeometry(CrispStroke.band(holding: pixel, scale: Double(scale)), axis: lineAxis)
+            for (gap, (b, s)) in zip(gaps, zip(badges, sizes)) {
                 let path = CGMutablePath()
-                let b: BadgeLayer
+                let a: CGPoint, z: CGPoint, probe: PixelPoint
                 if axis == .vertical {
-                    let y = bounds.maxY - safeTop - 28
-                    path.move(to: CGPoint(x: localX(gap.start), y: y)); path.addLine(to: CGPoint(x: localX(gap.end), y: y))
-                    b = badge(readout.length(gap.end - gap.start))
-                    let s = b.preferredFrameSize()
-                    b.frame = CGRect(x: (localX(gap.start) + localX(gap.end)) / 2 - s.width / 2, y: y - s.height - 4, width: s.width, height: s.height).integral
+                    a = CGPoint(x: localX(gap.start), y: center); z = CGPoint(x: localX(gap.end), y: center)
+                    probe = PixelPoint(x: min((gap.start + gap.end) / 2, limits.maxX - 1), y: min(pixel, limits.maxY - 1))
                 } else {
-                    let x: CGFloat = 28
-                    path.move(to: CGPoint(x: x, y: localY(gap.start))); path.addLine(to: CGPoint(x: x, y: localY(gap.end)))
-                    b = badge(readout.length(gap.end - gap.start))
-                    let s = b.preferredFrameSize()
-                    b.frame = CGRect(x: x + 6, y: (localY(gap.start) + localY(gap.end)) / 2 - s.height / 2, width: s.width, height: s.height).integral
+                    a = CGPoint(x: center, y: localY(gap.start)); z = CGPoint(x: center, y: localY(gap.end))
+                    probe = PixelPoint(x: min(pixel, limits.maxX - 1), y: min((gap.start + gap.end) / 2, limits.maxY - 1))
                 }
-                stroke(path, width: 3 * px, color: halo)
-                stroke(path, width: px, color: line)
-                boardLayer.addSublayer(b) // above its line
+                path.move(to: a); path.addLine(to: z)
+                let dash: [NSNumber]? = gap.touchesEdge ? [2, 3] : nil
+                stroke(path, width: width + 2 * px, color: halo(at: probe), dash: dash)
+                stroke(path, width: width, color: line, dash: dash)
+                labels.append((b, LabelLayout.lineLabel(size: s, from: a, to: z, bounds: labelArea)))
             }
         }
 
-        // Areas: a tinted box with a crisp outline just outside it, and its size.
+        // Areas: a crisp one-point outline just outside the box (its inner edge is the
+        // measured edge), the size in its middle. Hovered: tinted, with corner knobs on the
+        // outline (drag a side or corner to resize).
         for area in board.areas {
-            let hovered = hoveredItem == .area(area.id)
+            let isHovered = hovered == .area(area.id)
             let rect = localRect(area.rect)
-            let fill = CAShapeLayer()
-            fill.path = CGPath(rect: rect, transform: nil)
-            fill.fillColor = cg(accent.withAlphaComponent(hovered ? 0.22 : 0.12))
-            boardLayer.addSublayer(fill)
-            let outline = (hovered ? 2 : 1) * px
-            stroke(CGPath(rect: rect.insetBy(dx: -outline - px / 2 - px, dy: -outline - px / 2 - px), transform: nil), width: px, color: halo)
-            stroke(CGPath(rect: rect.insetBy(dx: -outline / 2, dy: -outline / 2), transform: nil), width: outline,
-                   color: line, dash: area.isSettled ? nil : [4, 3])
-            let b = badge(readout.size(width: area.rect.width, height: area.rect.height))
-            let s = b.preferredFrameSize()
-            b.frame = CGRect(origin: SelectionGeometry.labelOrigin(size: s, for: rect, bounds: bounds), size: s).integral
+            if isHovered { fill(CGPath(rect: rect, transform: nil), color: overlay(lineColor.withAlphaComponent(0.15))) }
+            let probe = PixelPoint(x: max(area.rect.minX - 1, 0), y: max(area.rect.minY - 1, 0))
+            stroke(CGPath(rect: rect.insetBy(dx: -1 - px, dy: -1 - px), transform: nil), width: px * 2, color: halo(at: probe))
+            let outline = rect.insetBy(dx: -0.5, dy: -0.5)
+            stroke(CGPath(rect: outline, transform: nil), width: 1, color: line, dash: area.isSettled ? nil : [4, 3])
+            if isHovered && rect.width >= 16 && rect.height >= 16 {
+                for corner in [CGPoint(x: outline.minX, y: outline.minY), CGPoint(x: outline.maxX, y: outline.minY),
+                               CGPoint(x: outline.minX, y: outline.maxY), CGPoint(x: outline.maxX, y: outline.maxY)] {
+                    let knob = CAShapeLayer()
+                    knob.contentsScale = backingScale
+                    knob.path = CGPath(ellipseIn: CGRect(x: corner.x - 3.5, y: corner.y - 3.5, width: 7, height: 7), transform: nil)
+                    knob.fillColor = OverlayPalette.paper.cgColor // a light handle reads on any line colour
+                    knob.strokeColor = line
+                    knob.lineWidth = 1
+                    boardLayer.addSublayer(knob)
+                }
+            }
+            let b = badge(readout.sizeLabel(width: area.rect.width, height: area.rect.height, ratio: model.readoutRatioStyle.areas))
+            labels.append((b, LabelLayout.areaLabel(size: b.preferredFrameSize(), box: rect, bounds: labelArea)))
         }
 
-        // Pinned distances look like the live one.
+        // Held distances: the line with T ends on whole pixels, its number threaded on it
+        // (beside it when the line is too short to show its ends past the number).
         for pin in board.pins {
-            let hovered = hoveredItem == .pin(pin.id)
-            let path = dimensionPath(pin.spans, at: pin.point, horizontal: true, vertical: true)
-            stroke(path, width: 3 * px, color: halo)
-            stroke(path, width: (hovered ? 2 : 1) * px, color: line)
-            let w = badge(""), h = badge("")
-            placeSpanLabels(pin.spans, at: pin.point, width: w, height: h)
+            let isHovered = hovered == .pin(pin.id)
+            let linePath = CGMutablePath(), haloPath = CGMutablePath()
+            addDimension(line: linePath, halo: haloPath, axis: pin.axis, at: pin.at, start: pin.start, end: pin.end, emphasized: isHovered)
+            let probe = pin.axis == .horizontal ? PixelPoint(x: (pin.start + pin.end) / 2, y: pin.at) : PixelPoint(x: pin.at, y: (pin.start + pin.end) / 2)
+            fill(haloPath, color: halo(at: probe))
+            fill(linePath, color: line)
+            let b = badge(readout.lengthLabel(pin.length))
+            let mid = strokeGeometry(CrispStroke.band(holding: pin.at, scale: Double(scale)), axis: pin.axis).center
+            let (a, z): (CGPoint, CGPoint) = pin.axis == .horizontal
+                ? (CGPoint(x: localX(pin.start), y: mid), CGPoint(x: localX(pin.end), y: mid))
+                : (CGPoint(x: mid, y: localY(pin.start)), CGPoint(x: mid, y: localY(pin.end)))
+            labels.append((b, LabelLayout.lineLabel(size: b.preferredFrameSize(), from: a, to: z, bounds: labelArea)))
         }
+
+        // Labels last, above every line, moved off each other.
+        let frames = LabelLayout.separate(labels.map(\.1), bounds: labelArea)
+        for ((b, _), frame) in zip(labels, frames) {
+            b.frame = frame.integral
+            boardLabelLayer.addSublayer(b)
+        }
+        boardLabelFrames = frames
     }
 
     private func updateLoupe(_ pixel: PixelPoint?) {
-        guard overlay.model.showMagnifier, let pixel, let pointer, let snapshot, drag == nil else {
+        guard model.showMagnifier, let pixel, let pointer, let snapshot, gesture == nil, !isBackground else {
             loupe.isHidden = true
             return
         }
-        if loupe.superlayer == nil { layer?.insertSublayer(loupe, below: hintBadge) }
+        if loupe.superlayer == nil { layer?.insertSublayer(loupe, below: statusBadge) }
         loupe.isHidden = false
         loupe.show(image: snapshot, centerPixel: CGPoint(x: pixel.x, y: pixel.y),
                    pointLabel: "\(readout.number(pixel.x)), \(readout.number(pixel.y))")
-        let size = loupe.preferredFrameSize()
-        loupe.frame = CGRect(origin: SelectionGeometry.magnifierOrigin(size: size, pointer: pointer, bounds: bounds, offset: 40), size: size)
+        var avoid = boardLabelFrames
+        if !hoverPill.isHidden { avoid.append(hoverPill.frame.insetBy(dx: -6, dy: -6)) }
+        // On whole device pixels: a fractional origin would resample every zoomed cell.
+        let frame = LabelLayout.magnifier(size: loupe.preferredFrameSize(), pointer: pointer, bounds: labelArea, avoiding: avoid)
+        loupe.frame = CGRect(origin: CGPoint(x: (frame.minX * backingScale).rounded() / backingScale,
+                                             y: (frame.minY * backingScale).rounded() / backingScale), size: frame.size)
+    }
+
+    /// How far the overlay's own chrome (key hint, scale badge, guide gap rows) sits from
+    /// the display edges and the menu bar.
+    static let chromeInset = Spacing.l
+
+    /// Room the vertical guides' gap row takes under the menu bar, so the hint moved to the
+    /// top goes below it rather than over it.
+    private var gapRowHeight: CGFloat {
+        board.guides.contains { $0.axis == .vertical } ? hintBadge.preferredFrameSize().height + Spacing.s : 0
     }
 
     private func layoutHint() {
-        hintBadge.isHidden = pointer == nil || drag != nil
+        hintBadge.isHidden = !model.showHints || pointer == nil || gesture != nil || isBackground
+        guard !hintBadge.isHidden else { return }
         let size = hintBadge.preferredFrameSize()
-        var y: CGFloat = 28
-        if let pointer, pointer.y < y + size.height + 90 { y = bounds.maxY - safeTop - 36 - size.height }
+        var y = Self.chromeInset
+        // Near the bottom, the hint moves to the top so it's never under the pointer.
+        if let pointer, pointer.y < y + size.height + 90 { y = bounds.maxY - safeTop - Self.chromeInset - gapRowHeight - size.height }
         hintBadge.frame = CGRect(x: (bounds.midX - size.width / 2).rounded(), y: y.rounded(), width: size.width, height: size.height)
+    }
+
+    /// A corner badge while a design scale is on, so numbers are never silently divided.
+    /// Bottom right (the left edge has the horizontal guides' gaps), the other corner when
+    /// the pointer comes near.
+    private func layoutStatus() {
+        guard let text = DesignScale.badge(model.designScale), !isBackground, pointer != nil else {
+            statusBadge.isHidden = true
+            return
+        }
+        statusBadge.isHidden = false
+        statusBadge.text = "Scale \(text)"
+        let size = statusBadge.preferredFrameSize()
+        let inset = Self.chromeInset
+        var frame = CGRect(x: bounds.maxX - inset - size.width, y: inset, width: size.width, height: size.height)
+        if let pointer, frame.insetBy(dx: -60, dy: -60).contains(pointer) { frame.origin.x = inset }
+        statusBadge.frame = frame
     }
 
     private func updateAccessibility() {
@@ -652,10 +910,85 @@ final class MeasureView: NSView {
             parts.append("Areas: " + board.areas.map { readout.size(width: $0.rect.width, height: $0.rect.height) }.joined(separator: ", "))
         }
         if !board.pins.isEmpty {
-            parts.append("Pinned: " + board.pins.map { readout.size(width: $0.spans.width, height: $0.spans.height) }.joined(separator: ", "))
+            parts.append("Held: " + board.pins.map { readout.length($0.length) }.joined(separator: ", "))
         }
-        if !board.guides.isEmpty { parts.append("\(board.guides.count) guides") }
-        parts.append("Edge tolerance \(overlay.model.tolerance.title)")
+        if !board.guides.isEmpty { parts.append(board.guides.count == 1 ? "1 guide" : "\(board.guides.count) guides") }
+        parts.append("Edge tolerance \(model.tolerance.title)")
+        if let badge = DesignScale.badge(model.designScale) { parts.append("Scale \(badge)") }
         setAccessibilityValue(parts.joined(separator: ". "))
+    }
+
+    // MARK: Screenshots
+
+    /// The subject of a screenshot: the hovered area (with its label), else everything
+    /// measured (with labels), else nil (the whole display).
+    func screenshotSubject() -> PixelRect? {
+        if case .area(let id) = hoveredItem, let area = board.area(id) {
+            let label = boardLabelFrames.first { localRect(area.rect).insetBy(dx: -40, dy: -40).contains($0) }
+            return label.map { area.rect.union(pixelRect(local: $0)) } ?? area.rect
+        }
+        guard let measured = board.measuredBounds else { return nil }
+        return boardLabelFrames.reduce(measured) { $0.union(pixelRect(local: $1)) }
+    }
+
+    /// Everything on this overlay as drawn, at the display's own pixels (test dumps), so
+    /// pixel-grid alignment can be checked on the image.
+    func renderOverlay() -> CGImage? {
+        let s = backingScale
+        guard let root = layer, let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: Int(bounds.width * s), height: Int(bounds.height * s), bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.interpolationQuality = .none
+        context.scaleBy(x: s, y: s)
+        root.render(in: context)
+        return context.makeImage()
+    }
+
+    /// Draws the frozen screen with the placed measurements (not the live hover, hint or
+    /// magnifier) for `crop`, at the display's pixels or at 1×.
+    func renderScreenshot(crop: PixelRect, at1x: Bool) -> CGImage? {
+        guard let snapshot, let root = layer else { return nil }
+        let outScale = at1x ? 1 : scale
+        let local = localRect(crop)
+        let width = Int((local.width * outScale).rounded()), height = Int((local.height * outScale).rounded())
+        let space = snapshot.colorSpace.flatMap { $0.supportsOutput && $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard width > 0, height > 0,
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let transient: [CALayer] = [hoverHalo, hoverLine, hoverPill, crossHalo, crossLine, dragFill, dragOutline, dragBadge,
+                                    loupe, hintBadge, statusBadge, toastBadge]
+        let wasHidden = transient.map(\.isHidden)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        transient.forEach { $0.isHidden = true }
+        isRenderingScreenshot = true
+        drawBoard()
+        CATransaction.commit()
+
+        context.interpolationQuality = at1x ? .high : .none
+        context.scaleBy(x: outScale, y: outScale)
+        context.translateBy(x: -local.minX, y: -local.minY)
+        root.render(in: context)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (layer, hidden) in zip(transient, wasHidden) { layer.isHidden = hidden }
+        isRenderingScreenshot = false
+        CATransaction.commit()
+        refresh(force: true)
+        return context.makeImage()
+    }
+}
+
+extension BadgeLayer {
+    /// SlopKit's badge in `OverlayPalette` colours, a little more opaque (90% ink rather than
+    /// 80%: measurement labels sit on busy content all the time, and text under them otherwise
+    /// ghosts through), with a one-pixel light edge so the pill keeps its shape over dark
+    /// content.
+    func outlined(scale: CGFloat) {
+        setScale(scale)
+        backgroundColor = OverlayPalette.ink.withAlphaComponent(0.9).cgColor
+        borderWidth = 1 / scale
+        borderColor = OverlayPalette.paper.withAlphaComponent(0.2).cgColor
     }
 }

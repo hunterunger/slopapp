@@ -499,3 +499,270 @@ Owner defaults (2026-11-03), and calls made while building:
 ## Blind test log
 
 One section per round, newest last. See docs/dev-cycle.md step 5.
+
+### Round 1 (fixed in the parity pass, 2026-11-03)
+
+| Finding | Verdict | Fix |
+|---|---|---|
+| Labels overlap each other, and the magnifier covers the readouts | Accept | The live readout is now one "W × H" pill down-right of the pointer (like the original), not a label per span. Area sizes sit centred in the box (below it when it's too small), held distances carry their number on the line, and the board's labels are moved off each other (`LabelLayout.separate`). The magnifier takes the first corner around the pointer that's on screen and clear of the pill and every label (`LabelLayout.magnifier`, three distances per corner). Hovering inside an area whose edges are the span no longer draws lines through its own label. All in `RulerCore`, unit-tested. |
+| Right-click menu opens only every other time | Accept | The menu opened on mouse-up, so a right-click made while it was open only closed it and the next one was needed. Now, when a right-click closes the menu, the same click opens the next one where it happened (if the button is still down the press continues and the menu opens on release; otherwise it reopens at once). |
+| The session is lost when another app comes forward | Accept | Background mode (the original has it): when another app activates, the measurements stay on screen over the live display, click-through, and the shortcut picks the session up again with a fresh freeze. With nothing measured it just closes. Every closed session (Esc, Done, quitting) is saved, and **Restore Last Session** (menu bar and right-click menu) brings it back, also after relaunching. |
+
+## Parity pass (2026-11-03)
+
+Per `docs/parity-pass.md`: look and work much more like the original, no missing everyday
+features. Studied: the website's marketing assets (poster, product video frames, OG image,
+feature list), the full changelog 1.0 → 2.6.4 and the FAQ, all downloaded to
+`/tmp/ruler-parity/` (not committed), plus this doc's earlier read of the installed app's
+nibs and strings. PixelSnap itself was not launched (an Accessibility press on its status
+item crashed it last time, and its overlay would capture the owner's screen).
+
+**What the original's overlay looks like** (from its own video frames): a crosshair cursor;
+thin coloured lines with T-shaped ends running to the nearest edges; **one** dark rounded
+pill reading "565 x 48" just down-right of the cursor (optionally with "px"); held
+distances as a single line with the number in a pill threaded on its middle; areas as a
+plain outlined box (no fill) with "174 x 42" centred in it. That's now our layout exactly,
+in our colours (accent by default) and SlopKit's badge style.
+
+### Gap table
+
+| Item | Original | Status |
+|---|---|---|
+| **Overlay design** | | |
+| Hover readout | one "W × H" pill down-right of the cursor | **Done** (was two labels, one per span) |
+| Dimension lines | thin, T-capped | **Done** (1 pt lines, T ends) |
+| Area look | outline only, size centred | **Done** (outline just outside the box; tint + corner knobs only when hovered) |
+| Held distance look | one axis, number on the line | **Done** |
+| Line colour | brand colour + colour wells, ⌥ alternative colour | **Done**: Appearance › Line color (Accent + 8 system colours). ⌥ alternative colour: **deferred** (⌥ already means "from centre" while dragging; S, ~1 h) |
+| Auto contrast | lines adapt to background | **Done**: the halo is light on light pixels, dark on very dark ones |
+| Units on labels | show/hide | **Done**: Appearance › Show units in labels (toasts and VoiceOver always say the unit) |
+| Light/dark label theme | setting | **Deferred**: labels use SlopKit's dark `BadgeLayer`; a light variant belongs in SlopKit (S) |
+| Width/height indicators, show/hide cursor, animations | settings | Skip (labels on their lines say which is which; Reduce Motion respected) |
+| Key hint line | (onboarding video instead) | Ours, kept; **?** or Appearance hides it |
+| **Menu bar menu** | Find Dimensions · Clear All · Restore Last Session · Default Tolerance ▸ · Preferences · About · Quit | **Done**: Measure / Resume Measuring · Clear Measurements · Restore Last Session · Edge Tolerance ▸ · Units ▸ · Scale ▸ · Copy Format ▸ · footer |
+| Right-click status item starts measuring | yes | **Deferred**: `MenuBarExtra` has no right-click; needs an `NSStatusItem` rewrite (M, ~2 h) |
+| **Settings** | General, Screenshots, Tolerance, Appearance, Integrations, Shortcuts, About | **Done**: General, Appearance, Screenshots, Shortcuts, About (custom `TabView` from SlopKit pieces) |
+| Tolerance per-level sliders | 4 levels × slider | Skip: 4 tuned levels (decision 8); = − T and the menus switch them |
+| Screenshot settings | location, format, padding, 1×, sounds | **Done** except sounds (skip: no sound files; the toast is the feedback) |
+| Integrations (Sketch, Figma, Affinity, XD, CleanShot) | zoom-aware dimensions, screenshot hand-off | Skip/deferred: **Scale** covers zoomed designs by hand; Snapper hand-off needs a cross-app contract (L) |
+| Rebind every overlay key, disable hotkey in apps | yes | **Deferred** (M, ~3 h): keys are fixed and listed in Settings › Shortcuts and the right-click menu |
+| Language picker, onboarding videos, Touch Bar, licence/updates | yes | Skip |
+| **Features** | | |
+| Distance (hover), areas with snapping, many at once | yes | Done (v1) |
+| Area without snapping: ⌘ / right-drag; Space moves; ⇧ squares | yes | Done (v1) |
+| Resize areas, ⇧ keeps aspect ratio | 2.6 | **Done**: drag a side or corner (resize cursors, corner knobs when hovered), undoable, Esc cancels |
+| Hold distance on screen | separate horizontal / vertical | **Done**: P holds both, X the width, Y the height; each is its own item (hover, copy, delete) |
+| Distance snaps to guides and objects | 2.5 | Done (v1) |
+| Guides snap to edges, areas, midpoint between guides | 2.6 | **Done** (areas and midpoints new) |
+| Guide distances to the screen edges | 2.3.5 | **Done** (dotted, beside the gaps between guides) |
+| Move guides | yes | **Done**: drag a guide; it re-snaps on release |
+| Click-to-place guide mode (⇧H/⇧V) | yes | **Deferred** (S): H/V at the pointer plus dragging covers it |
+| Crosshair (hold ⇧) | yes | Done (v1) |
+| Tolerance = / − / T | yes | **Done** (T cycles, new) |
+| Copy formats | w,h / h,w / CSS / SASS | **Done**: Plain, CSS, Sass, Tailwind, SwiftUI; a held width/height copies just that property. Height-first: skip |
+| Screenshot of measurements: S save, C copy, padding, ⌥ toggles padding, 1×, PNG/JPEG, folder | yes | **Done**: the hovered area (else everything measured, else the display) plus padding, with measurements drawn in. Test mode: only ever the test scene (see privacy) |
+| ⌘S capture-area tool | yes | **Done**: ⌘S, then the next box drawn is saved as drawn (Esc cancels) |
+| Screenshot button on a hovered area | 2.6.1 | **Deferred** (S, ~1 h): S while hovering the area does it; the right-click menu lists it |
+| Aspect ratio on areas / distances, 4 formats | 2.5 | **Done**: Automatic, Fraction, Decimal, Common only |
+| Scale factor for @2x/@3x designs | via integrations | **Done**: Scale ▸ Actual / @2x / @3x / 50% zoom, custom in Settings; a corner badge shows it's on |
+| Background mode | 2.1 | **Done**: shortcut (with measurements) or B, and automatically when another app comes forward |
+| Restore last session | 2.6 | **Done**, per display (matched by display UUID and pixel size), survives relaunch |
+| Context menu on right-click | 2.6 | Done, now reliable; lists every action with its key |
+| Freeze screen toggle | optional | Skip: always frozen (decision 3) |
+| Physical units (cm/in) | no | Deferred (from v1) |
+
+### Deviations from the design system (and why)
+
+- **Line colour setting** (Accent + system colours) instead of accent-only: the original lets
+  you pick colours and users switching expect it. System colours only; no brand palette.
+- **Settings tabs built from SlopKit pieces** (`GeneralSettingsTab`, `SettingsForm`,
+  `AboutSettingsTab`) rather than `SlopSettings`, to get the original's Appearance and
+  Screenshots tabs. Same look and width.
+- **The shortcut no longer always closes**: with measurements on screen it steps back into
+  background mode (the original's behaviour); Esc still closes.
+- Labels are threaded on lines and centred in boxes rather than placed beside them, as in
+  the original.
+
+### Privacy (test mode)
+
+- Freezes contain only the test scene (`CaptureExclusions.onlyWindows` + `PrivacyMask`),
+  as before. New: `RULER_FAKE_CAPTURE=1` (test scene only) doesn't record the screen at all:
+  it draws the scene's own view where its window sits, transparent elsewhere. Used for the
+  scripted drawing checks below; it also works on a locked screen.
+- **Measurement screenshots** go through one function, `MeasureOverlay.screenshotCrop`, which
+  in test mode intersects every crop with the test scene's window (and refuses on a display
+  without it). Unit test `testModeCropsNeverLeaveTheScene` covers subjects inside, straddling,
+  outside and covering the scene at paddings 0–500. The `leakcheck` hook runs the production
+  crop for every subject at paddings 0/48/4000 and samples the frozen pixels outside the
+  scene (must all be fully transparent): **33 crops, 0 failures, 0 unmasked pixels**.
+- `RULER_PASTEBOARD=name` copies to a private pasteboard, so scripted runs never touch the
+  clipboard; `RULER_SCREENSHOT_DIR` keeps saved screenshots in `/tmp/ruler-test/`.
+
+### Shared components to move to SlopKit later
+
+- `LabelLayout` (RulerCore): cursor pill, centred/line labels, collision separation,
+  magnifier placement clear of labels. Snapper's and Dropper's loupes have the same problem.
+- `SceneRenderCapturer` (Ruler/TestScene.swift): a `ScreenCapturing` fake that draws a test
+  window instead of recording; useful for every capture app's scripted tests.
+- `LabeledShortcutRow` (unchanged; also in Snapper).
+
+### Build notes (parity pass)
+
+- **Tests:** 67 Swift Testing tests in RulerCore (was 44): held distances, resize handles
+  and aspect-locked resizing, guide moves and snapping to areas/midpoints, edge gaps, design
+  scale, aspect-ratio formats, single-length copy formats, label layout (pill, area label,
+  magnifier never on the readout, separation), screenshot crops incl. the test-mode leak
+  test, session round-trip and display matching, masked-pixel alpha.
+- **Gate:** `scripts/check.sh Ruler --perf` green: launch 131 ms, first status item 263 ms,
+  idle CPU 0.002 %, idle footprint 22.1 MB (busy machine, load 4.1).
+- **Scripted walkthrough (release build, test mode, `RULER_FAKE_CAPTURE=1`, hooks, private
+  pasteboard, screenshots to `/tmp/ruler-test/parity/shots`).** The Mac's screen was locked
+  for the whole session (ScreenCaptureKit returns `displayNotFound` and Accessibility hides
+  windows), so the overlay was driven through the hooks and checked with `dump` renders of
+  the overlay itself, which I looked at:
+  - Overlay up in 8–14 ms, frozen in 25–50 ms, pixels 93–116 ms. Self-check: all 13 exact
+    shapes measure exactly by hover and by box snapping.
+  - Hover: one pill down-right of the pointer, T-capped lines (`d1c.png`). Areas centred
+    labels, held width/height with numbers on their lines, guides with gap and dotted edge
+    labels, magnifier in a clear corner (`d2c.png`, `d2top.png`). Hovering inside an area
+    that is its own span hides the redundant lines (`d3c.png`, dark).
+  - Background mode: only the measurements remain, click-through (`d3bgc.png`); resume
+    re-freezes in ~1 ms + 25 ms snapshot with the board intact.
+  - Restore Last Session after quitting and relaunching: all 8 items back.
+  - Copy: area → `width: 200px;\nheight: 120px;`, held height → `height: 98px;`, deleted pin
+    → falls back to the hover size (private pasteboard read back).
+  - Resize through synthesized mouse events on the real gesture code: right side → 260 pt
+    wide; ⇧ corner keeps the ratio (260 × 120 → 360 × 166). Box drag snaps 200 × 120.
+  - Screenshots: S on a hovered area (`Ruler … 18.01.49.png`), S on everything
+    (`… 18.01.49 2.png`), C (1798 × 1154 px image, 899 × 577 pt, on the private pasteboard),
+    ⌘S then drag (`… 18.27.54.png`); all cropped inside the scene. Leak check clean.
+  - @2x scale halves every value, aspect ratios on areas and the pill, units hidden, red
+    lines, "Scale @2x" corner badge (`d4c.png`, `d4corner.png`).
+  - Memory: 359 MB footprint while measuring on 5K + Retina with the fake capturer,
+    102 MB in background mode and after closing, flat over 4 more sessions (no growth).
+- **Not tested (screen locked all session, owner away):** the real ScreenCaptureKit freeze,
+  the menu bar menu and Settings window screenshots (light/dark), `scripts/drive tree` for
+  `[unlabeled]` controls, the right-click menu fix with real right-clicks, and background
+  mode triggered by another app activating (Calculator was opened, but apps don't
+  activate behind the lock screen, so no notification came). These need an unlocked
+  screen; the blind tester should cover them first.
+
+## Polish pass (2026-11-05)
+
+Per `docs/polish-pass.md`. Everything was checked on the release build in test mode
+(`RULER_TEST_SCENE=1`, mostly `RULER_FAKE_CAPTURE=1`, private pasteboard, screenshots to
+`/tmp/ruler-test/shots`): the overlay through `dump` renders of the overlay itself (now at the
+display's own pixels, so half-pixel blur shows) probed pixel by pixel with `magick … txt:` and
+`scripts/measure line`; windows and menus with `scripts/drive shot`, light and dark. The owner
+was at the Mac the whole time (idle 0–22 s), so no real-pointer actions. Screenshots:
+`/tmp/slopapp-polish/ruler/` (`before/`, `after/`, `final/`).
+
+### Defects fixed (before → after)
+
+**Overlay, precision**
+
+| # | Defect | Before | After |
+|---|---|---|---|
+| 1 | Hover distance lines not on the pixel grid | 1 pt stroke centred on a pixel centre: at @2x 3 rows at 50 / 100 / 50 % (`#65AEFC #007AFF #65AEFC`), halo 4 rows with half-covered edges | Filled pixel rects from `CrispStroke` (RulerCore, tested): the point-wide band holding the row, 2 rows of solid `#007AFF`, 1 px halo each side. Also crisp at 1× and 3× and in 1× screenshots |
+| 2 | Held distances: same blur | 50 / 100 / 50 % | 2 px solid; hovered: a pixel bolder each side (4 px), not a centred 2 pt blur |
+| 3 | Guides straddled a pixel boundary with a 1 px line | 2 columns at ~50 % (`#7FBBFD` instead of `#007AFF`), washed out; 3 px halo also straddling | Even band centred on the boundary (2 px, ≥ 1 pt), solid accent, 1 px halo each side; hovered solid and 2 px bolder |
+| 4 | Guide gap lines on whole points with a 1 px stroke | 2 rows at ~50 % (`#7DBAFC`) | point-wide band, 2 rows solid |
+| 5 | Drag box outlined the raw pointer rect | fractional edges could fall between pixels; outline ≠ the pixels reported | outlines the pixel-rounded rect it reports ("226 × 144 pt"), 2 px crisp |
+| 6 | Magnifier frame off the pixel grid (pointer positions are fractional) | origin 0.25 pt (0.5 px) off: its 2 pt border blended on both sides and every zoomed cell resampled | origin rounded to device pixels: 4 px solid border, cells sharp |
+| 7 | @2x / @3x readouts rounded away real precision | 100.5 pt at @2x read 50.3 (one Retina pixel is 0.25 design pt); 100 px at @3x read 33.3 | two decimals whenever a design scale is on: 50.25, 274.25, 33.33 (test updated: `designScaleDividesValues`) |
+
+**Overlay, labels and chrome**
+
+| # | Defect | Before | After |
+|---|---|---|---|
+| 8 | A short held distance's label covered the edges it measures | "24 pt" pill (48 pt wide) centred on a 24 pt line, over both T ends | `LabelLayout.lineLabel` puts it beside a line shorter than label + 2 × 6 pt: 10 pt above (right of a vertical line), flipped at the display edge (4 tests). Same rule for guide gaps |
+| 9 | Horizontal guides' gap labels clamped against the display edge | line at x = 28, ~60 pt labels pushed to x = 4: ~6 pt off their line | line at 16 + widest label / 2: labels start 16 pt (`Spacing.l`) from the edge, centred on the line |
+| 10 | The live hover lines drew over the board's numbers | accent line on top of "12 pt" | board labels in their own layer above all lines, under the pill and magnifier |
+| 11 | Labels ghosted the content under them, and lost their shape on dark content | SlopKit badge at 72 % black: a caption under "100.5 × 50.5 pt" showed through as a doubled "1100.5"; on near-black, no edge | 85 % with a one-pixel 18 % white edge (`BadgeLayer.outlined`, in-app). White text is ≥ 7:1 on light, coloured and dark content |
+| 12 | Scale badge and hint on different insets, badge in the guide-gap column | badge bottom-left at 16 pt, hint at 28 pt, toast at a literal 24 / 12 | one `chromeInset` (`Spacing.l`): hint and badge share the bottom line, badge bottom-right (other corner when the pointer nears), toast `Spacing.m` from the hint |
+| 13 | Hint moved to the top could overlap the vertical guides' gap row | hint 36 pt below the menu bar, gap labels 16–40 pt below it | below the row with an 8 pt gap (measured 8.5 incl. anti-aliasing) |
+| 14 | Any screen-parameter change ended the session | the Dock / menu-bar resizing closed the overlay; it happened 4 times in 5 minutes on this Mac with the same single display | closes only when a display's id, frame or scale changes ("displays unchanged: kept" ×3 in one run) |
+| 15 | VoiceOver value grammar | "1 guides" | "1 guide" |
+| 16 | Test scene: the "2 × 2 and 1 × 1" caption ran into the "Measure 123" sample | overlapping text | sample moved 60 pt down (not an exact shape; self-check still 13/13) |
+| 17 | Hovered area knobs centred on the box corner | 0.5 pt inside the outline's centre line | on the outline |
+
+**Menu bar menu, permission prompt, Settings**
+
+| # | Defect | Before | After |
+|---|---|---|---|
+| 18 | "Screen Recording is off" was a greyed-out menu item (reads like an unavailable action) | disabled item | a macOS 14 menu section header above "Allow Screen Recording…" |
+| 19 | Permission window not centred | opened at (863, 33): centred at zero size, then SwiftUI grew it up and right from the screen's middle | sized first, then centred: (644, 191) on a 1728 pt display; 66 / 64 pt above / below the content |
+| 20 | Permission footnote in `.tertiary` | ~1.9:1 | `.secondary` |
+| 21 | General: explanations as separate caption rows | two extra rows of caption under Units and Scale | subtitles under their pickers |
+| 22 | General: "Custom scale" always shown, a borderless "1" next to "Actual Size", focused with its text selected when Settings opened | confusing second scale control | "Custom" at the end of the Scale menu reveals a bordered "Divide by" field (64 pt, monospaced digits); hidden otherwise |
+| 23 | Shortcuts tab too tall, keys in a code font | 16 form rows, window 862 pt tall (no room on a 900 pt display; these forms don't scroll); "drag a side or corner" in monospace, ⌫ glyphs tiny | a compact cheat sheet: keys as keycaps (`Radius.xs`, hairline edge), gestures as plain words, every row 20 pt on a 24 pt pitch, window 672 pt. Each row reads as one VoiceOver phrase ("Box without snapping, Command, drag, or right-drag") |
+| 24 | Shortcuts: the Measure explanation was a separate row | caption row | subtitle of the shortcut row |
+| 25 | Screenshots: padding slider drew 25 tick dots | `step: 4` ticks under the track | snaps to 4 pt through its binding, no ticks; VoiceOver value "24 points" |
+| 26 | Screenshots: "Save to" was a bare folder name | "shots" | folder icon + display name, middle truncation, the full path as a tooltip |
+
+### Checks
+
+- `scripts/lint.sh Ruler` passes. `scripts/check.sh Ruler --perf` green: launch 132 ms, first
+  status item 253 ms, idle CPU 0.000 % (lowest), footprint 21.5 MB (busy machine, load 5.5).
+- Tests: 77 (was 67): `CrispStroke` bands at 1×/2×/3×, ticks inside the measured edges, halos,
+  emphasis, tiny spans; short-line label placement and flipping; @2x precision.
+- Real ScreenCaptureKit freeze of the test scene (`--direct`): self-check 13 / 13 exact at
+  Normal; leak check 12 crops, 0 failures, 0 unmasked pixels outside the scene. Hover line on
+  the real capture: 1 px halo, 2 px `#007AFF`, 1 px halo.
+- `scripts/drive tree`: no `[unlabeled]` in the overlay or any Settings tab; window buttons
+  16 × 16 (Settings, permission window).
+- Screenshots (light and dark): `after/settings-{General,Appearance,Screenshots,Shortcuts,About}-{light,dark}.png`,
+  `after/settings-General-custom-dark.png`, `after/permission-{light,dark}.png`,
+  `after/menu-noperm-1.png`, `final/overlay-{light,dark}.png` (+ `-scene` crops),
+  `after/board-dark-2x-small.png` (@2x, badge, gap rows), `after/hint-top-dark-crop.png`,
+  `after/drag-crop.png`, `after/cross-scene.png`, `after/loupe-crop.png`,
+  `after/hover-{area,pin,guide}*.png`, `after/real-hover.png`, `after/measure-screenshot.png`.
+- New test hooks: `flags` (shift / command / none) and `mousedrag …,hold`; `dump` renders at
+  the display's pixels.
+
+### Not done, and why
+
+- **Real-pointer states owed** (owner active all session): resize cursors over an area's sides
+  and corners, the guide-drag cursor, the right-click menu over the overlay, and hover while
+  moving the real mouse. Designed in code and unchanged in this pass; the blind tester should
+  look at them.
+- **No 1× display attached**: 1× and 3× are covered by `CrispStroke` unit tests; lines sit on
+  point bands, so 1× screenshots stay crisp too.
+- The "Save to" row is ~4 pt taller than its neighbours because of the bordered "Choose…"
+  button (native control size; left as is).
+- The live pill sits down-right of the pointer and can cover content there, by design (as in
+  the original); it never covers the hover lines or their ends.
+- Fake-capture screenshots show a dark strip where the test scene's title bar is (the fake
+  capturer draws only the content view). Test mode only.
+
+### Golden Gate + light/dark (2026-11-06)
+
+Per the mid-pass owner request (`docs/polish-pass.md` "Added mid-pass", design system §4
+"Fitting in on macOS 27 Golden Gate", §10 items 25–26), on macOS 27.2. Every overlay run
+was gated on the owner being idle ≥ 60 s (checked a minute after each launch, since launching
+resets the timer): one earlier run lost to a stray keystroke and two to other apps coming
+forward showed the overlay takes focus. Screenshots: `/tmp/slopapp-polish/ruler/gg/`.
+
+| Check | Before | After |
+|---|---|---|
+| Overlay chrome over arbitrary content (`OverlayPalette`) | my `BadgeLayer.outlined` forced pure black at 85% with a white edge; line halos pure white 80% / black 45%; resize knobs pure white; lines and fills resolved in the current appearance (so the accent differed between modes) | badges `OverlayPalette.ink` at 90% (SlopKit's 80% still ghosts text under measurement labels) with a 20% `paper` edge; halos `paper` / `ink` 50%; knobs `paper`; all chrome colours resolved in the dark appearance, so the overlay is identical in light and dark (`overlay-light-dark-side.png`; label pixels equal after a live switch) |
+| Live appearance change | backdrop followed; nothing else depended on it | new `appearance` hook flips `NSApp.appearance` live: test backdrop 246 → 40, chrome unchanged, Settings windows follow (`settings-*-light/dark.png` were shot in one window, switched live) |
+| Live accent change | chrome kept the old accent until something else redrew | observes `NSColor.systemColorsDidChangeNotification` and redraws (observer removed on close) |
+| Pixel crispness after the colour change | — | guide row: `#FEFEFE #007AFF #007AFF #FEFEFE` (light), `#DEDEDE #007AFF #007AFF #DEDEDE` (dark): still 2 px solid with 1 px halos |
+| Menus text only | status menu, overlay context menu: already text only; Settings' Line color pull-down shows colour swatches | unchanged (swatches are information) |
+| Inactive windows | Settings has no custom accent or selection elements | checked with a new `focusscene` hook (the test scene becomes key): system controls grey out, only the line-colour swatch keeps its colour (`settings-*-inactive.png`) |
+| Glass | Ruler draws none (system menus, Settings toolbar only) | unchanged |
+| `.secondary` at 3.1:1 in light on 27.2 | the permission explanation, its "restart Ruler" note, the save folder, the padding value and every key in the Shortcuts cheat sheet were secondary but are the only copy of what they say | `.primary` (subtitles, the Screenshots footer and the decorative permission symbol stay secondary) |
+| Hairline change in SlopKit | Ruler uses no `Hairline` (only `.hairlineBorder` on keycaps, unchanged) | nothing to re-measure |
+| Reopen opens Settings (new SlopKit behaviour) | — | right for Ruler (the menu bar icon can be hidden); skipped while the overlay or the test scene is visible. Verified: `open build/Ruler.app` while running (no test scene) opened Settings; ⌘W closed it. |
+| Unchanged and still right | Settings tabs, permission window, status menu in light and dark | `side-*.png` |
+
+### SlopKit notes (not edited)
+
+- `BadgeLayer` now uses `OverlayPalette` (80 % ink). Measurement labels still ghost the text
+  under them at 80 %, so Ruler uses 90 % ink plus a one-pixel 20 % `paper` edge
+  (`BadgeLayer.outlined` in `MeasureView.swift`); a denser variant may suit SlopKit.
+- `LoupeLayer`: callers have to pixel-align its frame or the zoomed cells resample; it could
+  round its own origin.
+- Ruler's `PermissionWindow` (same shape as Snapper's) centred before sizing; Snapper's copy
+  likely has the same off-centre bug.

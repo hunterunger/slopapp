@@ -19,6 +19,9 @@ enum PermissionWindow {
             window.styleMask = [.titled, .closable]
             window.title = "Ruler Needs Screen Recording"
             window.isReleasedWhenClosed = false
+            // Size it before centring: SwiftUI fills the window in later, and a window centred
+            // at zero size grows up and right from the screen's middle instead.
+            window.setContentSize(hosting.view.fittingSize)
             window.center()
             self.window = window
         }
@@ -64,7 +67,6 @@ struct PermissionView: View {
                 Text("Screen Recording is on")
                     .font(.title3.bold())
                 Text("Press the Measure shortcut or choose Measure from the Ruler menu.")
-                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 Button("Done") { PermissionWindow.close() }
                     .keyboardShortcut(.defaultAction)
@@ -78,7 +80,6 @@ struct PermissionView: View {
                     .font(.title3.bold())
                 Text("Ruler reads the pixels on screen to find edges, so it needs Screen Recording. It only looks while you measure, and nothing is saved or leaves your Mac.")
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: Spacing.s) {
                     Button("Open System Settings") {
@@ -93,8 +94,9 @@ struct PermissionView: View {
                 }
                 .padding(.top, Spacing.xs)
                 Text(didRequest ? "After you turn it on, restart Ruler." : "Turn it on in System Settings, then restart Ruler.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    // The only place that says a restart is needed: primary, not secondary
+                    // (3.1:1 in light mode on macOS 27).
+                    .font(.callout)
             }
         }
         .padding(Spacing.xxl)

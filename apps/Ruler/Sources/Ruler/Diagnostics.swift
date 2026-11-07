@@ -9,10 +9,13 @@ import QuartzCore
 ///   the scene and everything else (other apps, the menu bar, the desktop) is masked out,
 ///   so the overlay can never show or measure anything personal.
 /// - `RULER_TEST_HOOKS=1`: listen for the distributed notifications
-///   `app.slopapp.ruler.test.<measure|close|selfcheck>`. `selfcheck` measures every test-scene
+///   `app.slopapp.ruler.test.<measure|close|selfcheck|hover|drag|key|background|resume|restore|shotcheck>`. `selfcheck` measures every test-scene
 ///   shape on the real frozen image (overlay must be open, test scene on) and logs the result.
 /// - `RULER_LOG=/path/file.log`: append timings and measurements (sizes only) to a file.
 /// - `RULER_APPEARANCE=light|dark`: force an appearance (screenshots).
+/// - `RULER_PASTEBOARD=name`: copy to a private named pasteboard instead of the clipboard.
+/// - `RULER_SCREENSHOT_DIR=/path`: save measurement screenshots there instead of the
+///   folder in Settings.
 enum Diagnostics {
     static let logger = Logger(subsystem: "app.slopapp.ruler", category: "ruler")
 
@@ -20,6 +23,11 @@ enum Diagnostics {
     static let testScene = environment["RULER_TEST_SCENE"].map { !$0.isEmpty && $0 != "0" } ?? false
     static let testHooks = environment["RULER_TEST_HOOKS"] == "1"
     static let forcedAppearance = environment["RULER_APPEARANCE"]
+    /// `RULER_FAKE_CAPTURE=1` (test scene only): freeze by drawing the scene, not by
+    /// recording the screen. See `SceneRenderCapturer`.
+    static let fakeCapture = testScene && environment["RULER_FAKE_CAPTURE"] == "1"
+    static let pasteboardName = environment["RULER_PASTEBOARD"].flatMap { $0.isEmpty ? nil : $0 }
+    static let screenshotDirectory = environment["RULER_SCREENSHOT_DIR"].flatMap { $0.isEmpty ? nil : $0 }
     private static let logFile = environment["RULER_LOG"].map { URL(fileURLWithPath: $0) }
 
     /// Seconds since boot, monotonic.

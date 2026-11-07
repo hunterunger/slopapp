@@ -101,20 +101,24 @@ struct BoardTests {
         var board = Board()
         for x in [300, 100, 160] { board.addGuide(.vertical, at: x) }
         board.addGuide(.horizontal, at: 5)
-        let gaps = board.guideGaps(.vertical)
-        #expect(gaps.map(\.start) == [100, 160])
-        #expect(gaps.map(\.end) == [160, 300])
-        #expect(board.guideGaps(.horizontal).isEmpty)
+        let gaps = board.guideGaps(.vertical, limit: 1000)
+        // Edge → 100, 100 → 160, 160 → 300, 300 → edge.
+        #expect(gaps.map(\.start) == [0, 100, 160, 300])
+        #expect(gaps.map(\.end) == [100, 160, 300, 1000])
+        #expect(gaps.map(\.touchesEdge) == [true, false, false, true])
+        #expect(board.guideGaps(.horizontal, limit: 800).map(\.length) == [5, 795])
+        #expect(Board().guideGaps(.vertical, limit: 1000).isEmpty)
     }
 
-    @Test func hitTestingPrefersGuidesThenPinsThenSmallestArea() {
+    @Test func hitTestingPrefersPinsThenGuidesThenSmallestArea() {
         var board = Board()
         let big = board.addArea(PixelRect(x: 0, y: 0, width: 500, height: 500))
         let small = board.addArea(PixelRect(x: 100, y: 100, width: 50, height: 50))
         #expect(board.item(at: PixelPoint(x: 120, y: 120), slop: 4) == .area(small))
         #expect(board.item(at: PixelPoint(x: 300, y: 300), slop: 4) == .area(big))
-        let pin = board.addPin(point: PixelPoint(x: 400, y: 400), spans: PixelRect(minX: 350, minY: 380, maxX: 450, maxY: 420))
-        #expect(board.item(at: PixelPoint(x: 360, y: 402), slop: 4) == .pin(pin))
+        let pins = board.addPins(point: PixelPoint(x: 400, y: 400), spans: PixelRect(minX: 350, minY: 380, maxX: 450, maxY: 420))
+        #expect(board.item(at: PixelPoint(x: 360, y: 402), slop: 4) == .pin(pins[0]))
+        #expect(board.item(at: PixelPoint(x: 398, y: 385), slop: 4) == .pin(pins[1]))
         let guide = board.addGuide(.horizontal, at: 121)
         #expect(board.item(at: PixelPoint(x: 120, y: 119), slop: 4) == .guide(guide))
         #expect(board.item(at: PixelPoint(x: 700, y: 700), slop: 4) == nil)
@@ -123,9 +127,10 @@ struct BoardTests {
     @Test func lastMeasuredFollowsAddsAndRemoves() {
         var board = Board()
         let a = board.addArea(PixelRect(x: 0, y: 0, width: 10, height: 10))
-        let p = board.addPin(point: PixelPoint(x: 1, y: 1), spans: PixelRect(x: 0, y: 0, width: 4, height: 6))
+        let p = board.addPins(point: PixelPoint(x: 1, y: 1), spans: PixelRect(x: 0, y: 0, width: 4, height: 6), axes: [.horizontal])[0]
         #expect(board.lastMeasured == .pin(p))
-        #expect(board.size(of: .pin(p))! == (4, 6))
+        #expect(board.reading(of: .pin(p)) == .length(4, axis: .horizontal))
+        #expect(board.reading(of: .area(a)) == .size(width: 10, height: 10))
         board.remove(.pin(p))
         #expect(board.lastMeasured == .area(a))
         board.addGuide(.vertical, at: 3)

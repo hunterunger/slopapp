@@ -40,6 +40,8 @@ public enum Tolerance: Int, CaseIterable, Sendable, Identifiable {
     public var looser: Tolerance? { Tolerance(rawValue: rawValue + 1) }
     /// One step less tolerant (more edges), or nil at the end.
     public var stricter: Tolerance? { Tolerance(rawValue: rawValue - 1) }
+    /// The next level, wrapping from the loosest back to the strictest (T).
+    public var cycled: Tolerance { looser ?? .strict }
 }
 
 /// Memory for a decoded display image, mapped straight from the system so it goes back to
@@ -104,6 +106,12 @@ public struct EdgeImage: Sendable {
         let i = (point.y * width + point.x) * 4
         let p = storage.pointer
         return (p[i], p[i + 1], p[i + 2])
+    }
+
+    /// The alpha of a pixel (0 where test mode masked the capture), or nil outside the image.
+    public func alpha(at point: PixelPoint) -> UInt8? {
+        guard bounds.contains(point) else { return nil }
+        return storage.pointer[(point.y * width + point.x) * 4 + 3]
     }
 
     private func withPixels<T>(_ body: (UnsafeBufferPointer<UInt8>) -> T) -> T {
