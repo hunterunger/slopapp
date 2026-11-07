@@ -89,6 +89,15 @@ int archive_read_set_options(struct archive *, const char *);
 int archive_read_add_passphrase(struct archive *, const char *);
 int archive_read_open_filename(struct archive *, const char *, size_t);
 int archive_read_open_filenames(struct archive *, const char **, size_t);
+// Reading through callbacks (encrypted 7z archives are decrypted as libarchive reads them).
+typedef ssize_t archive_read_callback(struct archive *, void *_client_data, const void **_buffer);
+typedef int64_t archive_skip_callback(struct archive *, void *_client_data, int64_t request);
+typedef int64_t archive_seek_callback(struct archive *, void *_client_data, int64_t offset, int whence);
+typedef int archive_open_callback(struct archive *, void *_client_data);
+typedef int archive_close_callback(struct archive *, void *_client_data);
+int archive_read_set_seek_callback(struct archive *, archive_seek_callback *);
+int archive_read_open2(struct archive *, void *_client_data, archive_open_callback *, archive_read_callback *,
+                       archive_skip_callback *, archive_close_callback *);
 int archive_read_next_header(struct archive *, struct archive_entry **);
 ssize_t archive_read_data(struct archive *, void *, size_t);
 int archive_read_data_block(struct archive *, const void **, size_t *, int64_t *);

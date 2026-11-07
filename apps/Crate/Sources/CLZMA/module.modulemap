@@ -1,0 +1,8 @@
+// The system liblzma (/usr/lib/liblzma.5.dylib, public domain / 0BSD), linked through the
+// macOS SDK's liblzma.tbd. Apple ships the library but not lzma.h, so crate_lzma.h
+// declares the few calls Crate uses to decode 7z headers.
+module CLZMA [system] {
+    header "crate_lzma.h"
+    link "lzma"
+    export *
+}

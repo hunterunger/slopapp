@@ -140,3 +140,11 @@ final class FakeFileSystem: FileSystem, @unchecked Sendable {
 extension ArchiveListing {
     var paths: [String] { entries.map(\.path).sorted() }
 }
+
+import CommonCrypto
+
+enum CommonCryptoShim {
+    static func sha256(_ data: inout [UInt8], _ digest: inout [UInt8]) {
+        CC_SHA256(&data, CC_LONG(data.count), &digest)
+    }
+}

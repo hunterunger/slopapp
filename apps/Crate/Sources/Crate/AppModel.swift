@@ -32,6 +32,8 @@ final class AppModel {
     var passwordRequests: [PasswordRequest] = []
     /// Archives in File ▸ Open Recent.
     private(set) var recents: [URL] = []
+    /// Remembered passwords (Keychain), used only when Settings ▸ Remember passwords is on.
+    let savedPasswords = SavedPasswords(store: KeychainPasswordStore.standard())
     /// The window's undo manager (set by the main view), for putting trashed archives back.
     @ObservationIgnored weak var undoManager: UndoManager?
 
@@ -41,7 +43,7 @@ final class AppModel {
         let loaded = UserDefaults.standard.data(forKey: Self.settingsKey)
             .flatMap { try? JSONDecoder().decode(CrateSettings.self, from: $0) } ?? CrateSettings()
         settings = loaded
-        let processor = ExtractProcessor()
+        let processor = ExtractProcessor(savedPasswords: savedPasswords)
         self.processor = processor
         queue = FileQueue(processor: processor, acceptedTypes: [.item], maxConcurrent: 3)
         processor.settings = loaded
@@ -115,18 +117,55 @@ final class AppModel {
         }
     }
 
+    /// File ▸ Join Parts…: pick any part of a `.001` set; it opens, then joins.
+    func chooseSplitFilesToJoin() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Choose any part of a split file (.001, .002…) to put it back together."
+        panel.prompt = "Join"
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            MainActor.assumeIsolated { self.join(url) }
+        }
+    }
+
+    func join(_ url: URL) {
+        guard !isBusy else { return refuseWhileBusy() }
+        guard FileSplitter.isNumberedSet(url) else {
+            NSSound.beep()
+            HUD.show("Choose a .001 part", systemImage: "square.stack.3d.up")
+            return
+        }
+        do {
+            let source = try VolumeSet.resolve(url)
+            noteRecent(source.displayURL)
+            let model = BrowseModel(source: source, app: self)
+            model.joinWhenReady = true
+            screen = .browse(model)
+            model.load()
+        } catch {
+            let crateError = error as? CrateError ?? .unreadableSource(name: url.lastPathComponent)
+            screen = .browse(BrowseModel(failed: url, error: crateError, app: self))
+        }
+    }
+
     /// ⌥ and nothing else (so a stray Shift-Option or Command-Option doesn't count).
     static var optionAloneHeld: Bool {
         NSEvent.modifierFlags.intersection([.shift, .control, .option, .command]) == .option
     }
 
-    func extractInQueue(_ urls: [URL]) {
+    func extractInQueue(_ urls: [URL], to folder: URL? = nil) {
         // A split set shows as its first part, whichever part was dropped.
         let archives = urls.map { (try? VolumeSet.resolve($0))?.displayURL ?? $0 }
         archives.forEach { noteRecent($0) }
-        if case .ask = settings.destination {
+        if let folder {
+            archives.forEach { processor.setFolder(folder, for: $0) }
+            addToQueue(archives)
+        } else if case .ask = settings.destination {
             chooseFolder(message: "Choose where to put the extracted files.", prompt: "Extract Here", near: archives.first) { [weak self] folder in
                 guard let self else { return }
+                self.settings.noteRecentFolder(folder)
                 archives.forEach { self.processor.setFolder(folder, for: $0) }
                 self.addToQueue(archives)
             }
@@ -183,6 +222,7 @@ final class AppModel {
     func closeCurrent() {
         if let browse { browse.cancel() }
         if let create { create.cancel() }
+        ArchiveReader.forgetDecryptionKeys()
         screen = queue.items.isEmpty ? .empty : .queue
     }
 
@@ -302,6 +342,14 @@ final class AppModel {
     }
 }
 
+/// A failed queue row: the short, nameless message (the row shows the name), and no Try
+/// Again for archives that fail the same way every time.
+struct QueueFailure: LocalizedError, FileQueueRetryHint {
+    let error: CrateError
+    var errorDescription: String? { error.rowMessage }
+    var isWorthRetrying: Bool { !error.isFinal }
+}
+
 struct PasswordRequest: Identifiable, Equatable {
     let url: URL
     let wrong: Bool
@@ -311,12 +359,17 @@ struct PasswordRequest: Identifiable, Equatable {
 /// Extracts one archive for the batch queue. Passwords live in memory only, until used.
 final class ExtractProcessor: FileProcessor, @unchecked Sendable {
     private let lock = NSLock()
+    private let savedPasswords: SavedPasswords
     private var passwords: [String: String] = [:]
     private var folders: [String: URL] = [:]
     private var _settings = CrateSettings()
     private let fileSystem = SystemFileSystem()
     var onNeedsPassword: (@Sendable (URL, Bool) -> Void)?
     var onFinished: (@Sendable (URL, String, [TrashMove]) -> Void)?
+
+    init(savedPasswords: SavedPasswords) {
+        self.savedPasswords = savedPasswords
+    }
 
     var settings: CrateSettings {
         get { lock.withLock { _settings } }
@@ -334,19 +387,35 @@ final class ExtractProcessor: FileProcessor, @unchecked Sendable {
     func process(_ job: FileJob, progress: FileProgress) async throws -> FileOutcome {
         let key = job.input.standardizedFileURL.path
         let (password, chosenFolder, settings) = lock.withLock { (passwords[key], folders[key], _settings) }
-        let source = try VolumeSet.resolve(job.input)
+        let source: ArchiveSource
+        do {
+            source = try VolumeSet.resolve(job.input)
+        } catch let error as CrateError {
+            throw QueueFailure(error: error)
+        }
         let folder = chosenFolder ?? settings.extractionFolder(for: source) ?? source.folder
         let result: ExtractionResult
         do {
-            result = try Extractor(fileSystem: fileSystem).extract(
-                source, to: folder, options: ExtractionOptions(password: password)
-            ) { progress($0) }
+            do {
+                result = try Extractor(fileSystem: fileSystem).extract(
+                    source, to: folder, options: ExtractionOptions(password: password)
+                ) { progress($0) }
+            } catch let error as CrateError where error.needsPassword && password == nil && settings.rememberPasswords {
+                // Try the remembered passwords before asking.
+                guard let saved = savedPasswords.find(for: source) else { throw error }
+                result = try Extractor(fileSystem: fileSystem).extract(
+                    source, to: folder, options: ExtractionOptions(password: saved)
+                ) { progress($0) }
+            }
         } catch let error as CrateError where error.needsPassword {
             // Wrong passwords are forgotten; the prompt asks again.
             lock.withLock { passwords[key] = nil }
             onNeedsPassword?(job.input, password != nil)
-            throw error
+            throw QueueFailure(error: error)
+        } catch let error as CrateError {
+            throw QueueFailure(error: error)
         }
+        if let password, settings.rememberPasswords { savedPasswords.remember(password) }
         lock.withLock { passwords[key] = nil }
         var summary = Self.summary(result)
         var moves: [TrashMove] = []

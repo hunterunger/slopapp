@@ -5,16 +5,20 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var model: AppModel
     let info: AppInfo
+    @State private var savedCount = 0
+    @State private var confirmForget = false
+    @State private var showingFileTypes = false
 
     var body: some View {
         SlopSettings(info: info, isMenuBarApp: false) {
-            Picker("When you open an archive", selection: $model.settings.openBehavior) {
+            // Each explanation sits under its own label, as the system's Settings do.
+            Picker(selection: $model.settings.openBehavior) {
                 Text("Show What's Inside").tag(CrateSettings.OpenBehavior.browse)
                 Text("Extract It Right Away").tag(CrateSettings.OpenBehavior.extract)
+            } label: {
+                Text("When you open an archive")
+                Text("Hold Option (⌥) to do the other.")
             }
-            Text("Hold Option (⌥) while dropping or opening to do the other.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
             Picker("Extract to", selection: destinationChoice) {
                 Text("Next to Archive").tag(0)
                 Text("Ask Each Time").tag(1)
@@ -24,21 +28,53 @@ struct SettingsView: View {
                 Divider()
                 Text("Choose Folder…").tag(3)
             }
-            Picker("After extracting", selection: $model.settings.afterExtracting) {
+            Picker(selection: $model.settings.afterExtracting) {
                 Text("Keep Archive").tag(CrateSettings.AfterExtracting.keep)
                 Text("Move Archive to Trash").tag(CrateSettings.AfterExtracting.trash)
+            } label: {
+                Text("After extracting")
+                Text("Only after a complete extraction with nothing skipped. Edit ▸ Undo puts it back.")
             }
-            Text("Archives only go to the Trash after a complete extraction with nothing skipped. Edit ▸ Undo puts them back.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             Toggle("Show extracted files in Finder", isOn: $model.settings.revealAfterExtracting)
+            Picker("When you add files to compress", selection: $model.settings.reviewFilesFirst) {
+                Text("Show the List First").tag(true)
+                Text("Go Straight to the Format").tag(false)
+            }
+            LabeledContent {
+                Button("Choose…") { showingFileTypes = true }
+            } label: {
+                Text("File types")
+                Text("Which archives open in Crate when you double-click them.")
+            }
+            .sheet(isPresented: $showingFileTypes) { FileTypesSheet() }
         } advanced: {
-            Toggle("Leave out Mac-only files when compressing", isOn: $model.settings.leaveOutMacFiles)
-            Text(".DS_Store, “._” files, __MACOSX and custom folder icons mean nothing on other computers.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Toggle(isOn: $model.settings.rememberPasswords) {
+                Text("Remember passwords in the Keychain")
+                Text("Passwords that open an archive are saved in your Keychain and tried first on the next one.")
+            }
+            LabeledContent("Saved passwords") {
+                HStack {
+                    Text(savedCount == 0 ? "None" : savedCount == 1 ? "1" : "\(savedCount)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    Button("Forget All…") { confirmForget = true }
+                        .disabled(savedCount == 0)
+                }
+            }
+            .confirmationDialog("Forget all saved passwords?", isPresented: $confirmForget) {
+                Button("Forget All", role: .destructive) {
+                    model.savedPasswords.forgetAll()
+                    savedCount = 0
+                }
+            } message: {
+                Text("They're removed from your Keychain. Archives will ask for their passwords again.")
+            }
+            .onAppear { savedCount = model.savedPasswords.count }
+            .onChange(of: model.settings.rememberPasswords) { savedCount = model.savedPasswords.count }
+            Toggle(isOn: $model.settings.leaveOutMacFiles) {
+                Text("Leave out Mac-only files when compressing")
+                Text(".DS_Store, “._” files, __MACOSX and custom folder icons mean nothing on other computers.")
+            }
         }
     }
 

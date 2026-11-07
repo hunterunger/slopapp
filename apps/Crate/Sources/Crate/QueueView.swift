@@ -21,22 +21,27 @@ struct QueueView: View {
                 return AppModel.shared.queueResults[item.input.standardizedFileURL.path]
             }
             .fileQueueRetryTitle("Extract Again")
-            Divider()
-            HStack {
+            FooterBar {
                 Text(summary)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
                     .monospacedDigit()
-                Spacer()
-                if model.queue.isBusy {
+                Spacer(minLength: Spacing.s)
+                // One slot for both titles, so the button doesn't change width.
+                ZStack(alignment: .trailing) {
                     Button("Stop All") { model.queue.cancelAll() }
                         .keyboardShortcut(.cancelAction)
-                } else {
+                        .opacity(model.queue.isBusy ? 1 : 0)
+                        .disabled(!model.queue.isBusy)
+                        .accessibilityHidden(!model.queue.isBusy)
                     Button("Clear List") { model.clearQueue() }
+                        .opacity(model.queue.isBusy ? 0 : 1)
+                        .disabled(model.queue.isBusy)
+                        .accessibilityHidden(model.queue.isBusy)
                 }
+                .controlSize(.small)
             }
-            .padding(.horizontal, Spacing.l)
-            .padding(.vertical, Spacing.m)
         }
         .navigationTitle("Crate")
         .navigationSubtitle(model.queue.isBusy ? "Extracting" : "")

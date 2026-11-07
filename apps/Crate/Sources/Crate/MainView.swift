@@ -24,12 +24,15 @@ struct MainView: View {
                 QueueView(model: model)
             }
         }
-        .frame(minWidth: 540, minHeight: 380)
+        // 540: the narrowest width where the browse toolbar (title, Close, Split, Convert,
+        // Extract, Filter) fits without sending Extract to the overflow menu.
+        .frame(minWidth: 540, minHeight: 340)
         .onAppear { model.undoManager = undoManager }
         .onChange(of: undoManager) { _, manager in model.undoManager = manager }
         .sheet(item: queuePasswordRequest) { request in
             PasswordEntrySheet(
                 fileName: request.url.lastPathComponent, wrong: request.wrong, checking: false,
+                remember: $model.settings.rememberPasswords,
                 onSubmit: { model.answerPassword($0, for: request) },
                 onCancel: { model.answerPassword(nil, for: request) }
             )
@@ -58,9 +61,7 @@ struct WindowDrop: ViewModifier {
         content
             .overlay {
                 if targeted {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(Color.accentColor, lineWidth: 2)
-                        .padding(2)
+                    DropHighlight()
                         .allowsHitTesting(false)
                 }
             }
@@ -76,11 +77,36 @@ extension View {
     func acceptsDrops(_ model: AppModel) -> some View { modifier(WindowDrop(model: model)) }
 }
 
-/// Unlock an encrypted archive. Used by the open archive and by queue rows.
+/// A 2 pt accent ring just inside the window while files are dragged over it, its
+/// corners following the window's.
+struct DropHighlight: View {
+    private static let inset: CGFloat = 2
+    private static let lineWidth: CGFloat = 2
+
+    var body: some View {
+        if #available(macOS 26, *) {
+            // A stroke twice the width centred on the edge, clipped to the inside.
+            let shape = ConcentricRectangle(corners: .concentric(minimum: .fixed(Radius.xs)), isUniform: true)
+            shape.stroke(Color.accentColor, lineWidth: Self.lineWidth * 2)
+                .clipShape(shape)
+                .padding(Self.inset)
+        } else {
+            RoundedRectangle(cornerRadius: Radius.nested(in: Radius.legacyWindow, padding: Self.inset), style: .continuous)
+                .strokeBorder(Color.accentColor, lineWidth: Self.lineWidth)
+                .padding(Self.inset)
+        }
+    }
+}
+
+/// Unlock an encrypted archive. Used by the open archive and by queue rows. The layout of
+/// an authentication dialog: the lock on the left, everything else in one column, and a
+/// wrong password replaces the subtitle in place, so the sheet never changes size.
 struct PasswordEntrySheet: View {
     let fileName: String
     let wrong: Bool
     let checking: Bool
+    /// Settings ▸ Remember passwords, offered here too.
+    @Binding var remember: Bool
     let onSubmit: (String) -> Void
     let onCancel: () -> Void
 
@@ -89,40 +115,51 @@ struct PasswordEntrySheet: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.m) {
+        VStack(alignment: .leading, spacing: Spacing.l) {
             HStack(alignment: .top, spacing: Spacing.m) {
                 Image(systemName: "lock.fill")
                     .font(.largeTitle)
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("“\(fileName)” is protected with a password")
-                        .font(.headline)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Enter its password to extract its files. Crate doesn't save passwords.")
+                VStack(alignment: .leading, spacing: Spacing.m) {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("“\(fileName)” is protected with a password")
+                            .font(.headline)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Group {
+                            if wrong {
+                                Label("That password didn't work. Try again.", systemImage: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.textOrange)
+                            } else {
+                                Text("Enter its password to open it.")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                    }
+                    .accessibilityElement(children: .combine)
+                    Group {
+                        if showPassword {
+                            TextField("Password", text: $password)
+                        } else {
+                            SecureField("Password", text: $password)
+                        }
+                    }
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focused)
+                    .onSubmit(submit)
+                    VStack(alignment: .leading, spacing: Spacing.s) {
+                        Toggle("Show password", isOn: $showPassword)
+                        Toggle("Remember in Keychain", isOn: $remember)
+                            .help("Save passwords that work in your Keychain, and try them on new archives")
+                    }
                 }
             }
-            Group {
-                if showPassword {
-                    TextField("Password", text: $password)
-                } else {
-                    SecureField("Password", text: $password)
-                }
-            }
-            .textFieldStyle(.roundedBorder)
-            .focused($focused)
-            .onSubmit(submit)
-            Toggle("Show password", isOn: $showPassword)
-            if wrong {
-                Label("That password didn't work. Check it and try again.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-            }
-            HStack {
+            HStack(spacing: Spacing.s) {
                 if checking {
                     ProgressView().controlSize(.small).accessibilityLabel("Checking password")
                 }

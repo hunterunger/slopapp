@@ -17,7 +17,8 @@ final class BrowseModel {
         case idle
         case working(title: String, progress: Double?)
         case extracted(ExtractionResult, trashed: Bool?)
-        case converted(CreateResult)
+        case split([URL])
+        case joined(URL)
         case failed(String)
     }
 
@@ -28,7 +29,9 @@ final class BrowseModel {
         case extractTo
         case quickLook
         case open(ArchiveNode)
-        case convert(CreateFormat)
+        case convert
+        /// Header-encrypted 7z: list it once the password is known.
+        case reload
     }
 
     let source: ArchiveSource
@@ -43,10 +46,7 @@ final class BrowseModel {
     /// Set by the outline. Changing it clears a finished job's message and moves Quick Look.
     var selection: [ArchiveNode] = [] {
         didSet {
-            switch job {
-            case .extracted, .converted, .failed: job = .idle
-            default: break
-            }
+            if case .failed = job { job = .idle }
             if quickLook.isVisible, let node = previewNode { preparePreview(node) }
         }
     }
@@ -56,6 +56,11 @@ final class BrowseModel {
     var askingPassword = false
     var passwordWasWrong = false
     var checkingPassword = false
+    /// Saved passwords are being tried before asking.
+    private(set) var tryingSavedPasswords = false
+    var splitting = false
+    /// Join the parts as soon as the set has been read (File ▸ Join Split Files…).
+    @ObservationIgnored var joinWhenReady = false
     @ObservationIgnored private var pending: PendingAction?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// Space bar Quick Look (a real QLPreviewPanel that follows the selection).
@@ -72,8 +77,8 @@ final class BrowseModel {
     }
 
     /// An archive that couldn't even be opened (e.g. a missing part).
-    init(failed url: URL, error: CrateError, app: AppModel) {
-        source = ArchiveSource(file: url)
+    init(failed url: URL, error: CrateError, app: AppModel, source: ArchiveSource? = nil) {
+        self.source = source ?? ArchiveSource(file: url)
         self.app = app
         phase = .failed(error)
     }
@@ -95,14 +100,52 @@ final class BrowseModel {
         isLoaded && !isWorking && !archiveGone && listing?.encryptionUnsupported == false && !tree.roots.isEmpty
     }
 
+    /// The finished screen (extracted, split or joined) is showing.
+    var isShowingResult: Bool {
+        switch job {
+        case .extracted, .split, .joined: true
+        default: false
+        }
+    }
+
+    /// What the finished screen lists (real files, so they can be dragged anywhere).
+    var resultItems: [URL] {
+        switch job {
+        case .extracted(let result, _): result.outputs
+        case .split(let parts): parts
+        case .joined(let file): [file]
+        default: []
+        }
+    }
+
+    /// A `.001` set: Join makes it one file again.
+    var canJoin: Bool {
+        !isWorking && !archiveGone && source.parts.count > 1 && FileSplitter.isNumberedSet(source.parts[0])
+    }
+
+    /// Split the archive file itself into parts.
+    var canSplit: Bool {
+        !isWorking && !archiveGone && !source.isMultiPart && (isLoaded || isFailed)
+    }
+
+    var isFailed: Bool {
+        if case .failed = phase { return true }
+        return false
+    }
+
     var hasSelection: Bool { !selection.isEmpty }
 
     /// "212 items, 1.4 GB" for the window subtitle.
     var summary: String {
         guard let listing, isLoaded else { return "" }
         let count = tree.itemCount
+        guard count > 0 else { return "Empty · " + listing.formatName }
         var text = count == 1 ? "1 item" : "\(count.formatted()) items"
-        text += tree.sizesKnown ? ", " + ByteCountFormatter.string(fromByteCount: tree.totalBytes, countStyle: .file) : ", size unknown"
+        if !selection.isEmpty {
+            text = "\(selection.count.formatted()) of \(text) selected"
+        } else {
+            text += tree.sizesKnown ? ", " + ByteCountFormatter.string(fromByteCount: tree.totalBytes, countStyle: .file) : ", size unknown"
+        }
         text += " · " + listing.formatName
         return text
     }
@@ -117,10 +160,11 @@ final class BrowseModel {
                 if case .loading = self?.phase { self?.phase = .loading(fraction) }
             }
         }
+        let password = self.password
         task = Task {
             let result = await Task.detached(priority: .userInitiated) { () -> Result<(ArchiveListing, ArchiveTree), CrateError> in
                 do {
-                    let listing = try ArchiveReader.list(source, progress: loadProgress)
+                    let listing = try ArchiveReader.list(source, password: password, progress: loadProgress)
                     return .success((listing, ArchiveTree(entries: listing.entries)))
                 } catch let error as CrateError {
                     return .failure(error)
@@ -129,15 +173,26 @@ final class BrowseModel {
                 }
             }.value
             guard !Task.isCancelled else { return }
+            defer {
+                if joinWhenReady {
+                    joinWhenReady = false
+                    join()
+                }
+            }
             switch result {
             case .success(let (listing, tree)):
                 self.listing = listing
                 self.tree = tree
                 self.visibleTree = tree.filtered(query)
                 phase = .loaded
-                if listing.hasEncryptedEntries, !listing.encryptionUnsupported {
-                    askingPassword = true
+                if listing.hasEncryptedEntries, !listing.encryptionUnsupported, password == nil {
+                    askForPassword()
                 }
+            case .failure(let error) where error.needsPassword:
+                // 7z with hidden names: nothing to show until it's unlocked.
+                phase = .failed(error)
+                pending = .reload
+                askForPassword()
             case .failure(let error):
                 phase = .failed(error)
             }
@@ -145,6 +200,27 @@ final class BrowseModel {
     }
 
     // MARK: Password
+
+    /// Tries remembered passwords first (if that's on), then asks.
+    private func askForPassword() {
+        let saved = app.savedPasswords
+        guard app.settings.rememberPasswords, saved.count > 0 else {
+            askingPassword = true
+            return
+        }
+        tryingSavedPasswords = true
+        let source = self.source
+        Task {
+            let found = await Task.detached(priority: .userInitiated) { saved.find(for: source) }.value
+            tryingSavedPasswords = false
+            if let found {
+                HUD.show("Unlocked with a saved password", systemImage: "key.fill")
+                unlocked(with: found)
+            } else {
+                askingPassword = true
+            }
+        }
+    }
 
     func submitPassword(_ text: String) {
         guard !text.isEmpty else { return }
@@ -154,17 +230,28 @@ final class BrowseModel {
             let ok = await Task.detached { (try? ArchiveReader.checkPassword(text, for: source)) ?? false }.value
             checkingPassword = false
             if ok {
-                password = text
-                askingPassword = false
-                passwordWasWrong = false
-                if let pending {
-                    self.pending = nil
-                    run(pending)
-                }
+                if app.settings.rememberPasswords { app.savedPasswords.remember(text) }
+                unlocked(with: text)
             } else {
                 passwordWasWrong = true
             }
         }
+    }
+
+    private func unlocked(with text: String) {
+        password = text
+        askingPassword = false
+        passwordWasWrong = false
+        if let pending {
+            self.pending = nil
+            run(pending)
+        }
+    }
+
+    /// "Enter Password…" on a 7z whose names are hidden: list it once unlocked.
+    func unlockToList() {
+        pending = .reload
+        askingPassword = true
     }
 
     func cancelPassword() {
@@ -176,6 +263,9 @@ final class BrowseModel {
     private var needsPassword: Bool {
         listing?.hasEncryptedEntries == true && listing?.encryptionUnsupported == false && password == nil
     }
+
+    /// The password, once checked, for jobs that start elsewhere (Convert).
+    var checkedPassword: String? { password }
 
     /// Runs `action`, asking for the password first if the archive needs one.
     private func withPassword(_ action: PendingAction) {
@@ -194,7 +284,8 @@ final class BrowseModel {
         case .extractTo: extractSelectionTo()
         case .quickLook: toggleQuickLook()
         case .open(let node): open(node)
-        case .convert(let format): convert(to: format)
+        case .convert: convert()
+        case .reload: load()
         }
     }
 
@@ -226,6 +317,7 @@ final class BrowseModel {
         let paths = hasSelection ? selection.map(\.archivePath) : nil
         app.chooseFolder(message: hasSelection ? "Choose where to put the selected items." : "Choose where to extract the archive.",
                          prompt: "Extract Here", near: source.displayURL) { folder in
+            self.app.settings.noteRecentFolder(folder)
             self.extract(selection: paths, to: folder, layout: paths == nil ? .smart : .loose, fullArchive: paths == nil)
         }
     }
@@ -242,7 +334,10 @@ final class BrowseModel {
         } else {
             message = "Crate can't save next to the archive. Choose where to put the extracted files."
         }
-        app.chooseFolder(message: message, prompt: "Extract Here", near: source.displayURL, then: then)
+        app.chooseFolder(message: message, prompt: "Extract Here", near: source.displayURL) { folder in
+            self.app.settings.noteRecentFolder(folder)
+            then(folder)
+        }
     }
 
     private func extract(selection: [String]?, to folder: URL, layout: ExtractionOptions.Layout, fullArchive: Bool) {
@@ -316,14 +411,58 @@ final class BrowseModel {
         job = .idle
     }
 
+    /// Done on the finished screen: back to the start.
+    func finish() {
+        app.closeCurrent()
+    }
+
     func revealResult() {
-        switch job {
-        case .extracted(let result, _) where !result.outputs.isEmpty:
-            NSWorkspace.shared.activateFileViewerSelecting(result.outputs)
-        case .converted(let result):
-            NSWorkspace.shared.activateFileViewerSelecting(result.outputs)
-        default:
-            if !archiveGone { NSWorkspace.shared.activateFileViewerSelecting([source.displayURL]) }
+        let items = resultItems.filter { FileManager.default.fileExists(atPath: $0.path) }
+        if !items.isEmpty {
+            NSWorkspace.shared.activateFileViewerSelecting(items)
+        } else if !archiveGone {
+            NSWorkspace.shared.activateFileViewerSelecting([source.displayURL])
+        }
+    }
+
+    // MARK: Split and join
+
+    /// Splits the archive file into `.001`, `.002`… parts next to it.
+    func split(partSize: Int64) {
+        guard canSplit else { return }
+        let file = source.parts[0]
+        let folder = TrashLocation.contains(source.folder) ? TrashLocation.fallbackFolder : source.folder
+        job = .working(title: "Splitting…", progress: nil)
+        let sink = progressSink()
+        task = Task {
+            let outcome = await Task.detached(priority: .userInitiated) {
+                Result { try FileSplitter.split(file, partSize: partSize, in: folder, progress: sink) }
+            }.value
+            guard !Task.isCancelled else { return }
+            switch outcome {
+            case .success(let parts): job = .split(parts)
+            case .failure(is CancellationError): job = .idle
+            case .failure(let error): job = .failed((error as? CrateError)?.message ?? error.localizedDescription)
+            }
+        }
+    }
+
+    /// Joins a `.001` set into one file next to it.
+    func join() {
+        guard canJoin else { return }
+        let parts = source.parts
+        job = .working(title: "Joining parts…", progress: nil)
+        let sink = progressSink()
+        task = Task {
+            let outcome = await Task.detached(priority: .userInitiated) {
+                Result { try FileSplitter.join(parts, progress: sink) }
+            }.value
+            guard !Task.isCancelled else { return }
+            switch outcome {
+            case .success(let file): job = .joined(file)
+            case .failure(is CancellationError): job = .idle
+            case .failure(let error): job = .failed((error as? CrateError)?.message ?? error.localizedDescription)
+            }
         }
     }
 
@@ -409,39 +548,11 @@ final class BrowseModel {
 
     // MARK: Converting
 
-    func convert(to format: CreateFormat) {
+    /// Opens the format page to repack this archive (unlocking it first if needed).
+    func convert() {
         guard canExtract else { return }
-        if needsPassword { return withPassword(.convert(format)) }
-        let source = self.source
-        let password = self.password
-        let settings = app.settings
-        let folder = TrashLocation.contains(source.folder) ? TrashLocation.fallbackFolder
-            : FileManager.default.isWritableFile(atPath: source.folder.path) ? source.folder : nil
-        let start: @MainActor (URL) -> Void = { folder in
-            let template = CreateRequest(sources: [], folder: folder, name: source.baseName, format: format,
-                                         level: settings.compression, leaveOutMacFiles: settings.leaveOutMacFiles)
-            self.job = .working(title: "Converting to \(format.title)…", progress: nil)
-            let sink = self.progressSink()
-            self.task = Task {
-                let outcome = await Task.detached(priority: .userInitiated) { () -> Result<CreateResult, any Error> in
-                    Result {
-                        try Converter().convert(source, password: password, to: template, progress: sink)
-                    }
-                }.value
-                guard !Task.isCancelled else { return }
-                switch outcome {
-                case .success(let result): self.job = .converted(result)
-                case .failure(is CancellationError): self.job = .idle
-                case .failure(let error): self.job = .failed((error as? CrateError)?.message ?? error.localizedDescription)
-                }
-            }
-        }
-        if let folder {
-            start(folder)
-        } else {
-            app.chooseFolder(message: "Crate can't save next to the archive. Choose where to put the converted archive.",
-                             prompt: "Save Here", near: source.displayURL, then: start)
-        }
+        if needsPassword { return withPassword(.convert) }
+        app.screen = .create(CreateModel(converting: self, app: app))
     }
 
     /// The formats it can be converted to (not its own).

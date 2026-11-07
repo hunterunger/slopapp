@@ -77,6 +77,54 @@
       },
       {
         "NSMenuItem": {
+          "default": "Extract with Crate To…"
+        },
+        "NSMessage": "extractFilesTo",
+        "NSPortName": "Crate",
+        "NSRequiredContext": {},
+        "NSSendFileTypes": [
+          "public.zip-archive",
+          "org.7-zip.7-zip-archive",
+          "public.rar-archive",
+          "public.tar-archive",
+          "org.gnu.gnu-zip-archive",
+          "org.gnu.gnu-zip-tar-archive",
+          "public.bzip2-archive",
+          "public.tar-bzip2-archive",
+          "org.tukaani.xz-archive",
+          "org.tukaani.tar-xz-archive",
+          "public.z-archive",
+          "public.cpio-archive",
+          "com.apple.xar-archive",
+          "com.microsoft.cab"
+        ]
+      },
+      {
+        "NSMenuItem": {
+          "default": "Open in Crate"
+        },
+        "NSMessage": "openFiles",
+        "NSPortName": "Crate",
+        "NSRequiredContext": {},
+        "NSSendFileTypes": [
+          "public.zip-archive",
+          "org.7-zip.7-zip-archive",
+          "public.rar-archive",
+          "public.tar-archive",
+          "org.gnu.gnu-zip-archive",
+          "org.gnu.gnu-zip-tar-archive",
+          "public.bzip2-archive",
+          "public.tar-bzip2-archive",
+          "org.tukaani.xz-archive",
+          "org.tukaani.tar-xz-archive",
+          "public.z-archive",
+          "public.cpio-archive",
+          "com.apple.xar-archive",
+          "com.microsoft.cab"
+        ]
+      },
+      {
+        "NSMenuItem": {
           "default": "Compress with Crate"
         },
         "NSMessage": "compressFiles",

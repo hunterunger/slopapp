@@ -122,7 +122,7 @@ v1.1), **later**, **skip** (with reason).
 | 40 | Shortcuts / App Intents | No. | later | "Extract Archive", "Create Zip" intents. |
 | 41 | Help / feedback | Help (web), Acknowledgements, Send Email…; beta builds show a feedback link in the empty state. | skip | About tab with source link (design system). |
 | 42 | Licensing / trial / updates | Register license, trial screens, Updates pane (direct version only). | skip | Not applicable. |
-| 43 | Encrypted 7z/RAR (blind test F1) | — | **v1.1, top item** | See Blind test log, round 1. |
+| 43 | Encrypted 7z/RAR (blind test F1) | — | **7z: done in the parity pass**; RAR later | See Parity pass. |
 | 44 | Salvage the readable part of a truncated archive | — | later | Blind test round 1. |
 
 **Must rows:** 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 13, 22, 24, plus two behaviours that come
@@ -665,3 +665,331 @@ launch 158 ms, first window 261 ms, idle CPU 0.048%, footprint 28.8 MB. No `[unl
 controls. Walkthrough of every fix done with `open -a` and keys posted to Crate's process only:
 no real mouse, no global keys, no clipboard, window-only screenshots. Drag-out to Finder is
 still not tested: it needs the real mouse, and the owner may be using the Mac.
+
+## Parity pass (2026-11-03)
+
+Owner direction (`docs/parity-pass.md`): look and work much more like Archiver, and don't
+miss features. Studied again from the installed Archiver 5.1 (launched with
+`env -u ELECTRON_RUN_AS_NODE`, only `/tmp/crate-parity/` files, no settings touched, quit
+after) and the research screenshots in `/tmp/slopdrive/archiver-*.png` (empty, preview,
+files, create, convert, split, done, settings). The screen locked partway through the
+session, so the rest came from those screenshots.
+
+**Archiver's layout, as matched:** a compact window; empty state = one big drop symbol;
+browse = outline (disclosure, icon, name, size) with the actions **top right** (a round
+Cancel ×, then Split, Convert, Extract) and the **archive name centered in the footer**;
+dropped files = a staging list with **+ / −** and "N Files" centered in the footer, Cancel
+and Archive top right; then a **"choose format" page** (a row of big format tiles, the
+format's one-line description, then Archive Name, Compression Level, Encrypt → Password,
+Repeat, Show Password) with back/forward; then a **finished page** listing the results with
+"drag the files…", Back, Finder and a round Done ✓.
+
+### Gap table
+
+| Item (Archiver) | Before | Now | Notes |
+|---|---|---|---|
+| Compact window | 640×500 | **done**: 560×420 default, 480×340 min | Archiver is 460×306; ours needs room for the outline's columns. |
+| Empty drop state | DropZone | kept | SlopKit DropZone (symbol + one line + click to choose) is the suite standard and labelled for VoiceOver; Archiver's is a bare symbol. |
+| Browse: actions top right (Cancel, Split, Convert, Extract) | Convert + Close in toolbar, Extract in a bottom bar | **done**: toolbar Close ×, (Join Parts), Split, Convert, **Extract** (prominent, Return; "Extract 3 Items" with a selection) | |
+| Browse: name centered in footer | subtitle | **done**: footer centered "name — N items, size · format", Extract to: menu on the left | Progress + Stop replace the summary while working. |
+| List / grid toggle | — | **deferred** (M, ~½ day) | Grid needs its own folder navigation and file-promise drags; the list does everything the grid does. |
+| Finished page: results list, drag to copy, Back / Finder / Done | a result line in the bottom bar | **done**: `ResultPage` after extract, create, convert, split, join; rows are real files (drag anywhere, double-click opens); toolbar Back, Show in Finder, **Done** (Return) | |
+| Create: staging list with + / − and "N items" footer, then format page | one combined view | **done**: review page (list, +/−, centered count; toolbar Cancel, Split for one file, **Compress**) → format page | Settings ▸ "When you add files to compress: Show the List First / Go Straight to the Format" (Archiver's "Creating archives: Skip preview"). |
+| Format page: tiles + description + Name / Compression / Encrypt | pickers in a grid | **done**: our own format cards (SF Symbols, accent outline when selected), the description line, Archive name, Compression (**None** / Fast / Normal / Best, matching Archiver's four levels), **Encrypt** checkbox revealing Password, Repeat, Show password inline (no sheet), zip strength, 7z "Hide file names", Split, Save to | Not Archiver's coloured envelope tiles (trade dress). |
+| Convert: "choose format" page without the source format | menu of formats | **done**: Convert (⌘K) opens the format page in convert mode (source format left out, name = archive's base name, Encrypt available), Back returns to the archive | |
+| Split: page with chunk size + unit | only "split when creating" | **done**: Split sheet (part size field + stepper + KB/MB/GB, default 10 MB like Archiver) for an open archive or a single dropped file | A sheet, not a page: there's no format to choose for a byte split. Archiver's ZSPLIT/checksum formats skipped (proprietary). |
+| Combine / join split files | — (later) | **done**: Join Parts (⌘J) for an open `.001` set, File ▸ Join Split Files… (⌥⌘J), and a "Join Parts" button when a `.001` set isn't an archive (e.g. `movie.mkv.001`) | Numbered `.001` sets only; joining RAR volumes or `.z01` spans doesn't give a valid single file. Never overwrites; keeps quarantine. |
+| **Encrypted 7z: open** | "can't open yet" | **done** (see below) | Data-only and header-encrypted; any coder chain libarchive decodes. |
+| **Encrypted 7z: create** | password Zip only | **done**: AES-256 7z, "Hide file names" on by default | Verified by 7-Zip 26.05. |
+| Encrypted RAR | can't open | **deferred** (L, 1–2 days for RAR5; RAR4 another M–L) | Same "virtual decrypted view" approach should work: RAR5 = AES-256-CBC + PBKDF2-HMAC-SHA256 (2^n) with a password check value, per-file encryption records and optional header encryption (every header block encrypted, own IVs). We'd have to rewrite headers (drop the encryption record, recompute header CRC32s, drop the HMAC-tweaked data checksums) so libarchive's RAR5 reader accepts it, across solid streams and volumes. RAR4 uses AES-128 with its own SHA-1 KDF. Not attempted this session: 7z came first and the RAR work needs its own test corpus. |
+| Password manager / remember | never stored | **done (opt-in)**: Settings ▸ Advanced ▸ "Remember passwords in the Keychain" (off), mirrored as "Remember in Keychain" in the password sheet; one generic-password item (`app.slopapp.crate.passwords`) with a JSON list, newest first, max 50; the 15 newest are tried automatically on a locked archive (browse and queue) before asking; "Forget All…" | `PasswordStore` protocol with Keychain, file (`CRATE_PASSWORDS_FILE`, tests only) and memory stores. **Not exercised against the real login keychain** (doing so would write to the owner's keychain); unit tests use the memory and file stores. |
+| Destination presets ("Output files to: same / ask / Other…") | Next to Archive / Ask / one chosen folder | **done**: Extract to: menu adds Desktop, Downloads and the 5 most recent chosen folders | |
+| Finder integration (six Services) | 2 Services | **done**: + "Extract with Crate To…", "Open in Crate" (4 total) | Archiver's "Compress to…" and "Convert" Services skipped: the window flow covers them. Services only appear for apps registered from /Applications, so not exercised here. |
+| File Types pane (default app per type) | — (later) | **done**: Settings ▸ General ▸ File types ▸ Choose… lists 13 archive types with the current app and "Use Crate" / "Use Crate for All" | Never prompts. **Not exercised for real** (would change the owner's default apps); `CRATE_DRY_DEFAULTS=1` pretends. |
+| Extract selected by drag | built, unverified | see Build notes below | Needs the real mouse. |
+| Quick Look / preview | done | kept | |
+| Quit when done, play sound, go back to start, inspect app bundles, Clean ⌘K | skipped | still skipped | Design system (quiet, window stays); ⌘K is Convert here. |
+| RAR creation, `.archiver`, ZSPLIT | skipped | still skipped | Proprietary. |
+
+### Encrypted 7z: how it's built
+
+- **Reading** (`SevenZipDecryptedView`): Crate parses the 7z structure itself (signature,
+  encoded header via the system **liblzma**, folders, coders, bind pairs), derives the key
+  (7-Zip's KDF: SHA-256 over salt + UTF-16LE password + 64-bit counter, 2^NumCyclesPower
+  rounds; CommonCrypto), and presents libarchive with a **virtual unencrypted 7z**: a new
+  signature header, the packed streams (AES streams decrypted on the fly, any block on its
+  own since CBC only needs the previous ciphertext block; the rest byte for byte), and a
+  rewritten header with the AES coders removed. libarchive reads it through
+  `archive_read_open2` + seek callbacks, so LZMA/LZMA2/PPMd/BCJ/BCJ2/Deflate, listing and
+  **all extraction safety (paths, links, bombs, quarantine, no overwrite)** are the same
+  code as every other archive. **Nothing decrypted is written to disk** except the
+  extracted files. Keys are cached in memory (16 entries) so list/check/extract derive once.
+- **Password check:** header-encrypted archives are checked against the header's CRC (or a
+  clean parse); data streams by test-decoding the first 64 KB with liblzma (LZMA/LZMA2
+  reject random bytes almost at once); anything that slips through fails libarchive's CRC
+  at extraction and is reported as a wrong password (as 7-Zip does). Non-ASCII passwords
+  that fail are retried in the other Unicode normalization form (NFC/NFD).
+- **Writing** (`SevenZipEncryptor`): libarchive writes a normal LZMA2 7z; Crate adds an
+  AES-256 coder in front of each folder (7-Zip's layout: AES first, bound to the
+  compressor), with a random 16-byte salt and per-folder IV, 2^19 rounds; with "Hide file
+  names" the header is written as an AES-only encoded header (as py7zr and 7-Zip with
+  `-mhc=off` do), with its CRC. Passwords are normalized to NFC.
+- **Interop (opt-in test, `CRATE_7ZZ=/path/to/7zz`):** 7-Zip 26.05 (official macOS build,
+  downloaded to `/tmp/crate-parity/7zip-dl`, not shipped) lists, tests and extracts Crate's
+  archives with and without hidden names, rejects wrong passwords; Crate reads 7-Zip's
+  encrypted archives made with LZMA, LZMA2, PPMd, BCJ+LZMA, non-solid, Copy, Deflate,
+  uncompressed headers, and 700 KB volumes, all with a non-ASCII password. Also py7zr's
+  fixtures (data-only and header encryption).
+- **Hostile/robustness tests:** traversal, absolute paths and escaping symlinks inside an
+  encrypted 7z are refused like anywhere else; a 64 MB bomb inside encryption is stopped
+  and cleaned up; truncated archives fail cleanly; 150 rounds of random byte damage to an
+  encrypted archive never crash or leave output. Header sizes are capped (256 MB), counts
+  bounded, every read bounds-checked.
+- **Gotcha found:** Foundation's `Process` passes arguments *and* environment values in
+  decomposed (NFD) form, so a test that hands "ö" to 7zz changes the password. The interop
+  harness passes arguments through files.
+
+### Deviations from the design system (and why)
+
+- **Primary action in the toolbar** (Extract, Compress, Create, Done as prominent toolbar
+  buttons, Return), not a bottom bar: Archiver's actions sit top right. The design system
+  allows options "in a bottom bar or the toolbar"; the footer keeps the centered summary.
+- **Format cards** (custom buttons) instead of a popup: matches the original's "choose a
+  format" tiles; built from SF Symbols, system fills and the accent colour, labelled for
+  VoiceOver (name, selected, description as hint).
+- **Two-step create** (review list → format page) instead of one view: the original's
+  order. Not a modal (in-window pages); Settings can skip the list.
+
+### Decisions
+
+1. Encrypted 7z built in-house (no 7-Zip/LGPL code): ~1,350 lines in
+   `Sources/CrateCore/SevenZip/` plus `Sources/CLZMA` (our header for the system liblzma,
+   like CArchive). Recorded here instead of `docs/design-system.md` (not ours to edit):
+   **system liblzma, linked not bundled**, should join "system libarchive" in the dependency
+   table.
+2. New 7z archives encrypt names by default ("Hide file names" on): what people expect from
+   a password, and what Archiver's 7z encryption via 7-Zip `-mhe` is commonly used for.
+3. Salted keys (16 random bytes) although 7-Zip's own encoder uses no salt: the format
+   supports it, 7-Zip reads it (verified by the interop test), and it stops precomputed attacks.
+4. Remembered passwords are opt-in and live in one Keychain item, never in UserDefaults.
+5. Compression "None" added (Archiver's "No Compression"): store for zip and 7z, level 0
+   for gzip/xz.
+6. Split default 10 MB with KB/MB/GB like Archiver; the create page keeps the presets
+   (25 MB, 100 MB, 1 GB, 4 GB FAT32, Custom).
+
+### Shared components built in-app (for later extraction to SlopKit)
+
+- `Pages.swift`: `ResultPage` / `ResultRow` / `ResultToolbar` (a finished screen with
+  draggable result files), `PageFooter` (left control + centered summary/progress),
+  `FormatCard`, `SplitSheet`. Any drop-in app with a "done" state could use `ResultPage`.
+- `SavedPasswords.swift`: `PasswordStore` + Keychain/file/memory stores.
+
+
+### Gates (parity pass)
+
+- `scripts/check.sh Crate --perf`: **all PASS**. 85 Swift Testing tests in 14 suites (new:
+  7z crypto 6, 7z write/hostile/fuzz 7, split/join 4, saved passwords 4); plus the opt-in
+  interop suite (`CRATE_7ZZ`, 12 cases against 7-Zip 26.05) **passes**. Perf (final run): launch 134 ms,
+  first window 243 ms, idle CPU 0.017 %, footprint 29.0 MB.
+- **Walkthrough (release build)**: the screen was **locked for the whole UI part of this
+  session** (owner away), which hides windows from Accessibility and blocks screen capture.
+  So the walkthrough was driven with `open -a` (files under `/tmp/crate-test/parity`) and keys
+  posted to Crate's pid only, and the screenshots come from a new test-only hook
+  (`CRATE_SNAPSHOT_DIR`: Crate renders its own windows offscreen to PNG; nothing else on
+  screen can be captured). Windows render as inactive (greyed toolbar) because nothing is key
+  while locked. Covered, each checked on disk:
+  - dark: empty (`d-01`), browse demo.zip (`d-02`), Return → finished page (`d-03`), 7-Zip
+    header-encrypted `vault.7z` locked (`d-05`), wrong password (`d-06-…-sheet`), unlocked
+    listing (`d-07`), extracted **byte-identical** to the source, Convert page (`d-09`) →
+    `vault.zip` (`d-10`, contents checked with `unzip -l`), Advanced settings (`d-25`),
+    review (`d-26`), 7z format page (`d-27`), split-file offer (`d-28`);
+  - light: review (`l-11`), format page (`l-12`), created Archive.zip (`l-13`), one-file
+    review with Split (`l-14`), Split sheet (`l-15-…-sheet`), split into 3 parts (`l-16`),
+    join offer (`l-17`), joined **byte-identical** (`l-18`), queue with a 7z password prompt
+    (`l-19`) → both extracted, 7z output byte-identical (`l-20`), Remember-in-Keychain sheet
+    (`l-21-…-sheet`, file store), second names-hidden 7z **unlocked automatically** with the
+    remembered password (`l-22`), 7z format page (`l-23`), General settings (`l-24-2`).
+  - Screenshots: `/tmp/crate-test/shots/` (not committed).
+  - For the session only, Crate's own defaults got `{"rememberPasswords":true,
+    "createFormat":"sevenZip"}` and the Settings tab index; both were put back afterwards
+    (the `settings` key didn't exist before and doesn't now).
+- **Not done because of the locked screen** (need a human or an unlocked session):
+  `scripts/drive tree` for `[unlabeled]` controls (every new control has a label in code:
+  toolbar Labels, `+`/`−` and stepper `accessibilityLabel`s, FormatCard name/selected/hint,
+  result rows); the Encrypt-checked state of the format page (the checkbox needs a click;
+  covered by unit and interop tests); Settings ▸ File types sheet (click only;
+  `CRATE_DRY_DEFAULTS=1` for testers); **drag-out to Finder** (real mouse; also needs the
+  owner away, and the screen unlocked).
+- Fixed during the walkthrough: Esc didn't leave the finished page (Back now has Esc);
+  footer text off-centre with no left control; the Split size field wasn't focused; the
+  password field now takes focus when Encrypt is ticked; "isn't an archive" wording for a
+  non-archive `.001` set (now "one part of a split file… Join Parts puts its 3 parts back
+  together as “movie.bin”"); File ▸ Join Split Files… on a real archive set showed "not an
+  archive"; "Enter Password…" after cancelling didn't re-list a names-hidden 7z.
+
+### Deferred (with estimates)
+
+| Item | Size | Why |
+|---|---|---|
+| Encrypted RAR (RAR5, then RAR4) | L (1–2 days) + M–L | See the gap table; needs header rewriting for libarchive's RAR readers and its own corpus. |
+| Grid (icon) view | M (~½ day) | Needs folder navigation and file-promise drags of its own; the list covers the job. |
+| Drag-out, `[unlabeled]` tree, Encrypt-on screenshot, File types sheet | S (a human, 15 min) | Locked screen this session; see above. |
+| Real-Keychain check of remembered passwords | S | Would write to the owner's login keychain; the file store (`CRATE_PASSWORDS_FILE`) exercises the same flow. |
+| Settings tab "File Types" like Archiver's | S, needs SlopKit | `SlopSettings` has fixed tabs; it's a sheet from General for now. |
+
+## Polish pass (2026-11-05)
+
+Per `docs/polish-pass.md`. Release build stamped with SDK 27.0 (full-size 16×16 window
+buttons, checked in `drive tree`). Every surface shot in light and dark with
+`SLOP_APPEARANCE`, test data only from `/tmp/crate-test/polish/` (archives and files made
+for this pass), with `CRATE_PASSWORDS_FILE` (remembered passwords in a test file, never the
+Keychain), `CRATE_TRASH_DIR`, `CRATE_DOWNLOADS_DIR`, `CRATE_DRY_DEFAULTS=1` and
+`CRATE_SNAPSHOT_DIR` (for sheets). Only made-up test passwords were typed, and only into
+secure fields. Files were opened with `open -g` (no activation); keys were posted to Crate's
+pid only. The owner was at the Mac almost the whole session (HID idle under 60 s at nearly
+every check), so most shots are of an inactive window. Once (idle 64 s) Crate was brought
+to the front for an active-window check: accent selection, the blue Extract capsule, the
+filter field typed into with ⌘F (`light-60-active-selection.png`, `light-62-active-password-*`).
+
+### Defects found and fixed (before → after)
+
+| # | Surface | Defect (measured) | Fix |
+|---|---|---|---|
+| 1 | Lint | 4 corner literals: format cards `10` (×3), drop ring `8` | Cards `Radius.l`; drop ring is a `ConcentricRectangle` 2 pt inside the window (legacy: `Radius.nested(in: 10, padding: 2)`). Lint clean |
+| 2 | All pages | SwiftUI `Divider` = 2 px (1 pt) above every footer, under the result header, above failure lines, under banners, on the format page | SlopKit `Hairline`: 1 px `#EAEAEA` measured |
+| 3 | Footers | Browse/create footer 36.5 pt, queue footer 48.5 pt; progress + Stop grew it to 40.5 pt (hairline 927 → 919 px, the list jumped 4 pt) | One `FooterBar`: fixed 40 pt, small Stop / Clear List. Hairline at 919 px in idle, progress, warning and queue states |
+| 4 | Footers | Leading text at 16 pt (menu), 18.5 pt (+ glyph), 16.5 pt (queue) | 16 pt margin; the borderless menu's 4 pt inner inset is taken back (`-Spacing.xs`), + glyph at 16.5 pt |
+| 5 | Browse list | Columns ended 20 pt short of the right edge (Kind ended at 620 of 640 pt, stray header divider, empty strip); at the 480 pt minimum the table overflowed and scrolled sideways (Kind clipped, rows lost their inset) | `fitColumnsToWidth`: columns fill the visible row exactly (10 pt row inset both sides) on every resize; extra width goes back to Date/Kind then Name, a narrow window takes it from Kind, Date, Name down to their minimums. No sideways scrolling at the minimum |
+| 6 | Browse list | Kind/Date truncated in the middle: "Folder,…00 items", "Comma…values" | Tail truncation for every column but Name ("Folder, 1,0…"); Kind 110 → 140 pt, Date 165 → 132 pt by default (autosave key `ArchiveColumns.v2` so the new defaults apply) |
+| 7 | Browse toolbar | Extract's title changed with the selection: "Extract All" 106 pt → "Extract 2 Items" 136 pt, the whole group shifted 30 pt | One title, "Extract" (87 pt). The footer says "2 of 12 items selected"; VoiceOver ("Extract All" / "Extract Selected"), the tooltip and Archive menu say which |
+| 8 | Format toolbar | "Create Zip" / "Create 7z" / "Create Tar.gz" changed width with the format | "Create" (or "Convert"); the format is in the tooltip |
+| 9 | Browse toolbar | At the default 560 pt width, opening the filter sent Convert and Extract to the » overflow menu; at the 480 pt minimum Extract was in » even without filtering (the window title alone reserved 160 pt) | Toolbar title hidden on the browse page (macOS 15+; the name is centred in the footer, the window keeps its title for the Window menu and VoiceOver); the filter field stays open beside the actions, so nothing moves when you type. Minimum width 480 → 540 pt: every action visible at 540 with a 60-character archive name |
+| 10 | Toolbars | Primary buttons merged into their neighbours' glass capsule in some states ("Back \| Create" one capsule while Create was disabled; Extract inside the action group) | Extract, Compress, Create and Done are their own `ToolbarItem`: always their own capsule |
+| 11 | Browse toolbar | Split used `square.split.2x1` (reads as Show Sidebar); Convert used `arrow.triangle.2.circlepath` (reads as Sync) | `scissors` and `arrow.left.arrow.right` |
+| 12 | Password sheet | Wrong password added an orange row: sheet 176 → 203 pt; plain `.orange` text (~2:1); field and checkboxes at the 20 pt margin while the text started 39 pt further in; subtitle changed with the Remember checkbox | Message replaces the subtitle in place (sheet 204 pt in both states), `.textOrange` (core #A4682D); one column: title, field and checkboxes share a leading edge; checkboxes stacked; lock glyph on the 20 pt margin |
+| 13 | Format page | Ticking Encrypt moved every label 66 pt left (the grid re-centred on its widest row); the name field changed width with the extension (294 → 298 pt) | Fixed columns (104 + 8 + 320 pt) centred, fixed ".tar.gz"-wide extension slot: labels' trailing edge at 207.5 pt in every state, field 279 pt always |
+| 14 | Format page | Row pitch 36 / 32 / 32 / 36 pt (checkbox rows 16 pt tall); the zip radio group sat 4 pt high (32 pt pitch) | Every row 24 pt, the first radio centred in its row: pitch 36 pt throughout, Encrypt on or off, zip or 7z |
+| 15 | Format page | "Choose a format:" leading-aligned at 20 pt over centred cards; content inset 16 pt top vs 20 pt sides | Centred heading, no colon; 20 pt all round |
+| 16 | Format page | AES/7z hints up to 85 characters, wrapping at the minimum width (and pushing the form down when the format changed) | ≤ 66 characters, one line at 540 pt ("AES-256 password, names hidden too. Opens in 7-Zip, Keka or Crate") |
+| 17 | Format cards | 1 pt grey stroke, no hover or pressed state | `FormatCardStyle`: hairline edge, fill 4 % → 8 % hover → 12 % pressed, accent fill + 2 pt accent edge when selected, 50 % when disabled |
+| 18 | Format page | Ticking Encrypt left focus in Archive name (the field didn't exist yet when focus was set) | Focus moves to Password on the next run loop |
+| 19 | Format page | Zip encryption radios had no label; 7z note didn't say the password isn't kept when names are shown | "Encryption:" label on the radio group; both 7z notes end "Crate doesn't keep this password." |
+| 20 | Footer | "The passwords don't match." looked like the grey summary | Real problems (mismatch, bad split size) in `.textOrange` with a warning symbol; steps still to do ("Enter a password…") stay secondary |
+| 21 | Result page | "Drag items to copy them anywhere." in `.tertiary` (~1.9:1); warning in plain `.orange` | `.secondary`; `.textOrange` |
+| 22 | Status text | Plain `.orange` text in the failure line, Split sheet, File Types sheet, split-size icon | `.textOrange` |
+| 23 | Empty archive | Footer "0 items, Zero KB · Zip" | "Empty · Zip" |
+| 24 | Error states | Headings ended with a full stop ("…isn't an archive Crate can read.") | No full stop on headings |
+| 25 | Review list | Detail in `.caption`, the result list's in `.callout` | `.callout` in both |
+| 26 | Review footer | + / − hit areas were the glyphs (AX frames 10×10 and 10×1 pt) | 24×20 pt each (`FooterGlyph`) |
+| 27 | Settings | Four explanations were separate rows with separators | Subtitles under their own labels (General: open behaviour, after extracting, file types; Advanced: remember passwords, Mac-only files); "Hold Option (⌥) to do the other." fits one line |
+| 28 | File Types sheet | Inset list: rows started 16 pt right of the text margin | Bordered list with alternating rows on the 20 pt margin |
+| 29 | Queue rows | Messages repeated the name and ran long: "“q3.zip” needs a password. Enter the password to unpack it." | `CrateError.rowMessage`: nameless, ≤ 80 characters, says what to do ("Needs a password. Click Extract Again to enter it."); no Extract Again for archives that fail the same way every time (not an archive, damaged, unsupported encryption, bomb). 3 new tests |
+| 30 | Queue footer | Stop All ↔ Clear List swapped buttons of different widths | One fixed slot for both |
+| 31 | Copy | "7-Zip" broke across lines at its hyphen ("Use 7-" / "Zip, Keka…") in the zip encryption note | Non-breaking hyphen (U+2011) in every visible "7‑Zip" |
+| 32 | Browse list (filtering) | Typing a filter expanded every folder, NSOutlineView widened Name to fit the indentation, and the table scrolled sideways: rows lost their inset and Kind ran off the edge (seen in the one active-window check) | `autoresizesOutlineColumn = false`: deep names truncate in the middle instead; checked with a 7-level archive expanded with ⌥→ |
+| 33 | Browse list (filtering) | The footer kept "1 of 12 items selected" (and Extract kept the selection) after the filter hid the selected row | The selection is reconciled after every reload: rows the filter hides are deselected |
+| 34 | Browse list | Opened in the background, the list sometimes didn't get keyboard focus (↓ and Return did nothing) | Takes first responder as soon as it's in a window |
+
+Checked and fine as is: drop zone 20.0 pt from the title bar, sides and bottom; window
+buttons 16×16; "Name" header text on the folder icons' edge (27.5 pt); Size values' right
+edge = header's right edge; lock icon centred on the name's line; banner and failure-line
+symbols on the same 18 pt edge; result and review icons at 16 pt; banner/failure line rows
+40 pt like the footer; dark mode throughout (card fills, banner tint, sheets).
+
+### Decisions
+
+- **No title in the browse toolbar** (macOS 15+). The archive's name is already centred in
+  the footer with its size and format (the original's layout); the title cost 160 pt and
+  pushed the main action into the overflow menu. The filter field is therefore always open,
+  like Mail's and Finder's.
+- **Extract is one fixed title.** Stable width beats a live count in the button; the count
+  moved to the footer.
+- **Minimum window 540 × 340** (was 480 × 340): the narrowest width where the browse toolbar
+  fits without overflow. Default size stays 560 × 420.
+
+### Gates
+
+- `scripts/check.sh Crate --perf` (final build): all pass. Launch 168 ms, first window
+  271 ms, idle CPU 0.017 %, footprint 29.6 MB (load 3.7).
+- Tests: 88 in 15 suites (new `RowMessageTests`).
+- `scripts/lint.sh Crate`: clean (was 4 corner literals).
+- `scripts/drive tree`: 0 `[unlabeled]` on the empty window, browse, result, password sheet,
+  review, format page (zip and 7z, Encrypt on), Split sheet, queue, Settings (all tabs) and
+  File Types; close button 16×16.
+
+- Crate's own defaults: the pass changed only Crate's `settings` (format, encryption) and
+  window frames; `settings` was deleted again afterwards (it didn't exist before) and the
+  main/Settings window frames were put back. New keys `NSTableView … ArchiveColumns.v2`
+  are the new column autosave.
+
+### Not done, and why
+
+- **Active-window states after the last fixes:** the one active check (above) found #32;
+  after fixing it the owner was back (idle 0–36 s for the next ~10 minutes), so the filter
+  wasn't typed into again (AX can't set SwiftUI's search binding). The fix was checked by
+  expanding a 7-level archive instead (`light-63-deep-expanded.png`). Focus rings, Quick
+  Look and format-card hover (in code, `FormatCardStyle`) not observed: not tested, owner
+  active.
+- **Drop highlight** (accent ring while dragging over a page): needs a real drag; concentric
+  by construction, not measured.
+- **Split sheet row:** the size field measures 26 pt border to border, the stepper and
+  pop-up 24 pt. These are the system's regular control metrics; kept.
+- **Footer summary centring:** with the Extract to: menu on the left, the summary is centred
+  in the space that's left, so it sits right of centre below ~620 pt. It never overlaps.
+- **macOS 14:** `toolbar(removing: .title)` needs macOS 15, so Sonoma keeps the title and the
+  collapsing search field; at narrow widths filtering can still overflow there.
+- **Disabled form while creating:** labels stay full strength while the controls dim
+  (SwiftUI `Text` doesn't follow `.disabled`); Apple's own forms do the same.
+
+### SlopKit notes (not edited)
+
+- `AboutView` uses `Divider()`: a 1 pt (2 px) line under the version (measured).
+- `FileQueueView` with `.fileQueueSizeStyle(.neutral)` shows "2.2 MB → 2.2 MB" for an
+  extraction (packed → unpacked), which reads as redundant; a style that shows only the
+  result size would suit extractors.
+- `FooterBar` (fixed 40 pt footer with hairline) and `FormatCardStyle` (selectable card
+  with hover/pressed states) are in `Pages.swift`, named to move to SlopKit; `Hairline`-style
+  fixed footers now exist in several apps.
+
+### Screenshots (`/tmp/slopapp-polish/crate/`)
+
+`before-l-*.png` (light, before fixes). After, in `light-NN-*.png` and `dark-NN-*.png`:
+01 empty, 02 browse, 03 selection, 04 result, 05 password, 06 wrong password, 07 unlocked
+(lock icons), 08 empty archive, 09 not an archive, 10 1,001 items, 11 type-select, 12 list
+scrolled under the header, 13 review, 14 format, 15/16 Encrypt (zip/7z), 17 mismatch
+warning, 19 created, 20 one-file review, 21 Split sheet (`-sheet`), 22 queue password, 23
+queue, 24–27 Settings (General, File Types `-sheet`, Advanced, About), 40 truncated banner,
+41 failure line, 42 unsafe banner, 43 Convert, 44 big-file review, 45/46 progress, 47 after
+Stop, 48 minimum-width browse, 49/50 minimum-width format page; light only: 57/58 the whole
+format page with zip and 7z encryption options, 60 active window with selection, 62 active
+password sheet, 63 deeply nested archive expanded.
+
+### Golden Gate + light/dark (2026-11-06)
+
+Owner: "ensure all the apps are optimized for dark/light mode AND look like they fit in with
+macOS Golden Gate" (macOS 27.2). Checked against design system §4 "Fitting in on macOS 27
+Golden Gate" and §10 items 25–26. Defaults backed up first (`defaults export`) and restored
+after; test archives only in `/tmp/crate-test/`.
+
+| Check | Before | After |
+|---|---|---|
+| Menus text-only | Extract to: pull-down showed folder icons beside Desktop, Downloads and recent folders (`menubar.dock.rectangle`, `arrow.down.circle`, `folder`) | Text only; the checkmark on the current choice is the only image (`gg/light-menu-extract-to-1.png`). Main menu, outline context menu, result/review context menus, Save to: and Split pull-downs were already text |
+| Inactive windows: format cards | Selected card kept its accent fill, 2 pt accent ring and accent symbol in a background window | `Color.selectionTint` / `.selectionRing` / `.windowAccent` with `controlActiveState`: grey fill, grey ring and grey symbol when inactive, accent when key (`gg/pair-16-format-encrypt-7z.png` inactive, `gg/pair-active-format.png` active) |
+| Inactive windows: archive outline | — | `NSOutlineView` already uses the unemphasized selection grey when inactive and accent when key (`gg/pair-03-browse-selection.png`, `gg/pair-active-browse.png`) |
+| Inactive windows: drop zone | — | SlopKit `DropZone`; Crate's in-window drop ring stays accent: it only shows while something is dragged over the window, as Finder's does |
+| `.secondary` text (≈3.1:1 in light mode on 27.2) | The format page's footer, the only place that says why Create is off ("Enter a password, or turn off Encrypt."), was `.secondary` | `.primary` for that next-step text (`isNextStep`); `.secondary` kept only for supporting text (summaries, hints, details) |
+| Sidebar / toolbar / glass | — | No sidebar. Standard SwiftUI toolbar, the system's glass; no drawn strips or translucent fakes (the banner's 8 % orange tint is a status fill, not glass) |
+| Live appearance change | Not tested | New test hook: writing `appearance:dark` / `appearance:light` to `$CRATE_SNAPSHOT_DIR/request` switches Crate live. Browse (AppKit cells, lock icons, hairlines), format cards and the password sheet all followed with no stale colours (`gg/live-dark-browse.png`, `gg/live-dark-format.png`, `gg/live-light-password-1.png`) |
+| Hairline (now 1 pt of layout) | Footer hairline pixel at y 459.5 pt, bar 40 pt | Pixel at 459.0 pt, then the 40 pt bar from 460: every footer is 41 pt and identical in browse, create, progress and queue; `#EAEAEA` light, `#4C4F51` dark |
+| FileQueue (SlopKit changed) | — | Re-shot: rows, strip and footer fine in both modes (`gg/pair-23-queue.png`) |
+| Pure black/white, one-mode colours | — | None drawn: fills are `Color.primary` opacities, semantic `NSColor`s, accent, status colours; card fills, banner tint and orange text measured readable in both |
+
+Side-by-side light | dark pairs of every surface: `/tmp/slopapp-polish/crate/gg/pair-*.png`
+(empty, browse, selection, result, password and wrong password, empty archive, not an
+archive, 1,001 items, review, format pages, mismatch, created, Split sheet, queue, Settings
+tabs, File Types, banners, failure line, Convert, progress, after Stop, minimum width).
+
+Gates: `scripts/check.sh Crate --perf` all pass (lint, 88 tests, bundle, smoke; idle CPU
+0.015 %, footprint 29.3 MB, busy machine). Not done: hover on format cards and focus rings
+over many surfaces still not observed with the real pointer (owner present most of the
+session; one 60 s window was used for the active-window shots).

@@ -16,7 +16,7 @@ struct CrateApp: App {
         Window("Crate", id: "main") {
             MainView(model: model)
         }
-        .defaultSize(width: 640, height: 500)
+        .defaultSize(width: 560, height: 420)
         .commands { CrateCommands(model: model, info: info) }
 
         Settings {
@@ -38,6 +38,8 @@ struct CrateCommands: Commands {
                 .keyboardShortcut("n")
             Button("Open…") { model.chooseFiles() }
                 .keyboardShortcut("o")
+            Button("Join Split Files…") { model.chooseSplitFilesToJoin() }
+                .keyboardShortcut("j", modifiers: [.command, .option])
             Menu("Open Recent") {
                 ForEach(model.recents, id: \.self) { url in
                     Button(url.lastPathComponent) { model.open([url], explicit: true, optionHeld: false) }
@@ -74,12 +76,16 @@ struct CrateCommands: Commands {
             Button("Quick Look") { browse?.toggleQuickLook() }
                 .keyboardShortcut("y")
                 .disabled(browse?.canExtract != true || browse?.hasSelection != true)
-            Menu("Convert To") {
-                ForEach(browse?.conversionFormats ?? []) { format in
-                    Button(format.title) { browse?.convert(to: format) }
-                }
-            }
-            .disabled(browse?.canExtract != true)
+            Divider()
+            Button("Convert…") { browse?.convert() }
+                .keyboardShortcut("k")
+                .disabled(browse?.canExtract != true || browse?.isShowingResult == true)
+            Button("Split…") { splitAction() }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+                .disabled(!canSplit)
+            Button("Join Parts") { browse?.join() }
+                .keyboardShortcut("j")
+                .disabled(browse?.canJoin != true)
             Divider()
             Button("Show in Finder") { revealInFinder() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -96,6 +102,22 @@ struct CrateCommands: Commands {
             Button("Crate Help") {
                 NSWorkspace.shared.open(Brand.repoURL.appending(path: "tree/main/apps/Crate"))
             }
+        }
+    }
+
+    private var canSplit: Bool {
+        switch model.screen {
+        case .browse(let browse): browse.canSplit && !browse.isShowingResult
+        case .create(let create): create.canSplitFile && create.page == .review && !create.isDone
+        default: false
+        }
+    }
+
+    private func splitAction() {
+        switch model.screen {
+        case .browse(let browse): browse.splitting = true
+        case .create(let create): create.splittingFile = true
+        default: break
         }
     }
 

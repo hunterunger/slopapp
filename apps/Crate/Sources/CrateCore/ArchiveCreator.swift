@@ -28,17 +28,18 @@ public enum CreateFormat: String, Codable, CaseIterable, Sendable, Identifiable 
         case .zip: "Opens on any computer"
         case .tarGz: "Common for code and on Linux"
         case .tarXz: "Smaller than tar.gz, slower to make"
-        case .sevenZip: "Smallest, but needs 7-Zip or Keka to open"
+        case .sevenZip: "Smallest, but needs 7‑Zip or Keka to open"
         }
     }
-    public var supportsPassword: Bool { self == .zip }
+    public var supportsPassword: Bool { self == .zip || self == .sevenZip }
 }
 
 public enum CompressionLevel: String, Codable, CaseIterable, Sendable, Identifiable {
-    case fast, normal, best
+    case none, fast, normal, best
     public var id: String { rawValue }
     public var title: String {
         switch self {
+        case .none: "None"
         case .fast: "Fast"
         case .normal: "Normal"
         case .best: "Best"
@@ -46,6 +47,7 @@ public enum CompressionLevel: String, Codable, CaseIterable, Sendable, Identifia
     }
     func value(for format: CreateFormat) -> Int {
         switch (self, format) {
+        case (.none, _): 0
         case (.fast, _): 1
         case (.normal, _): 6
         // xz and 7z at 9 need several hundred MB of memory; 7 is nearly as small.
@@ -66,7 +68,7 @@ public enum ZipEncryption: String, Codable, CaseIterable, Sendable, Identifiable
     }
     public var note: String {
         switch self {
-        case .aes256: "Archive Utility on Mac and Windows Explorer can't open it. Use 7-Zip, Keka or The Unarchiver."
+        case .aes256: "Archive Utility on Mac and Windows Explorer can't open it. Use 7‑Zip, Keka or The Unarchiver."
         case .zipCrypto: "Opens almost everywhere, but is easy to crack. Don't use it for anything sensitive."
         }
     }
@@ -82,13 +84,16 @@ public struct CreateRequest: Sendable, Equatable {
     public var level: CompressionLevel
     public var password: String?
     public var encryption: ZipEncryption
+    /// 7z with a password: encrypt the file list too, so names need the password.
+    public var hideNames: Bool
     /// Leave out .DS_Store, ._*, __MACOSX, Icon\r and volume folders.
     public var leaveOutMacFiles: Bool
     /// Split into parts of this many bytes (`name.zip.001`, `.002`…); nil for one file.
     public var partSize: Int64?
 
     public init(sources: [URL], folder: URL, name: String, format: CreateFormat = .zip, level: CompressionLevel = .normal,
-                password: String? = nil, encryption: ZipEncryption = .aes256, leaveOutMacFiles: Bool = true, partSize: Int64? = nil) {
+                password: String? = nil, encryption: ZipEncryption = .aes256, hideNames: Bool = true,
+                leaveOutMacFiles: Bool = true, partSize: Int64? = nil) {
         self.sources = sources
         self.folder = folder
         self.name = name
@@ -96,6 +101,7 @@ public struct CreateRequest: Sendable, Equatable {
         self.level = level
         self.password = password
         self.encryption = encryption
+        self.hideNames = hideNames
         self.leaveOutMacFiles = leaveOutMacFiles
         self.partSize = partSize
     }
@@ -163,12 +169,27 @@ public struct ArchiveCreator: Sendable {
         guard !items.isEmpty else { throw CrateError.nothingToArchive }
         let total = max(1, items.reduce(Int64(0)) { $0 + $1.size })
         let fileName = request.name + "." + request.format.fileExtension
-        let temp = work.appendingPathComponent("archive")
+        var temp = work.appendingPathComponent("archive")
+        let encrypts7z = request.format == .sevenZip && request.password?.isEmpty == false
+        let writeShare = (request.partSize == nil ? 1 : 0.9) * (encrypts7z ? 0.9 : 1)
 
         try write(items, to: temp, request: request, fileName: fileName) { done in
-            progress?(min(0.99, Double(done) / Double(total)) * (request.partSize == nil ? 1 : 0.9))
+            progress?(min(0.99, Double(done) / Double(total)) * writeShare)
         }
         try Task.checkCancellation()
+        if encrypts7z, let password = request.password {
+            // libarchive can't encrypt 7z: Crate adds 7z's AES-256 layer itself.
+            let encrypted = work.appendingPathComponent("archive-encrypted")
+            do {
+                try SevenZipEncryptor.encrypt(temp, to: encrypted, password: password, hideNames: request.hideNames) { fraction in
+                    progress?(writeShare + fraction * (request.partSize == nil ? 0.1 : 0.09) * 0.99)
+                }
+            } catch let error as SevenZipError {
+                throw CrateError.writeFailed(name: fileName, detail: "\(error)")
+            }
+            try? FileManager.default.removeItem(at: temp)
+            temp = encrypted
+        }
 
         let size = (try? FileManager.default.attributesOfItem(atPath: temp.path)[.size] as? Int64) ?? 0
         var outputs: [URL]
@@ -246,8 +267,12 @@ public struct ArchiveCreator: Sendable {
         switch request.format {
         case .zip:
             archive_write_set_format_zip(archive)
-            try option("zip:compression=deflate")
-            try option("zip:compression-level=\(level)")
+            if request.level == .none {
+                try option("zip:compression=store")
+            } else {
+                try option("zip:compression=deflate")
+                try option("zip:compression-level=\(level)")
+            }
             try option("zip:hdrcharset=UTF-8")
             if let password = request.password, !password.isEmpty {
                 try option(request.encryption == .aes256 ? "zip:encryption=aes256" : "zip:encryption=zipcrypt")
@@ -264,8 +289,12 @@ public struct ArchiveCreator: Sendable {
             try option("xz:threads=0", required: false)
         case .sevenZip:
             archive_write_set_format_7zip(archive)
-            try option("7zip:compression=lzma2")
-            try option("7zip:compression-level=\(level)")
+            if request.level == .none {
+                try option("7zip:compression=store")
+            } else {
+                try option("7zip:compression=lzma2")
+                try option("7zip:compression-level=\(level)")
+            }
         }
         let opened = output.withUnsafeFileSystemRepresentation { archive_write_open_filename(archive, $0) }
         guard opened == ARCHIVE_OK else { throw fail() }
@@ -322,55 +351,8 @@ public struct ArchiveCreator: Sendable {
     /// set name that clashes with nothing.
     private func split(_ file: URL, partSize: Int64, fileName: String, in folder: URL, work: URL) throws -> [URL] {
         let size = (try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int64) ?? 0
-        let count = Int((size + partSize - 1) / partSize)
-        // Write the parts inside the working folder first.
-        let input = try FileHandle(forReadingFrom: file)
-        defer { try? input.close() }
-        var temps: [URL] = []
-        for index in 1...count {
-            try Task.checkCancellation()
-            let part = work.appendingPathComponent(String(format: "part.%03d", index))
-            FileManager.default.createFile(atPath: part.path, contents: nil)
-            let output = try FileHandle(forWritingTo: part)
-            var remaining = min(partSize, size - Int64(index - 1) * partSize)
-            while remaining > 0 {
-                let data = try input.read(upToCount: Int(min(remaining, 4 << 20))) ?? Data()
-                guard !data.isEmpty else { break }
-                try output.write(contentsOf: data)
-                remaining -= Int64(data.count)
-            }
-            try output.close()
-            temps.append(part)
-        }
-        // Pick a set name with no existing parts, then move every part in without replacing.
-        var number = 1
-        while true {
-            let base = Naming.candidate(fileName, number: number, isFolder: false)
-            let names = (1...count).map { base + String(format: ".%03d", $0) }
-            if Naming.exists(folder.appendingPathComponent(base)) || names.contains(where: { Naming.exists(folder.appendingPathComponent($0)) }) {
-                number += 1
-                continue
-            }
-            var placed: [URL] = []
-            do {
-                for (temp, name) in zip(temps, names) {
-                    let target = folder.appendingPathComponent(name)
-                    try moveExclusive(temp, to: target)
-                    placed.append(target)
-                }
-                return placed
-            } catch {
-                placed.forEach { try? FileManager.default.removeItem(at: $0) }
-                throw error
-            }
-        }
-    }
-
-    private func moveExclusive(_ from: URL, to: URL) throws {
-        let result = from.withUnsafeFileSystemRepresentation { a in
-            to.withUnsafeFileSystemRepresentation { b in renamex_np(a!, b!, UInt32(RENAME_EXCL)) }
-        }
-        if result != 0 { throw CrateError.writeFailed(name: to.lastPathComponent, detail: String(cString: strerror(errno))) }
+        let temps = try FileSplitter.writeParts(of: file, size: size, partSize: partSize, into: work, progress: nil)
+        return try FileSplitter.placeParts(temps, setName: fileName, in: folder, avoidingBase: true)
     }
 }
 

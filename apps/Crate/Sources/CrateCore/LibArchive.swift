@@ -1,4 +1,5 @@
 import CArchive
+import Darwin
 import Foundation
 
 /// The system libarchive's version, e.g. "3.7.4".
@@ -14,7 +15,10 @@ final class ReadArchive {
     let handle: OpaquePointer
     let source: ArchiveSource
     let hasPassword: Bool
+    /// An encrypted 7z being decrypted as it's read (see `SevenZipDecryptedView`).
+    private(set) var isDecryptedSevenZip = false
     private var cPaths: [UnsafeMutablePointer<CChar>?] = []
+    private var viewReader: ViewReader?
 
     init(_ source: ArchiveSource, password: String?) throws {
         guard let handle = archive_read_new() else { throw CrateError.unreadableSource(name: source.fileName) }
@@ -35,7 +39,13 @@ final class ReadArchive {
             throw CrateError.unreadableSource(name: part.lastPathComponent)
         }
         let result: Int32
-        if source.parts.count == 1 {
+        if let view = try SevenZipDecryptedView.open(source, password: password) {
+            let reader = ViewReader(view)
+            viewReader = reader
+            isDecryptedSevenZip = true
+            archive_read_set_seek_callback(handle, viewSeek)
+            result = archive_read_open2(handle, Unmanaged.passUnretained(reader).toOpaque(), nil, viewRead, viewSkip, nil)
+        } else if source.parts.count == 1 {
             result = source.parts[0].withUnsafeFileSystemRepresentation { archive_read_open_filename(handle, $0, 64 * 1024) }
         } else {
             cPaths = source.parts.map { url in url.withUnsafeFileSystemRepresentation { strdup($0!) } } + [nil]
@@ -83,10 +93,67 @@ final class ReadArchive {
 
     /// Maps libarchive's last error to a `CrateError`.
     func error(_ code: Int32, encryptedEntry: Bool = false) -> CrateError {
+        if let failure = viewReader?.failure {
+            if case .malformed("ends early") = failure { return .truncated(name: source.fileName) }
+            return .damaged(name: source.fileName, detail: "")
+        }
         let message = archive_error_string(handle).map { String(cString: $0) } ?? ""
+        // Data that fails to decompress after decryption almost always means a wrong
+        // password that slipped past the quick check (as 7-Zip says too).
         return ErrorMapping.map(message: message, format: formatCode, name: source.fileName,
-                                hasPassword: hasPassword, encryptedEntry: encryptedEntry)
+                                hasPassword: hasPassword, encryptedEntry: encryptedEntry || isDecryptedSevenZip)
     }
+}
+
+/// Feeds libarchive from a `SevenZipDecryptedView`.
+private final class ViewReader {
+    let view: SevenZipDecryptedView
+    var position: Int64 = 0
+    var failure: SevenZipError?
+    static let bufferSize = 1 << 20
+    let buffer = UnsafeMutableRawPointer.allocate(byteCount: ViewReader.bufferSize, alignment: 16)
+
+    init(_ view: SevenZipDecryptedView) { self.view = view }
+    deinit { buffer.deallocate() }
+
+    static func from(_ data: UnsafeMutableRawPointer?) -> ViewReader {
+        Unmanaged<ViewReader>.fromOpaque(data!).takeUnretainedValue()
+    }
+}
+
+private func viewRead(_ archive: OpaquePointer?, _ data: UnsafeMutableRawPointer?,
+                      _ buffer: UnsafeMutablePointer<UnsafeRawPointer?>?) -> Int {
+    let reader = ViewReader.from(data)
+    do {
+        let count = try reader.view.read(at: reader.position, count: ViewReader.bufferSize, into: reader.buffer)
+        reader.position += Int64(count)
+        buffer?.pointee = UnsafeRawPointer(reader.buffer)
+        return count
+    } catch {
+        reader.failure = error as? SevenZipError ?? .io("")
+        return Int(ARCHIVE_FATAL)
+    }
+}
+
+private func viewSkip(_ archive: OpaquePointer?, _ data: UnsafeMutableRawPointer?, _ request: Int64) -> Int64 {
+    let reader = ViewReader.from(data)
+    let skipped = max(0, min(request, reader.view.size - reader.position))
+    reader.position += skipped
+    return skipped
+}
+
+private func viewSeek(_ archive: OpaquePointer?, _ data: UnsafeMutableRawPointer?, _ offset: Int64, _ whence: Int32) -> Int64 {
+    let reader = ViewReader.from(data)
+    let target: Int64
+    switch whence {
+    case SEEK_SET: target = offset
+    case SEEK_CUR: target = reader.position + offset
+    case SEEK_END: target = reader.view.size + offset
+    default: return Int64(ARCHIVE_FATAL)
+    }
+    guard target >= 0 else { return Int64(ARCHIVE_FATAL) }
+    reader.position = target
+    return target
 }
 
 enum ErrorMapping {
@@ -101,12 +168,16 @@ enum ErrorMapping {
             return hasPassword ? .wrongPassword(name: name) : .passwordRequired(name: name)
         }
         if lower.contains("encrypt") || lower.contains("decrypt") {
-            if isSevenZip { return .unsupportedEncryption(name: name, format: "7z") }
-            if isRar { return .unsupportedEncryption(name: name, format: "RAR") }
+            // 7z encryption is handled by `SevenZipDecryptedView`; libarchive only gets
+            // here when no password was given.
+            if isRar, !isSevenZip { return .unsupportedEncryption(name: name, format: "RAR") }
+            // Only reached with a password when Crate couldn't decrypt this 7z's layout.
+            if isSevenZip, hasPassword { return .unsupportedEncryption(name: name, format: "7z") }
             return hasPassword ? .wrongPassword(name: name) : .passwordRequired(name: name)
         }
         // A weak ZipCrypto check can pass with the wrong password; the data then fails its CRC.
-        if encryptedEntry, lower.contains("crc") || lower.contains("checksum") || lower.contains("invalid") {
+        if encryptedEntry, lower.contains("crc") || lower.contains("checksum") || lower.contains("invalid")
+            || lower.contains("damaged") || lower.contains("decompress") || lower.contains("corrupt") {
             return hasPassword ? .wrongPassword(name: name) : .passwordRequired(name: name)
         }
         if lower.contains("unrecognized archive format") || lower.contains("not an archive") {

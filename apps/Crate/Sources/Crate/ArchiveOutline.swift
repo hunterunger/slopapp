@@ -25,9 +25,13 @@ struct ArchiveOutline: NSViewRepresentable {
         outline.allowsColumnReordering = true
         outline.allowsColumnResizing = true
         outline.autosaveExpandedItems = false
+        // Expanding deep folders mustn't widen Name past the window (it made the table
+        // scroll sideways and dropped the rows' inset); deep names truncate instead.
+        outline.autoresizesOutlineColumn = false
         outline.style = .inset
         outline.rowSizeStyle = .default
-        outline.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        // The name column takes up any change in width (see `fitColumnsToWidth`).
+        outline.columnAutoresizingStyle = .noColumnAutoresizing
         outline.target = context.coordinator
         outline.doubleAction = #selector(Coordinator.doubleClicked(_:))
         outline.setDraggingSourceOperationMask(.copy, forLocal: false)
@@ -46,7 +50,8 @@ struct ArchiveOutline: NSViewRepresentable {
             outline.addTableColumn(tableColumn)
             if column == .name { outline.outlineTableColumn = tableColumn }
         }
-        outline.autosaveName = "ArchiveColumns"
+        // v2: new default widths (Kind wider, Date narrower) for the 0.5 pt-exact fit.
+        outline.autosaveName = "ArchiveColumns.v2"
         outline.autosaveTableColumns = true
         outline.menu = context.coordinator.makeMenu()
 
@@ -58,14 +63,10 @@ struct ArchiveOutline: NSViewRepresentable {
         scroll.drawsBackground = false
         context.coordinator.outline = outline
         context.coordinator.show(tree, expandAll: expandAll)
-        // Fit the columns to the window: the name column takes up the difference.
-        DispatchQueue.main.async { [weak scroll] in
-            guard let scroll, let name = outline.tableColumns.first(where: { $0.identifier == Column.name.identifier }) else { return }
-            let others = outline.tableColumns.filter { $0 !== name }.reduce(0) { $0 + $1.width + outline.intercellSpacing.width }
-            let available = scroll.contentSize.width - others - outline.intercellSpacing.width - 24
-            if available > name.minWidth, abs(name.width - available) > 1 { name.width = available }
-        }
-        DispatchQueue.main.async { outline.window?.makeFirstResponder(outline) }
+        // Fit the columns to the window: the name column takes up the difference, so the
+        // last column ends the same distance from the right edge as the first starts from
+        // the left (no stray header divider and empty strip on the right).
+        DispatchQueue.main.async { outline.fitColumnsToWidth() }
         return scroll
     }
 
@@ -89,8 +90,8 @@ struct ArchiveOutline: NSViewRepresentable {
             switch self {
             case .name: 220
             case .size: 72
-            case .modified: 165
-            case .kind: 110
+            case .modified: 132
+            case .kind: 140
             }
         }
         var minWidth: CGFloat {
@@ -131,6 +132,16 @@ struct ArchiveOutline: NSViewRepresentable {
             } else if roots.count == 1, roots[0].isFolder {
                 // A single top folder opens, so the first view shows real contents.
                 outline.expandItem(roots[0])
+            }
+            // Keep the selection that's still on screen, and drop the rest, so the footer
+            // and Extract never act on rows the filter hid.
+            let rows = IndexSet(model.selection.map { outline.row(forItem: $0) }.filter { $0 >= 0 })
+            isUpdatingSelection = true
+            outline.selectRowIndexes(rows, byExtendingSelection: false)
+            isUpdatingSelection = false
+            let visible = rows.compactMap { outline.item(atRow: $0) as? ArchiveNode }
+            if visible.count != model.selection.count {
+                DispatchQueue.main.async { [weak self] in self?.model.selection = visible }
             }
         }
 
@@ -210,7 +221,7 @@ struct ArchiveOutline: NSViewRepresentable {
         }
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
-            guard let outline else { return }
+            guard let outline, !isUpdatingSelection else { return }
             model.selection = outline.selectedRowIndexes.compactMap { outline.item(atRow: $0) as? ArchiveNode }
         }
 
@@ -350,6 +361,59 @@ final class ArchiveOutlineView: NSOutlineView {
         MainActor.assumeIsolated { if let panel { quickLook?.release(panel) } }
     }
 
+    private var fittedWidth: CGFloat = 0
+
+    /// The list takes the keyboard as soon as it's on screen (↑/↓, Space, Return).
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.window === window else { return }
+            window.makeFirstResponder(self)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        let available = enclosingScrollView?.contentSize.width ?? 0
+        if available > 0, abs(available - fittedWidth) > 0.5 {
+            fittedWidth = available
+            fitColumnsToWidth()
+        }
+    }
+
+    /// Sizes the columns so they fill the visible row exactly: the last column ends as far
+    /// from the right edge as the first starts from the left, with no horizontal scrolling.
+    /// Extra room goes back to Date and Kind (up to their usual widths), then to Name;
+    /// a narrow window takes it from Kind, then Date, then Name, down to their minimums.
+    func fitColumnsToWidth() {
+        typealias Column = ArchiveOutline.Column
+        func column(_ kind: Column) -> NSTableColumn? { tableColumns.first { $0.identifier == kind.identifier } }
+        guard numberOfColumns > 0, let available = enclosingScrollView?.contentSize.width, available > 0,
+              let name = column(.name) else { return }
+        let leading = rect(ofColumn: 0).minX
+        let trailing = rect(ofColumn: numberOfColumns - 1).maxX
+        var change = available - leading - trailing
+        guard abs(change) > 0.5 else { return }
+        if change > 0 {
+            for kind in [Column.modified, .kind] {
+                guard let col = column(kind), col.width < kind.width else { continue }
+                let give = min(kind.width - col.width, change)
+                col.width += give
+                change -= give
+            }
+            name.width += change
+        } else {
+            for kind in [Column.kind, .modified, .name] {
+                guard let col = column(kind), change < 0 else { continue }
+                let take = min(col.width - col.minWidth, -change)
+                guard take > 0 else { continue }
+                col.width -= take
+                change += take
+            }
+        }
+    }
+
     override func keyDown(with event: NSEvent) {
         if event.charactersIgnoringModifiers == " ", event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
             onSpace?()
@@ -428,6 +492,9 @@ final class ArchiveCell: NSTableCellView {
     }
 
     func configureText(_ text: String, alignment: NSTextAlignment, secondary: Bool) {
+        // Sizes, dates and kinds read from the start ("Folder, 1,000 it…"); only names keep
+        // both ends.
+        label.lineBreakMode = .byTruncatingTail
         label.stringValue = text
         label.alignment = alignment
         label.textColor = secondary ? .secondaryLabelColor : .labelColor

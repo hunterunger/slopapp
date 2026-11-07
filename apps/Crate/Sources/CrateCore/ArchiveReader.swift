@@ -85,8 +85,8 @@ public enum ArchiveReader {
             }
         }
         let formatCode = archive.formatCode
-        let isUnsupportedFormat = formatCode == ARCHIVE_FORMAT_7ZIP || formatCode == ARCHIVE_FORMAT_RAR
-            || formatCode == ARCHIVE_FORMAT_RAR_V5
+        // Encrypted 7z is decrypted by Crate itself; encrypted RAR isn't yet.
+        let isUnsupportedFormat = formatCode == ARCHIVE_FORMAT_RAR || formatCode == ARCHIVE_FORMAT_RAR_V5
         if case .unsupportedEncryption = problem { encrypted = true }
         progress?(1)
         var listing = ArchiveListing(
@@ -119,9 +119,19 @@ public enum ArchiveReader {
 
     /// Checks a password against the first encrypted entry. True if it opens it.
     public static func checkPassword(_ password: String, for source: ArchiveSource) throws -> Bool {
-        let archive = try ReadArchive(source, password: password)
+        let archive: ReadArchive
+        do {
+            archive = try ReadArchive(source, password: password)
+        } catch let error as CrateError where error.needsPassword {
+            return false
+        }
         while let entry = try archive.next() {
-            guard archive_entry_is_data_encrypted(entry) != 0 else { continue }
+            if archive.isDecryptedSevenZip {
+                // Decrypted as it's read: the first file with data is the test.
+                guard EntryHeader(entry).kind == .file, archive_entry_size(entry) > 0 else { continue }
+            } else {
+                guard archive_entry_is_data_encrypted(entry) != 0 else { continue }
+            }
             var buffer = [UInt8](repeating: 0, count: 64 * 1024)
             let read = buffer.withUnsafeMutableBytes { archive_read_data(archive.handle, $0.baseAddress, $0.count) }
             if read >= 0 { return true }
@@ -131,6 +141,11 @@ public enum ArchiveReader {
             }
         }
         return true
+    }
+
+    /// Forgets cached 7z keys (derived from passwords). Called when an archive closes.
+    public static func forgetDecryptionKeys() {
+        SevenZipKey.forgetAll()
     }
 
     public static func packedSize(of source: ArchiveSource) -> Int64 {

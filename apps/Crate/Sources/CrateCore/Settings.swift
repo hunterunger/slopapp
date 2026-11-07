@@ -28,8 +28,25 @@ public struct CrateSettings: Codable, Equatable, Sendable {
     public var createFormat: CreateFormat = .zip
     public var compression: CompressionLevel = .normal
     public var zipEncryption: ZipEncryption = .aes256
+    /// 7z with a password: hide the file names too.
+    public var hideNames = true
+    /// Dropping files to compress shows them first (else straight to the options).
+    public var reviewFilesFirst = true
+    /// Opt-in: passwords that open archives are saved in the Keychain and tried first.
+    public var rememberPasswords = false
+    /// Folders chosen for extracting, newest first (the Extract to menu offers them).
+    public var recentFolders: [String] = []
+    /// The split sheet's last size.
+    public var splitSize = 10
+    public var splitUnit: FileSplitter.Unit = .mb
 
     public init() {}
+
+    /// Puts `folder` at the top of the recent folders (at most 5).
+    public mutating func noteRecentFolder(_ folder: URL) {
+        let path = folder.standardizedFileURL.path
+        recentFolders = Array(([path] + recentFolders.filter { $0 != path }).prefix(5))
+    }
 
     /// Missing keys fall back to defaults, so older saved settings keep working.
     public init(from decoder: any Decoder) throws {
@@ -43,6 +60,12 @@ public struct CrateSettings: Codable, Equatable, Sendable {
         createFormat = (try? c.decode(CreateFormat.self, forKey: .createFormat)) ?? d.createFormat
         compression = (try? c.decode(CompressionLevel.self, forKey: .compression)) ?? d.compression
         zipEncryption = (try? c.decode(ZipEncryption.self, forKey: .zipEncryption)) ?? d.zipEncryption
+        hideNames = (try? c.decode(Bool.self, forKey: .hideNames)) ?? d.hideNames
+        reviewFilesFirst = (try? c.decode(Bool.self, forKey: .reviewFilesFirst)) ?? d.reviewFilesFirst
+        rememberPasswords = (try? c.decode(Bool.self, forKey: .rememberPasswords)) ?? d.rememberPasswords
+        recentFolders = (try? c.decode([String].self, forKey: .recentFolders)) ?? d.recentFolders
+        splitSize = (try? c.decode(Int.self, forKey: .splitSize)) ?? d.splitSize
+        splitUnit = (try? c.decode(FileSplitter.Unit.self, forKey: .splitUnit)) ?? d.splitUnit
     }
 
     /// Whether a drop extracts right away, given whether ⌥ is held.

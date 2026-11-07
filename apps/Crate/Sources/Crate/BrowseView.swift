@@ -4,51 +4,117 @@ import QuickLook
 import SlopKit
 import SwiftUI
 
-/// An open archive: its contents as an outline, and the bar that extracts them.
+/// An open archive, laid out like the original: the contents as an outline, the actions
+/// top right (Close, Split, Convert, Extract), and the archive's name centered at the
+/// bottom. After a job, a finished screen lists what was made.
 struct BrowseView: View {
     @Bindable var model: BrowseModel
 
     var body: some View {
+        @Bindable var app = model.app
+        Group {
+            if model.isShowingResult {
+                resultPage
+            } else {
+                browsePage
+            }
+        }
+        .navigationTitle(model.source.fileName)
+        .acceptsDrops(model.app)
+        .sheet(isPresented: $model.askingPassword) {
+            PasswordEntrySheet(fileName: model.source.fileName, wrong: model.passwordWasWrong, checking: model.checkingPassword,
+                               remember: $app.settings.rememberPasswords,
+                               onSubmit: { model.submitPassword($0) }, onCancel: { model.cancelPassword() })
+        }
+        .sheet(isPresented: $model.splitting) {
+            SplitSheet(fileName: model.source.fileName, fileSize: ArchiveReader.packedSize(of: model.source),
+                       size: $app.settings.splitSize, unit: $app.settings.splitUnit,
+                       onSplit: { size in
+                           model.splitting = false
+                           model.split(partSize: size)
+                       },
+                       onCancel: { model.splitting = false })
+        }
+    }
+
+    // MARK: Browsing
+
+    private var browsePage: some View {
         VStack(spacing: 0) {
             if let banner { banner }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            BrowseBar(model: model)
+            if case .failed(let message) = model.job {
+                Hairline()
+                FailureLine(message: message) { model.dismissResult() }
+            }
+            PageFooter(summary: footerSummary, progress: progress, stop: { model.cancel() }) {
+                DestinationMenu(app: model.app)
+                    .disabled(!model.isLoaded || model.isWorking)
+            }
         }
-        .navigationTitle(model.source.fileName)
-        .navigationSubtitle(model.summary)
         .searchable(text: $model.query, placement: .toolbar, prompt: "Filter")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    ForEach(model.conversionFormats) { format in
-                        Button("\(format.title) (\(format.summary))") { model.convert(to: format) }
-                    }
-                } label: {
-                    Label {
-                        Text("Convert")
-                    } icon: {
-                        Image(systemName: "arrow.triangle.2.circlepath").accessibilityHidden(true)
-                    }
+        .toolbar { browseToolbar }
+        .modifier(HiddenToolbarTitle())
+    }
+
+    private var footerSummary: String {
+        let summary = model.summary
+        return summary.isEmpty ? model.source.name : "\(model.source.name) — \(summary)"
+    }
+
+    private var progress: (title: String, fraction: Double?)? {
+        if case .working(let title, let fraction) = model.job { return (title, fraction) }
+        return nil
+    }
+
+    @ToolbarContentBuilder private var browseToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button { model.app.closeCurrent() } label: {
+                Label("Close Archive", systemImage: "xmark")
+            }
+            .help("Close this archive (⇧⌘W)")
+            if model.canJoin {
+                Button { model.join() } label: {
+                    Label("Join Parts", systemImage: "square.stack.3d.up")
+                }
+                .help("Put the parts back together into one file")
+            }
+            Button { model.splitting = true } label: {
+                Label("Split", systemImage: "scissors")
+            }
+            .help("Split this archive into parts of a size you choose")
+            .disabled(!model.canSplit)
+            Button { model.convert() } label: {
+                Label {
+                    Text("Convert")
+                } icon: {
+                    Image(systemName: "arrow.left.arrow.right").accessibilityHidden(true)
+                }
+            }
+            .accessibilityLabel("Convert")
+            .help("Make a copy of this archive in another format")
+            .disabled(!model.canExtract)
+        }
+        // The primary action in its own item, so it keeps its own prominent capsule.
+        ToolbarItem(placement: .primaryAction) {
+            Button { model.extractPrimary() } label: {
+                Label("Extract", systemImage: "arrow.down.doc")
                     .labelStyle(.titleAndIcon)
-                }
-                .accessibilityLabel("Convert")
-                .help("Make a copy of this archive in another format")
-                .disabled(!model.canExtract)
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button { model.app.closeCurrent() } label: {
-                    Label("Close Archive", systemImage: "xmark")
-                }
-                .help("Close this archive (⇧⌘W)")
-            }
+            .accessibilityLabel(extractTitle)
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
+            .help(model.hasSelection ? "Extract the selected items (Return)" : "Extract everything (Return)")
+            .disabled(!model.canExtract)
         }
-        .acceptsDrops(model.app)
-        .sheet(isPresented: $model.askingPassword) {
-            PasswordEntrySheet(fileName: model.source.fileName, wrong: model.passwordWasWrong, checking: model.checkingPassword,
-                               onSubmit: { model.submitPassword($0) }, onCancel: { model.cancelPassword() })
-        }
+    }
+
+    /// One fixed title, so the toolbar never shifts and still fits at the window's usual
+    /// width; VoiceOver, the tooltip, the footer ("2 of 12 items selected") and the Archive
+    /// menu say whether it's everything or the selection.
+    private var extractTitle: String {
+        model.hasSelection ? "Extract Selected" : "Extract All"
     }
 
     @ViewBuilder private var content: some View {
@@ -67,11 +133,26 @@ struct BrowseView: View {
             }
         case .failed(let error):
             ContentUnavailableView {
-                Label(error.errorDescription ?? "Couldn't open the archive", systemImage: icon(for: error))
+                Label(failureTitle(error), systemImage: icon(for: error))
             } description: {
-                Text(error.recoverySuggestion ?? "")
+                Text(failureDetail(error))
             } actions: {
+                if error.needsPassword {
+                    Button("Enter Password…") { model.unlockToList() }
+                        .keyboardShortcut(.defaultAction)
+                } else if model.canJoin {
+                    Button("Join Parts") { model.join() }
+                        .keyboardShortcut(.defaultAction)
+                }
                 Button("Choose Another…") { model.app.chooseFiles() }
+            }
+            .overlay(alignment: .bottom) {
+                if model.tryingSavedPasswords {
+                    Label("Trying saved passwords…", systemImage: "key")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .padding()
+                }
             }
         case .loaded:
             if model.tree.roots.isEmpty {
@@ -85,20 +166,87 @@ struct BrowseView: View {
         }
     }
 
+    private var isSplitFile: Bool {
+        if case .failed(.notAnArchive) = model.phase { return model.canJoin }
+        return false
+    }
+
+    private func failureTitle(_ error: CrateError) -> String {
+        if isSplitFile { return "“\(model.source.fileName)” is one part of a split file" }
+        return Self.headline(error.errorDescription ?? "Couldn't open the archive")
+    }
+
+    /// A sentence used as a heading: no closing period (HIG).
+    static func headline(_ sentence: String) -> String {
+        sentence.hasSuffix(".") && !sentence.hasSuffix("..") ? String(sentence.dropLast()) : sentence
+    }
+
+    private func failureDetail(_ error: CrateError) -> String {
+        if isSplitFile {
+            let whole = (model.source.fileName as NSString).deletingPathExtension
+            return "Join Parts puts its \(model.source.parts.count) parts back together as “\(whole)”."
+        }
+        if error.needsPassword { return "Its file names are hidden too. Enter the password to see what's inside." }
+        return error.recoverySuggestion ?? ""
+    }
+
     private func icon(for error: CrateError) -> String {
         switch error {
         case .unsupportedEncryption, .passwordRequired, .wrongPassword: "lock.fill"
         case .missingPart: "puzzlepiece.extension"
+        case .notAnArchive where model.canJoin: "square.stack.3d.up"
         default: "exclamationmark.triangle"
         }
+    }
+
+    // MARK: Finished
+
+    private var resultPage: some View {
+        ResultPage(title: resultTitle, detail: resultDetail, items: model.resultItems, warning: resultWarning)
+            .toolbar {
+                ResultToolbar(back: { model.dismissResult() }, reveal: { model.revealResult() }, done: { model.finish() })
+            }
+    }
+
+    private var resultTitle: String {
+        switch model.job {
+        case .extracted(let result, _):
+            result.primary.map { "Extracted to “\($0.lastPathComponent)”" } ?? "Extracted"
+        case .split(let parts):
+            "Split into \(parts.count) parts"
+        case .joined(let file):
+            "Joined into “\(file.lastPathComponent)”"
+        default: ""
+        }
+    }
+
+    private var resultDetail: String {
+        switch model.job {
+        case .extracted(let result, let trashed):
+            var parts = [result.fileCount == 1 ? "1 file" : "\(result.fileCount.formatted()) files",
+                         ByteCountFormatter.string(fromByteCount: result.bytes, countStyle: .file)]
+            if trashed == true { parts.append("archive moved to the Trash (Edit ▸ Undo puts it back)") }
+            return parts.joined(separator: " · ")
+        case .split(let parts):
+            let total = parts.reduce(Int64(0)) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0) }
+            return "“\(model.source.fileName)” is unchanged · \(ByteCountFormatter.string(fromByteCount: total, countStyle: .file)) in all"
+        case .joined:
+            return "The parts are unchanged."
+        default: return ""
+        }
+    }
+
+    private var resultWarning: String? {
+        guard case .extracted(let result, let trashed) = model.job else { return nil }
+        let notes = [result.skippedNote, trashed == false ? "Couldn't move the archive to the Trash." : nil, model.keptNote].compactMap { $0 }
+        return notes.isEmpty ? nil : notes.joined(separator: " ")
     }
 
     private var banner: Banner? {
         guard let listing = model.listing, model.isLoaded else { return nil }
         if listing.encryptionUnsupported {
-            let format = listing.formatName.hasPrefix("RAR") ? "RAR" : "7z"
             return Banner(symbol: "lock.fill",
-                          text: "This \(format) archive is protected with a password. Crate can't open password-protected 7z and RAR archives yet, but you can see what's inside. Try Keka or The Unarchiver to extract it.")
+                          text: "This RAR archive is protected with a password. Crate can't decrypt RAR yet, but you can see what's inside. Try Keka or The Unarchiver to extract it.")
         }
         if !listing.unsafeEntries.isEmpty {
             let count = listing.unsafeEntries.count
@@ -143,100 +291,28 @@ struct Banner: View {
         .padding(.horizontal, Spacing.l)
         .padding(.vertical, Spacing.s)
         .background(.orange.opacity(0.08))
-        .overlay(alignment: .bottom) { Divider() }
+        .overlay(alignment: .bottom) { Hairline() }
         .accessibilityElement(children: .combine)
     }
 }
 
-/// Destination, progress or result on the left; the main button on the right.
-struct BrowseBar: View {
-    @Bindable var model: BrowseModel
-
-    var body: some View {
-        HStack(spacing: Spacing.m) {
-            status
-            Spacer(minLength: Spacing.s)
-            primaryButton
-        }
-        .padding(.horizontal, Spacing.l)
-        .padding(.vertical, Spacing.m)
-        .frame(minHeight: 52)
-    }
-
-    @ViewBuilder private var status: some View {
-        switch model.job {
-        case .idle:
-            DestinationMenu(app: model.app)
-                .disabled(!model.isLoaded)
-        case .working(let title, let progress):
-            HStack(spacing: Spacing.s) {
-                Text(title).font(.callout).lineLimit(1)
-                ProgressView(value: progress ?? 0)
-                    .progressViewStyle(.linear)
-                    .frame(maxWidth: 200)
-                    .accessibilityLabel("Progress")
-                Button("Stop") { model.cancel() }
-                    .keyboardShortcut(.cancelAction)
-            }
-        case .extracted(let result, let trashed):
-            ResultLine(
-                symbol: result.skipped.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
-                tint: result.skipped.isEmpty ? .green : .orange,
-                title: result.primary.map { "Extracted to “\($0.lastPathComponent)”" } ?? "Extracted",
-                detail: [result.skippedNote, trashed == true ? "The archive is in the Trash (Edit ▸ Undo puts it back)." : nil,
-                         trashed == false ? "Couldn't move the archive to the Trash." : nil, model.keptNote].compactMap { $0 }.joined(separator: " "),
-                reveal: { model.revealResult() }
-            )
-        case .converted(let result):
-            ResultLine(symbol: "checkmark.circle.fill", tint: .green,
-                       title: "Saved “\(result.primary?.lastPathComponent ?? "")”",
-                       detail: ByteCountFormatter.string(fromByteCount: result.bytes, countStyle: .file),
-                       reveal: { model.revealResult() })
-        case .failed(let message):
-            HStack(spacing: Spacing.s) {
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-                    .lineLimit(3)
-                    .help(message)
-                Button("OK") { model.dismissResult() }
-            }
-        }
-    }
-
-    private var primaryButton: some View {
-        let count = model.selection.count
-        let title = count == 0 ? "Extract All" : count == 1 ? "Extract 1 Item" : "Extract \(count) Items"
-        return Button(title) { model.extractPrimary() }
-            .keyboardShortcut(.defaultAction)
-            .disabled(!model.canExtract)
-            .help(count == 0 ? "Extract everything (Return)" : "Extract the selected items (Return)")
-    }
-}
-
-/// "Extracted to …" with a Show in Finder button.
-struct ResultLine: View {
-    let symbol: String
-    let tint: Color
-    let title: String
-    let detail: String
-    let reveal: () -> Void
+/// A failed job's message, with OK.
+struct FailureLine: View {
+    let message: String
+    let dismiss: () -> Void
 
     var body: some View {
         HStack(spacing: Spacing.s) {
-            Image(systemName: symbol)
-                .foregroundStyle(tint)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.callout).lineLimit(1).truncationMode(.middle)
-                if !detail.isEmpty {
-                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                }
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(detail.isEmpty ? title : "\(title). \(detail)")
-            Button("Show in Finder", action: reveal)
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(.textOrange)
+                .lineLimit(3)
+                .help(message)
+            Spacer()
+            Button("OK", action: dismiss)
         }
+        .padding(.horizontal, Spacing.l)
+        .padding(.vertical, Spacing.s)
     }
 }
 
@@ -245,47 +321,56 @@ struct DestinationMenu: View {
     @Bindable var app: AppModel
 
     var body: some View {
-        HStack(spacing: Spacing.xs) {
-            Text("Extract to:")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Menu(label) {
-                Picker("Extract to", selection: choice) {
-                    Text("Next to Archive").tag(0)
-                    Text("Ask Each Time").tag(1)
-                    if case .folder(let path) = app.settings.destination {
-                        Text(FileManager.default.displayName(atPath: path)).tag(2)
-                    }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
+        Menu {
+            Picker("Extract to", selection: choice) {
+                Text("Next to Archive").tag("next")
+                Text("Ask Each Time").tag("ask")
                 Divider()
-                Button("Choose Folder…") {
-                    app.chooseFolder(message: "Choose where extracted files go.", prompt: "Choose", near: nil) { url in
-                        app.settings.destination = .folder(url.path)
-                    }
+                ForEach(DestinationPresets.folders(for: app.settings), id: \.self) { path in
+                    // Text only (Golden Gate menus carry no decorative icons).
+                    Text(FileManager.default.displayName(atPath: path))
+                        .tag("folder:" + path)
                 }
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .accessibilityLabel("Extract to: \(label)")
+            .pickerStyle(.inline)
+            .labelsHidden()
+            Divider()
+            Button("Choose Folder…") {
+                app.chooseFolder(message: "Choose where extracted files go.", prompt: "Choose", near: nil) { url in
+                    app.settings.destination = .folder(url.path)
+                    app.settings.noteRecentFolder(url)
+                }
+            }
+        } label: {
+            Text("Extract to: \(label)")
         }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .font(.callout)
+        // A borderless menu draws its title 4 pt in; this puts the text on the footer's
+        // 16 pt margin, like every other footer.
+        .padding(.leading, -Spacing.xs)
+        .accessibilityLabel("Extract to: \(label)")
+        .help("Where extracted files go")
     }
 
-    private var choice: Binding<Int> {
+    private var choice: Binding<String> {
         Binding(
             get: {
                 switch app.settings.destination {
-                case .nextToArchive: 0
-                case .ask: 1
-                case .folder: 2
+                case .nextToArchive: "next"
+                case .ask: "ask"
+                case .folder(let path): "folder:" + path
                 }
             },
             set: { value in
                 switch value {
-                case 0: app.settings.destination = .nextToArchive
-                case 1: app.settings.destination = .ask
-                default: break
+                case "next": app.settings.destination = .nextToArchive
+                case "ask": app.settings.destination = .ask
+                default:
+                    let path = String(value.dropFirst("folder:".count))
+                    app.settings.destination = .folder(path)
+                    app.settings.noteRecentFolder(URL(fileURLWithPath: path, isDirectory: true))
                 }
             }
         )
@@ -296,6 +381,35 @@ struct DestinationMenu: View {
         case .nextToArchive: "Next to Archive"
         case .ask: "Ask Each Time"
         case .folder(let path): FileManager.default.displayName(atPath: path)
+        }
+    }
+}
+
+/// Folders offered in Extract to: the current choice, recent ones, Desktop and Downloads.
+enum DestinationPresets {
+    static func folders(for settings: CrateSettings) -> [String] {
+        var result: [String] = []
+        if case .folder(let path) = settings.destination { result.append(path) }
+        result += settings.recentFolders
+        for directory in [FileManager.SearchPathDirectory.desktopDirectory, .downloadsDirectory] {
+            if let url = FileManager.default.urls(for: directory, in: .userDomainMask).first { result.append(url.path) }
+        }
+        var seen = Set<String>()
+        return result.filter { seen.insert(URL(fileURLWithPath: $0).standardizedFileURL.path).inserted }
+    }
+}
+
+/// The open archive's name is in the footer (centered, with its size and format), so the
+/// toolbar doesn't repeat it. The title alone reserved about 160 pt, which sent Convert and
+/// Extract to the overflow menu at the default width once the filter field opened. Without
+/// it the filter stays open beside the actions, and nothing moves when you start typing.
+/// The window keeps its title for the Window menu, Mission Control and VoiceOver.
+struct HiddenToolbarTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content
         }
     }
 }

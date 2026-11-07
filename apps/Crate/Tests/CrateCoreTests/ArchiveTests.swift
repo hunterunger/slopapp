@@ -39,19 +39,9 @@ import Testing
         #expect(result.bytes == listing.unpackedBytes)
     }
 
-    @Test func encryptedRarAndSevenZipAreExplained() throws {
+    @Test func encryptedRarIsExplained() throws {
         #expect(throws: CrateError.unsupportedEncryption(name: "rar_encryption_header.rar", format: "RAR")) {
             try ArchiveReader.list(ArchiveSource(file: TestFolder.fixture("rar_encryption_header.rar")))
-        }
-        let seven = try ArchiveReader.list(ArchiveSource(file: TestFolder.fixture("encrypted_data.7z")))
-        #expect(seven.encryptionUnsupported)
-        let out = TestFolder.make()
-        #expect(throws: CrateError.unsupportedEncryption(name: "encrypted_data.7z", format: "7z")) {
-            try Extractor().extract(ArchiveSource(file: TestFolder.fixture("encrypted_data.7z")), to: out, options: .init(password: "secret"))
-        }
-        #expect(TestFolder.tree(out).isEmpty)
-        #expect(throws: CrateError.unsupportedEncryption(name: "encrypted_header.7z", format: "7z")) {
-            try ArchiveReader.list(ArchiveSource(file: TestFolder.fixture("encrypted_header.7z")))
         }
         let rarData = TestFolder.fixture("rar_encryption_data.rar")
         do {
@@ -465,12 +455,12 @@ import Testing
         }
     }
 
-    @Test func passwordOnlyForZip() throws {
+    @Test func passwordOnlyForZipAnd7z() throws {
         let folder = TestFolder.make()
         let a = folder.appendingPathComponent("a.txt")
         TestFolder.write("a", to: a)
-        #expect(throws: CrateError.passwordNotSupported(format: "7z")) {
-            try ArchiveCreator().create(CreateRequest(sources: [a], folder: folder, name: "x", format: .sevenZip, password: "pw"))
+        #expect(throws: CrateError.passwordNotSupported(format: "Tar.gz")) {
+            try ArchiveCreator().create(CreateRequest(sources: [a], folder: folder, name: "x", format: .tarGz, password: "pw"))
         }
     }
 
