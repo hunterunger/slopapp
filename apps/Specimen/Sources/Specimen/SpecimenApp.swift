@@ -21,11 +21,14 @@ struct SpecimenApp: App {
 
         Settings {
             SlopSettings(info: info, isMenuBarApp: false) {
-                Toggle("Show macOS fonts", isOn: Binding(get: { model.showSystemFonts }, set: { model.showSystemFonts = $0 }))
-                Toggle("Group styles into families", isOn: Binding(get: { model.groupByFamily }, set: { model.groupByFamily = $0 }))
-                Text("Fonts that come with macOS can be hidden to see only the ones you added.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Toggle(isOn: Binding(get: { model.showSystemFonts }, set: { model.showSystemFonts = $0 })) {
+                    Text("Show macOS fonts")
+                    Text("Turn off to see only the fonts you added.")
+                }
+                Toggle(isOn: Binding(get: { model.groupByFamily }, set: { model.groupByFamily = $0 })) {
+                    Text("Group styles into families")
+                    Text("One card per family. Turn off for a card per style.")
+                }
             }
         }
     }
@@ -35,11 +38,25 @@ struct SpecimenCommands: Commands {
     @Bindable var model: AppModel
     let info: AppInfo
 
+    private var detailFamily: String? {
+        if case .detail(let name) = model.screen { return name }
+        return nil
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
             Button("About Specimen") { AboutWindow.show(info: info) }
         }
-        CommandGroup(replacing: .newItem) {}
+        CommandGroup(replacing: .newItem) {
+            Button("New Tag…") { model.sheet = .newTag }
+                .keyboardShortcut("n")
+            Button("New Smart Collection…") { model.newSmartCollection() }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+            Divider()
+            Button("Add Fonts…") { model.chooseFontsToAdd() }
+                .keyboardShortcut("o")
+                .disabled(model.environment.stressCopies > 1)
+        }
         CommandGroup(after: .newItem) {
             Button("Show in Finder") { model.revealInFinder() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -56,6 +73,27 @@ struct SpecimenCommands: Commands {
                 .keyboardShortcut("l")
         }
         CommandGroup(before: .toolbar) {
+            if case .detail = model.screen {
+                ForEach(Array(DetailTab.allCases.enumerated()), id: \.element) { index, tab in
+                    Toggle(tab.title, isOn: Binding(get: { model.detailTab == tab }, set: { _ in model.detailTab = tab }))
+                        .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
+                        .disabled(tab == .variables && !(model.family(named: detailFamily ?? "")?.isVariable ?? false))
+                }
+            } else {
+                ForEach(Array(ViewMode.allCases.enumerated()), id: \.element) { index, mode in
+                    Toggle("as \(mode.title)", isOn: Binding(get: { model.viewMode == mode }, set: { _ in model.viewMode = mode }))
+                        .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
+                }
+            }
+            Menu("Sort By") {
+                ForEach(LibrarySort.Key.allCases) { key in
+                    Toggle(key.title, isOn: Binding(get: { model.sort.key == key }, set: { _ in model.sort = LibrarySort(key: key, ascending: model.sort.key == key ? model.sort.ascending : nil) }))
+                }
+                Divider()
+                Toggle("Ascending", isOn: Binding(get: { model.sort.ascending }, set: { model.sort = LibrarySort(key: model.sort.key, ascending: $0) }))
+                Toggle("Descending", isOn: Binding(get: { !model.sort.ascending }, set: { model.sort = LibrarySort(key: model.sort.key, ascending: !$0) }))
+            }
+            Divider()
             Button("Bigger") { model.biggerPreview() }
                 .keyboardShortcut("+")
                 .disabled(model.previewSize >= PreviewSize.range.upperBound)
@@ -67,10 +105,12 @@ struct SpecimenCommands: Commands {
             Divider()
             Toggle("Show macOS Fonts", isOn: $model.showSystemFonts)
             Toggle("Group Styles into Families", isOn: $model.groupByFamily)
+            Toggle("Hide Fonts That Can’t Show This Text", isOn: $model.hideUncovered)
+                .keyboardShortcut("h", modifiers: [.command, .shift])
             Divider()
             Menu("Go To") {
-                ForEach(SidebarItem.libraryItems + SidebarItem.categoryItems, id: \.self) { item in
-                    Button(item.title) {
+                ForEach(LibraryFilter.countedItems(tags: model.tags, smartCollections: model.smartCollections), id: \.self) { item in
+                    Button(model.title(for: item)) {
                         model.sidebar = item
                         model.screen = .grid
                     }
@@ -85,13 +125,31 @@ struct SpecimenCommands: Commands {
             Button("Back to All Fonts") { model.goBack() }
                 .keyboardShortcut("[")
                 .disabled(model.screen == .grid)
+            Button(model.selectionIsInTray ? "Remove from Compare" : "Add to Compare") { model.toggleTraySelection() }
+                .disabled(model.screen != .grid || model.selection.isEmpty)
             Button("Compare") { model.openCompare() }
                 .keyboardShortcut("k")
                 .disabled(!model.canCompare)
+            Button("Clear Compare") { model.clearTray() }
+                .keyboardShortcut("k", modifiers: [.command, .option])
+                .disabled(model.tray.isEmpty)
             Divider()
             Button(model.allActionFamiliesAreFavorites ? "Remove from Favorites" : "Add to Favorites") { model.toggleFavorite() }
                 .keyboardShortcut("d")
                 .disabled(model.actionFamilies.isEmpty)
+            Button("Tags…") { model.sheet = .tags }
+                .keyboardShortcut("t")
+                .disabled(model.actionFamilies.isEmpty)
+            Menu("Tags") {
+                let names = model.actionFamilies
+                ForEach(model.tags.names, id: \.self) { tag in
+                    Toggle(tag, isOn: Binding(get: { model.tags.membership(tag, families: names) == .all },
+                                              set: { _ in model.toggleTag(tag, families: names) }))
+                }
+                if !model.tags.isEmpty { Divider() }
+                Button("New Tag…") { model.sheet = .newTag }
+            }
+            .disabled(model.actionFamilies.isEmpty)
             Menu("Category") {
                 let names = model.actionFamilies
                 let current = Set(names.compactMap(model.category(ofFamily:)))
@@ -136,6 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppModel.shared.start()
+        Snapshots.startIfAsked(model: AppModel.shared)
         if let kind = AppModel.shared.environment.benchmark {
             Benchmark.run(kind, model: AppModel.shared)
         }

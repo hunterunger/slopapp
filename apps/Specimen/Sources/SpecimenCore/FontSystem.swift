@@ -47,14 +47,20 @@ public struct FaceDetails: Codable, Sendable, Equatable {
     public var coversBasicLatin: Bool
     public var hasColorGlyphs: Bool
     public var axes: [VariationAxis]
+    /// The font's manufacturer name (foundry), for the list view and sorting.
+    public var foundry: String?
+    /// The font's version string, cleaned ("1.000" from "Version 1.000;...").
+    public var version: String?
 
     public init(panose: [UInt8]? = nil, equalAdvances: Bool? = nil, coversBasicLatin: Bool = true,
-                hasColorGlyphs: Bool = false, axes: [VariationAxis] = []) {
+                hasColorGlyphs: Bool = false, axes: [VariationAxis] = [], foundry: String? = nil, version: String? = nil) {
         self.panose = panose
         self.equalAdvances = equalAdvances
         self.coversBasicLatin = coversBasicLatin
         self.hasColorGlyphs = hasColorGlyphs
         self.axes = axes
+        self.foundry = foundry
+        self.version = version
     }
 }
 

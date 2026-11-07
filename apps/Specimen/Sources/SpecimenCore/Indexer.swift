@@ -7,7 +7,7 @@ public struct IndexCache: Codable, Sendable, Equatable {
         public var details: FaceDetails
     }
 
-    public static let currentVersion = 3
+    public static let currentVersion = 4
     public var version = IndexCache.currentVersion
     public var entries: [String: Entry] = [:]
     /// The last full index, shown at launch while the fresh one builds.
@@ -89,7 +89,8 @@ public struct FontIndexer: Sendable {
             weight: face.weight, width: face.width, slant: face.slant, isItalic: face.isItalic,
             isVariable: !details.axes.isEmpty, axes: details.axes, format: face.format,
             category: Classifier.classify(facts), coversBasicLatin: details.coversBasicLatin,
-            hasColorGlyphs: details.hasColorGlyphs, fileModified: modified
+            hasColorGlyphs: details.hasColorGlyphs, fileModified: modified,
+            foundry: details.foundry, version: details.version
         )
     }
 

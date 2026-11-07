@@ -23,13 +23,35 @@ final class PreviewRenderer {
         samples.countLimit = 300
     }
 
-    func font(for face: FontFace, size: CGFloat) -> CTFont? {
-        let key = "\(face.id)@\(size)" as NSString
+    func font(for face: FontFace, size: CGFloat, variation: [Int: Double] = [:]) -> CTFont? {
+        let key = "\(face.id)@\(size)\(Self.variationKey(variation))" as NSString
         if let font = sizedFonts.object(forKey: key) { return font }
         guard let base = baseFont(for: face) else { return nil }
-        let font = CTFontCreateCopyWithAttributes(base, size, nil, nil)
+        var descriptor: CTFontDescriptor?
+        if !variation.isEmpty {
+            // Start from the face's own position (a named instance), then move the axes.
+            var merged = (CTFontCopyVariation(base) as? [NSNumber: NSNumber] ?? [:]).reduce(into: [Int: Double]()) {
+                $0[$1.key.intValue] = $1.value.doubleValue
+            }
+            merged.merge(variation) { _, new in new }
+            let dictionary = Dictionary(uniqueKeysWithValues: merged.map { (NSNumber(value: $0.key), NSNumber(value: $0.value)) })
+            descriptor = CTFontDescriptorCreateWithAttributes([kCTFontVariationAttribute: dictionary] as CFDictionary)
+        }
+        let font = CTFontCreateCopyWithAttributes(base, size, nil, descriptor)
         sizedFonts.setObject(font, forKey: key)
         return font
+    }
+
+    static func variationKey(_ variation: [Int: Double]) -> String {
+        variation.isEmpty ? "" : "|" + variation.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
+    }
+
+    /// The face's own axis values (a named instance's position), as CoreText reports them.
+    func variation(of face: FontFace) -> [Int: Double] {
+        guard let base = baseFont(for: face) else { return [:] }
+        return (CTFontCopyVariation(base) as? [NSNumber: NSNumber] ?? [:]).reduce(into: [Int: Double]()) {
+            $0[$1.key.intValue] = $1.value.doubleValue
+        }
     }
 
     private func baseFont(for face: FontFace) -> CTFont? {
@@ -48,18 +70,20 @@ final class PreviewRenderer {
     /// One typeset line of `text` in `face`, truncated to `width`. Characters the font lacks
     /// are drawn faint (never silently in another font). If the font can't show most of the
     /// text, the line shows a sample of the font's own characters instead.
-    func line(for face: FontFace, text: String, size: CGFloat, width: CGFloat, allowSample: Bool = true) -> TypesetLine {
+    func line(for face: FontFace, text: String, size: CGFloat, width: CGFloat, allowSample: Bool = true,
+              variation: [Int: Double] = [:]) -> TypesetLine {
         let dark = NSAppearance.currentDrawing().bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let key = "\(face.id)|\(size)|\(Int(width))|\(dark)|\(allowSample)|\(text)" as NSString
+        let key = "\(face.id)|\(size)|\(Int(width))|\(dark)|\(allowSample)\(Self.variationKey(variation))|\(text)" as NSString
         if let cached = lines.object(forKey: key) { return cached }
-        let result = typeset(face: face, text: text, size: size, width: width, allowSample: allowSample)
+        let result = typeset(face: face, text: text, size: size, width: width, allowSample: allowSample, variation: variation)
         lines.setObject(result, forKey: key)
         return result
     }
 
-    private func typeset(face: FontFace, text: String, size: CGFloat, width: CGFloat, allowSample: Bool) -> TypesetLine {
-        guard let font = font(for: face, size: size) else {
-            return TypesetLine(line: nil, ascent: size, descent: size * 0.3, missing: 0, isSample: false, unavailable: true)
+    private func typeset(face: FontFace, text: String, size: CGFloat, width: CGFloat, allowSample: Bool,
+                         variation: [Int: Double]) -> TypesetLine {
+        guard let font = font(for: face, size: size, variation: variation) else {
+            return TypesetLine(line: nil, ascent: size, descent: size * 0.3, missing: 0, isSample: false, unavailable: true, width: 0)
         }
         var runs = PreviewText.runs(text) { units in
             var glyphs = [CGGlyph](repeating: 0, count: units.count)
@@ -93,7 +117,8 @@ final class PreviewRenderer {
             line = CTLineCreateTruncatedLine(line, Double(width), .end, token) ?? line
         }
         return TypesetLine(line: line, ascent: CTFontGetAscent(font), descent: CTFontGetDescent(font),
-                           missing: isSample ? 0 : PreviewText.missingCount(runs), isSample: isSample, unavailable: false)
+                           missing: isSample ? 0 : PreviewText.missingCount(runs), isSample: isSample, unavailable: false,
+                           width: CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)))
     }
 
     private func sampleText(for face: FontFace, font: CTFont) -> String {
@@ -114,6 +139,22 @@ final class PreviewRenderer {
     }
 }
 
+/// Where a preview line sits. The baseline is the same for every font at a given size (not
+/// derived from each font's own ascent, which varies by a third of the size), so previews
+/// line up across a row of cards, down the styles list and in Compare.
+enum PreviewMetrics {
+    /// Space above the tallest ordinary ascender.
+    static let topPadding: CGFloat = 4
+
+    /// Height of a preview area for text at `size`: room for ascenders, accents and descenders.
+    static func height(for size: CGFloat) -> CGFloat { ceil(size * 1.45) + 8 }
+
+    /// Baseline, measured down from the top of the preview area. At 0.95 em most Latin
+    /// ascenders and accents fit above it and descenders below, with the cap height a little
+    /// above the area's centre (where text looks centred).
+    static func baseline(for size: CGFloat) -> CGFloat { topPadding + (size * 0.95).rounded() }
+}
+
 /// A typeset preview line plus what the card says about it.
 final class TypesetLine {
     let line: CTLine?
@@ -125,8 +166,11 @@ final class TypesetLine {
     let isSample: Bool
     /// The font couldn't be loaded at all (unsupported format, missing file).
     let unavailable: Bool
+    /// Typographic width of the (possibly truncated) line.
+    let width: CGFloat
 
-    init(line: CTLine?, ascent: CGFloat, descent: CGFloat, missing: Int, isSample: Bool, unavailable: Bool) {
+    init(line: CTLine?, ascent: CGFloat, descent: CGFloat, missing: Int, isSample: Bool, unavailable: Bool, width: CGFloat = 0) {
+        self.width = width
         self.line = line
         self.ascent = ascent
         self.descent = descent

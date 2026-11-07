@@ -3,11 +3,65 @@ import CoreText
 import Observation
 import SlopKit
 import SpecimenCore
+import UniformTypeIdentifiers
 
 enum Screen: Equatable {
     case grid
     case detail(family: String)
     case compare
+}
+
+/// How the library is shown (View ▸ as Grid ⌘1 / as List ⌘2).
+enum ViewMode: String, CaseIterable, Identifiable {
+    case grid, list
+    var id: String { rawValue }
+    var title: String { self == .grid ? "Grid" : "List" }
+    var systemImage: String { self == .grid ? "square.grid.2x2" : "list.bullet" }
+}
+
+/// The family page's tabs (⌘1–⌘5 while it's open).
+enum DetailTab: String, CaseIterable, Identifiable {
+    case styles, characters, text, variables, info
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .styles: "Styles"
+        case .characters: "Characters"
+        case .text: "Text"
+        case .variables: "Variables"
+        case .info: "Info"
+        }
+    }
+}
+
+/// A sheet over the library window.
+enum LibrarySheet: Identifiable, Equatable {
+    case tags
+    case newTag
+    case renameTag(String)
+    case smartCollection(SmartCollection, isNew: Bool)
+    case install(InstallReport)
+
+    var id: String {
+        switch self {
+        case .tags: "tags"
+        case .newTag: "newTag"
+        case .renameTag(let name): "rename.\(name)"
+        case .smartCollection(let collection, _): "smart.\(collection.id)"
+        case .install: "install"
+        }
+    }
+}
+
+/// What "Add Fonts…" did, for its summary sheet.
+struct InstallReport: Equatable {
+    var added: [String]
+    var problems: [(file: String, reason: String)]
+    var folder: String
+
+    static func == (a: InstallReport, b: InstallReport) -> Bool {
+        a.added == b.added && a.folder == b.folder && a.problems.map(\.file) == b.problems.map(\.file)
+    }
 }
 
 /// A refusal or failure, shown as an alert.
@@ -39,11 +93,13 @@ final class AppModel {
     @ObservationIgnored let system: any FontSystem = CoreTextFontSystem()
     @ObservationIgnored private let favoritesStore: FavoritesStore
     @ObservationIgnored private let overridesStore: CategoryOverridesStore
+    @ObservationIgnored private let collectionsStore: CollectionsStore
+    @ObservationIgnored private var coverageTask: Task<Void, Never>?
     @ObservationIgnored private let defaults = UserDefaults.standard
 
     /// Saves a preference. Benchmarks change size and text a lot; they never save.
     private func persist(_ value: Any, _ key: String) {
-        guard environment.benchmark == nil else { return }
+        guard environment.benchmark == nil, !isSnapshotRun else { return }
         defaults.set(value, forKey: key)
     }
     /// SwiftUI's environment undo manager isn't the one Edit ▸ Undo uses; the window's is.
@@ -81,10 +137,23 @@ final class AppModel {
     var groupByFamily = true {
         didSet { guard groupByFamily != oldValue else { return }; persist(groupByFamily, "groupByFamily"); refreshItems() }
     }
+    var sort = LibrarySort() {
+        didSet { guard sort != oldValue else { return }; persist(sort.storageKey, "sort"); refreshItems() }
+    }
+    var viewMode: ViewMode = .grid {
+        didSet { guard viewMode != oldValue else { return }; persist(viewMode.rawValue, "viewMode"); if screen != .grid { screen = .grid } }
+    }
+    /// Hide fonts that can't show every character of the preview text.
+    var hideUncovered = false {
+        didSet { guard hideUncovered != oldValue else { return }; persist(hideUncovered, "hideUncovered"); updateCoverage() }
+    }
+    /// Faces hidden by `hideUncovered` for the current text.
+    private(set) var hiddenFaceIDs: Set<String> = []
+    private(set) var isCheckingCoverage = false
 
     // Preview (persisted)
     var previewText = "" {
-        didSet { persist(previewText, "previewText") }
+        didSet { guard previewText != oldValue else { return }; persist(previewText, "previewText"); if hideUncovered { updateCoverage() } }
     }
     var previewSize: Double = PreviewSize.standard {
         didSet {
@@ -97,14 +166,20 @@ final class AppModel {
     // User data
     private(set) var favorites: Set<String> = []
     private(set) var categoryOverrides: [String: FontCategory] = [:]
+    private(set) var tags = TagLibrary()
+    private(set) var smartCollections: [SmartCollection] = []
+    /// The compare tray: a shortlist that survives clicks and relaunches.
+    private(set) var tray = CompareTray()
 
     // Selection and navigation
     var selection: Set<String> = []
     var screen: Screen = .grid
-    /// Faces in the compare view, in order.
-    var compareFaceIDs: [String] = []
-    /// The style picked in the detail view (for info and waterfall).
+    /// The style picked in the detail view (for every tab).
     var detailFaceID: String?
+    var detailTab: DetailTab = .styles {
+        didSet { persist(detailTab.rawValue, "detailTab") }
+    }
+    var sheet: LibrarySheet?
 
     // Prompts
     var notice: Notice?
@@ -121,6 +196,8 @@ final class AppModel {
         self.environment = environment
         favoritesStore = FavoritesStore(directory: environment.dataDirectory)
         overridesStore = CategoryOverridesStore(directory: environment.dataDirectory)
+        collectionsStore = CollectionsStore(directory: environment.dataDirectory)
+        isSnapshotRun = ProcessInfo.processInfo.environment["SPECIMEN_SNAPSHOT_DIR"] != nil
         sidebar = defaults.string(forKey: "sidebar").flatMap(SidebarItem.init(storageKey:)) ?? .all
         showSystemFonts = defaults.object(forKey: "showSystemFonts") as? Bool ?? true
         groupByFamily = defaults.object(forKey: "groupByFamily") as? Bool ?? true
@@ -128,7 +205,18 @@ final class AppModel {
         previewSize = PreviewSize.clamp(defaults.object(forKey: "previewSize") as? Double ?? PreviewSize.standard)
         favorites = favoritesStore.load()
         categoryOverrides = overridesStore.load()
+        let collections = collectionsStore.load()
+        tags = collections.tagLibrary
+        smartCollections = collections.smartCollections
+        sort = defaults.string(forKey: "sort").flatMap(LibrarySort.init(storageKey:)) ?? LibrarySort()
+        viewMode = defaults.string(forKey: "viewMode").flatMap(ViewMode.init(rawValue:)) ?? .grid
+        hideUncovered = defaults.object(forKey: "hideUncovered") as? Bool ?? false
+        detailTab = defaults.string(forKey: "detailTab").flatMap(DetailTab.init(rawValue:)) ?? .styles
+        tray = CompareTray(faceIDs: defaults.stringArray(forKey: "compareTray") ?? [])
     }
+
+    /// `SPECIMEN_SNAPSHOT_DIR` renders the windows offscreen and quits; it never saves preferences.
+    @ObservationIgnored let isSnapshotRun: Bool
 
     // MARK: Loading
 
@@ -174,9 +262,9 @@ final class AppModel {
             }
         }.value
         guard !Task.isCancelled else { return }
-        apply(faces: result.faces)
         isIndexing = false
         indexProgress = nil
+        apply(faces: result.faces)
         if result.freshlyRead > 0 || result.cache.faces != cache.faces {
             Task.detached(priority: .utility) { try? result.cache.save(to: cacheURL) }
         }
@@ -186,13 +274,21 @@ final class AppModel {
         faces = newFaces
         let shown = FontIndexer.stressCopies(newFaces, copies: environment.stressCopies)
         families = FontFamily.group(shown, overrides: categoryOverrides)
+        familyIndex = Dictionary(families.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+        faceIndex = Dictionary(families.flatMap(\.faces).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         hasLoaded = true
         refreshItems(counts: true)
         // Forget selections and screens whose fonts went away.
         if case .detail(let family) = screen, !families.contains(where: { $0.name == family }) { screen = .grid }
-        let faceIDs = Set(newFaces.map(\.id))
-        compareFaceIDs.removeAll { !faceIDs.contains($0) }
-        if screen == .compare, compareFaceIDs.isEmpty { screen = .grid }
+        // Keep tray entries for fonts that are only offline for a moment (indexing): prune
+        // only against a complete index.
+        if !isIndexing {
+            var pruned = tray
+            pruned.prune(existing: Set(families.flatMap(\.faces).map(\.id)))
+            if pruned != tray { setTray(pruned) }
+        }
+        if screen == .compare, tray.isEmpty { screen = .grid }
+        if hideUncovered { updateCoverage() }
     }
 
     /// Font Book (or anything else) changed the registry: debounce, then update.
@@ -219,7 +315,9 @@ final class AppModel {
 
     var query: LibraryQuery {
         LibraryQuery(sidebar: sidebar, search: search, showSystemFonts: showSystemFonts,
-                     groupByFamily: groupByFamily, favorites: favorites)
+                     groupByFamily: groupByFamily, favorites: favorites, tags: tags,
+                     smartCollections: smartCollections, sort: sort,
+                     hiddenFaceIDs: hideUncovered ? hiddenFaceIDs : [])
     }
 
     private func refreshItems(counts recount: Bool = false) {
@@ -236,7 +334,7 @@ final class AppModel {
     var actionFaces: [FontFace] {
         switch screen {
         case .detail(let name): return families.first { $0.name == name }?.faces ?? []
-        case .compare: return compareFaceIDs.compactMap { id in faces.first { $0.id == id } }
+        case .compare: return trayFaces
         case .grid:
             // A selected family card acts on the whole family; an ungrouped card on its face.
             return selectedItems.flatMap { groupByFamily ? $0.family.faces : $0.faces }
@@ -246,13 +344,15 @@ final class AppModel {
     var actionFamilies: [String] {
         switch screen {
         case .detail(let name): return [name]
-        case .compare: return Array(NSOrderedSet(array: compareFaceIDs.compactMap { id in faces.first { $0.id == id }?.familyName })) as? [String] ?? []
+        case .compare: return Array(NSOrderedSet(array: trayFaces.map(\.familyName))) as? [String] ?? []
         case .grid: return Array(NSOrderedSet(array: selectedItems.map(\.family.name))) as? [String] ?? []
         }
     }
 
-    func family(named name: String) -> FontFamily? { families.first { $0.name == name } }
-    func face(id: String) -> FontFace? { faces.first { $0.id == id } }
+    func family(named name: String) -> FontFamily? { familyIndex[name] }
+    func face(id: String) -> FontFace? { faceIndex[id] }
+    @ObservationIgnored private var familyIndex: [String: FontFamily] = [:]
+    @ObservationIgnored private var faceIndex: [String: FontFace] = [:]
 
     func lockReason(for face: FontFace) -> LockReason? {
         ActivationPlanner.lockReason(for: face, testRoot: environment.testFontsDirectory,
@@ -274,15 +374,29 @@ final class AppModel {
         screen = .detail(family: item.family.name)
     }
 
+    /// Opens a family's page from compare (or anywhere a face is known).
+    func openDetail(face: FontFace) {
+        detailFaceID = face.id
+        screen = .detail(family: face.familyName)
+    }
+
+    /// ⌘K: add the selection to the tray (if any) and show the tray side by side.
     func openCompare() {
-        let chosen = selectedItems.prefix(8).map(\.representative.id)
-        guard chosen.count >= 2 else { return }
-        compareFaceIDs = chosen
+        if screen == .grid, !selectedItems.isEmpty {
+            var updated = tray
+            for item in selectedItems where !updated.containsAny(cardFaceIDs(item)) { updated.add(item.representative.id) }
+            if updated != tray { setTray(updated, actionName: "Add to Compare") }
+        }
+        guard !tray.isEmpty else { return }
         screen = .compare
     }
 
-    var canCompare: Bool { screen == .grid && selection.count >= 2 }
-    var compareIsCapped: Bool { selection.count > 8 }
+    var canCompare: Bool { !tray.isEmpty || (screen == .grid && !selection.isEmpty) }
+
+    /// The toolbar's tray button: show the tray, or go back if it's showing.
+    func toggleTrayScreen() {
+        if screen == .compare { goBack() } else if !tray.isEmpty { screen = .compare }
+    }
 
     func goBack() {
         screen = .grid
@@ -290,6 +404,322 @@ final class AppModel {
     }
 
     func selectAll() { selection = Set(items.map(\.id)) }
+
+    // MARK: Compare tray
+
+    var trayFaces: [FontFace] { tray.faceIDs.compactMap(face(id:)) }
+
+    /// The faces a card stands for in the tray: the whole family (grouped) or its one face.
+    func cardFaceIDs(_ item: GridEntry) -> [String] {
+        (groupByFamily ? item.family.faces : item.faces).map(\.id)
+    }
+
+    func isInTray(_ item: GridEntry) -> Bool { tray.containsAny(cardFaceIDs(item)) }
+
+    func toggleTray(_ item: GridEntry) {
+        var updated = tray
+        updated.toggle(cardFaceIDs: cardFaceIDs(item), representative: item.representative.id)
+        setTray(updated, actionName: updated.count > tray.count ? "Add to Compare" : "Remove from Compare")
+    }
+
+    /// Return in the grid or list: collect the selection (or take it out if it's all in).
+    func toggleTraySelection() {
+        let cards = selectedItems.map { (faceIDs: cardFaceIDs($0), representative: $0.representative.id) }
+        guard !cards.isEmpty else { return }
+        var updated = tray
+        updated.toggle(cards: cards)
+        setTray(updated, actionName: updated.count >= tray.count ? "Add to Compare" : "Remove from Compare")
+    }
+
+    var selectionIsInTray: Bool { !selectedItems.isEmpty && selectedItems.allSatisfy(isInTray) }
+
+    func removeFromTray(_ ids: [String]) {
+        var updated = tray
+        updated.remove(ids)
+        setTray(updated, actionName: "Remove from Compare")
+    }
+
+    func replaceInTray(_ old: String, with new: String) {
+        var updated = tray
+        updated.replace(old, with: new)
+        setTray(updated, actionName: "Change Style")
+    }
+
+    func moveInTray(from source: IndexSet, to destination: Int) {
+        var updated = tray
+        updated.move(from: source, to: destination)
+        setTray(updated, actionName: "Move")
+    }
+
+    func clearTray() {
+        guard !tray.isEmpty else { return }
+        setTray(CompareTray(), actionName: "Clear Compare")
+    }
+
+    func setTray(_ value: CompareTray, actionName: String? = nil) {
+        let previous = tray
+        guard value != previous else { return }
+        tray = value
+        persist(value.faceIDs, "compareTray")
+        if screen == .compare, value.isEmpty { goBack() }
+        if let actionName {
+            undoManager?.registerUndo(withTarget: self) { model in
+                MainActor.assumeIsolated { model.setTray(previous, actionName: actionName) }
+            }
+            undoManager?.setActionName(actionName)
+        }
+    }
+
+    // MARK: Tags and smart collections
+
+    /// The sidebar title for an item (smart collections have names).
+    func title(for item: SidebarItem) -> String {
+        if case .smart(let id) = item { return smartCollections.first { $0.id == id }?.name ?? item.title }
+        return item.title
+    }
+
+    func toggleTag(_ name: String, families names: [String]) {
+        guard !names.isEmpty else { return }
+        var updated = tags
+        if tags.membership(name, families: names) == .all {
+            updated.detach(name, from: names)
+            updateCollections(tags: updated, actionName: "Remove Tag")
+        } else {
+            updated.attach(name, to: names)
+            updateCollections(tags: updated, actionName: "Add Tag")
+        }
+    }
+
+    func attachTag(_ name: String, families names: [String]) {
+        var updated = tags
+        updated.attach(name, to: names)
+        updateCollections(tags: updated, actionName: "Add Tag")
+    }
+
+    /// New tag, attached to `families` (the selection) if any. Returns the tag's name.
+    @discardableResult
+    func createTag(_ name: String, families names: [String] = []) -> String? {
+        var updated = tags
+        guard let tag = updated.create(name) else { return nil }
+        if !names.isEmpty { updated.attach(tag, to: names) }
+        updateCollections(tags: updated, actionName: "New Tag")
+        return tag
+    }
+
+    func renameTag(_ old: String, to new: String) -> Bool {
+        var updated = tags
+        guard updated.rename(old, to: new) else { return false }
+        let newName = TagLibrary.normalize(new)
+        let smart = smartCollections.map { collection -> SmartCollection in
+            var collection = collection
+            if collection.rules.tag == old { collection.rules.tag = newName }
+            return collection
+        }
+        updateCollections(tags: updated, smart: smart, actionName: "Rename Tag")
+        if sidebar == .tag(old) { sidebar = .tag(newName) }
+        return true
+    }
+
+    func deleteTag(_ name: String) {
+        var updated = tags
+        updated.delete(name)
+        let smart = smartCollections.map { collection -> SmartCollection in
+            var collection = collection
+            if collection.rules.tag == name { collection.rules.tag = nil }
+            return collection
+        }
+        if sidebar == .tag(name) { sidebar = .all }
+        updateCollections(tags: updated, smart: smart, actionName: "Delete Tag")
+    }
+
+    func saveSmartCollection(_ collection: SmartCollection) {
+        var updated = smartCollections
+        if let index = updated.firstIndex(where: { $0.id == collection.id }) {
+            updated[index] = collection
+        } else {
+            updated.append(collection)
+        }
+        updateCollections(smart: updated, actionName: "Smart Collection")
+        sidebar = .smart(collection.id)
+        refreshItems(counts: true)
+    }
+
+    func deleteSmartCollection(_ id: UUID) {
+        if sidebar == .smart(id) { sidebar = .all }
+        updateCollections(smart: smartCollections.filter { $0.id != id }, actionName: "Delete Smart Collection")
+    }
+
+    /// A smart collection from the current sidebar item and search (File ▸ New Smart Collection).
+    func newSmartCollection() {
+        let base = sidebar == .all && search.isEmpty ? "New Smart Collection" : (search.isEmpty ? title(for: sidebar) : "“\(search)”")
+        var name = base
+        var number = 2
+        while smartCollections.contains(where: { $0.name == name }) { name = "\(base) \(number)"; number += 1 }
+        sheet = .smartCollection(SmartCollection(name: name, rules: SmartRules(sidebar: sidebar, search: search)), isNew: true)
+    }
+
+    /// How many families a set of rules matches (live count in the editor).
+    func matchCount(_ rules: SmartRules) -> Int {
+        let probe = SmartCollection(name: "", rules: rules)
+        var query = query
+        query.sidebar = .smart(probe.id)
+        query.search = ""
+        query.hiddenFaceIDs = []
+        query.groupByFamily = true
+        query.smartCollections = [probe]
+        return LibraryFilter.items(in: families, query: query).count
+    }
+
+    private func updateCollections(tags newTags: TagLibrary? = nil, smart newSmart: [SmartCollection]? = nil, actionName: String) {
+        let previousTags = tags, previousSmart = smartCollections
+        if let newTags { tags = newTags }
+        if let newSmart { smartCollections = newSmart }
+        guard tags != previousTags || smartCollections != previousSmart else { return }
+        do {
+            try collectionsStore.save(CollectionsStore.Contents(tags: tags, smartCollections: smartCollections))
+        } catch {
+            notice = Notice(title: "Couldn't save tags", message: "\(error.localizedDescription) Check that \(environment.dataDirectory.path) is writable.")
+        }
+        if case .tag(let name) = sidebar, tags.tags[name] == nil { sidebar = .all }
+        if case .smart(let id) = sidebar, !smartCollections.contains(where: { $0.id == id }) { sidebar = .all }
+        refreshItems(counts: true)
+        undoManager?.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { model.updateCollections(tags: previousTags, smart: previousSmart, actionName: actionName) }
+        }
+        undoManager?.setActionName(actionName)
+    }
+
+    // MARK: Coverage
+
+    /// Recomputes which faces can't show the preview text, in the background.
+    func updateCoverage() {
+        coverageTask?.cancel()
+        guard hideUncovered, let text = PreviewText.coverageText(previewText) else {
+            isCheckingCoverage = false
+            if !hiddenFaceIDs.isEmpty { hiddenFaceIDs = [] }
+            refreshItems()
+            return
+        }
+        let targets = faces.map { (id: $0.id, postScriptName: $0.postScriptName, path: $0.path, isEnabled: $0.isEnabled) }
+        let copies = environment.stressCopies
+        isCheckingCoverage = true
+        coverageTask = Task {
+            // Debounce typing.
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            let hidden = await Task.detached(priority: .userInitiated) { () -> Set<String>? in
+                var hidden = Set<String>()
+                for target in targets {
+                    if Task.isCancelled { return nil }
+                    let covered = autoreleasepool { () -> Bool in
+                        guard let font = FontLoader.makeFont(postScriptName: target.postScriptName, path: target.path,
+                                                             isEnabled: target.isEnabled, size: 12) else { return false }
+                        return PreviewText.covers(text) { units in
+                            var glyphs = [CGGlyph](repeating: 0, count: units.count)
+                            return CTFontGetGlyphsForCharacters(font, units, &glyphs, units.count)
+                        }
+                    }
+                    if !covered {
+                        hidden.insert(target.id)
+                        for copy in stride(from: 2, through: copies, by: 1) { hidden.insert("\(target.id)#\(copy)") }
+                    }
+                }
+                return hidden
+            }.value
+            guard let hidden, !Task.isCancelled else { return }
+            isCheckingCoverage = false
+            hiddenFaceIDs = hidden
+            refreshItems()
+        }
+    }
+
+    // MARK: Adding fonts
+
+    /// Where "Add Fonts…" copies files: `~/Library/Fonts`, or (test mode) a folder inside the
+    /// test folder, so tests never install anything for real.
+    var installFolder: URL {
+        if let override = ProcessInfo.processInfo.environment["SPECIMEN_INSTALL_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        if let test = environment.testFontsDirectory { return test.appendingPathComponent("Added", isDirectory: true) }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Fonts", isDirectory: true)
+    }
+
+    func chooseFontsToAdd() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = true
+        panel.allowedContentTypes = [.font]
+        panel.prompt = "Add"
+        panel.message = "Choose font files or folders to add to \(installFolder.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))."
+        guard panel.runModal() == .OK else { return }
+        addFonts(panel.urls)
+    }
+
+    /// Copies fonts into the install folder (skipping exact copies and name clashes), then
+    /// selects them. In test mode the copies are registered for the session only.
+    func addFonts(_ urls: [URL]) {
+        let fileManager = FileManager.default
+        let files = InstallPlan.fontFiles(in: urls, isDirectory: { url in
+            var isDirectory: ObjCBool = false
+            return fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        }, contents: { (try? fileManager.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil)) ?? [] })
+        let folder = installFolder
+        guard !files.isEmpty else {
+            notice = Notice(title: "No fonts to add", message: "Choose .otf, .ttf, .ttc, .otc or .dfont files, or folders that contain them.")
+            return
+        }
+        let plan = InstallPlan.make(
+            files: files, into: folder, installed: Set(faces.filter(\.isEnabled).map(\.postScriptName)),
+            names: { url in
+                let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor] ?? []
+                let names = descriptors.compactMap { CTFontDescriptorCopyAttribute($0, kCTFontNameAttribute) as? String }
+                return names.isEmpty ? nil : names
+            },
+            exists: { fileManager.fileExists(atPath: $0.path) },
+            sameFile: { fileManager.contentsEqual(atPath: $0.path, andPath: $1.path) }
+        )
+        var added: [String] = []
+        var copied: [URL] = []
+        var problems: [(file: String, reason: String)] = []
+        for item in plan.items {
+            let name = item.source.lastPathComponent
+            switch item.outcome {
+            case .copy(let destination):
+                do {
+                    try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+                    try fileManager.copyItem(at: item.source, to: destination)
+                    copied.append(destination)
+                    added.append(contentsOf: item.postScriptNames)
+                } catch {
+                    problems.append((name, error.localizedDescription))
+                }
+            case .alreadyInstalled: problems.append((name, "Already added."))
+            case .nameInUse(let postScriptName): problems.append((name, "A font named \(postScriptName) is already installed."))
+            case .unreadable: problems.append((name, "Not a font macOS can read. It may be damaged."))
+            }
+        }
+        if environment.isTestMode, !copied.isEmpty {
+            testFontURLs.append(contentsOf: copied)
+            TestFonts.register(copied)
+        }
+        let addedNames = Set(added)
+        Task {
+            // The registry notices new files on its own; re-list now and select them.
+            try? await Task.sleep(for: .milliseconds(600))
+            await refreshFromSystem()
+            if !addedNames.isEmpty {
+                sidebar = .all
+                search = ""
+                let ids = items.filter { $0.faces.contains { addedNames.contains($0.postScriptName) } }.map(\.id)
+                selection = Set(ids)
+                focusGridRequest += 1
+            }
+        }
+        if !problems.isEmpty || added.isEmpty {
+            sheet = .install(InstallReport(added: added, problems: problems, folder: folder.path))
+        }
+    }
 
     // MARK: Preview
 

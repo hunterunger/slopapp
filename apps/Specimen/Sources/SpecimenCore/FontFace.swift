@@ -25,13 +25,16 @@ public struct FontFace: Codable, Hashable, Sendable, Identifiable {
     public var coversBasicLatin: Bool
     public var hasColorGlyphs: Bool
     public var fileModified: Date?
+    /// Manufacturer (foundry) and version from the font's name table, when it has them.
+    public var foundry: String?
+    public var version: String?
 
     public init(
         postScriptName: String, familyName: String, displayFamilyName: String? = nil, styleName: String,
         fullName: String? = nil, path: String?, isEnabled: Bool = true, weight: Double = 0, width: Double = 0,
         slant: Double = 0, isItalic: Bool = false, isVariable: Bool = false, axes: [VariationAxis] = [],
         format: String = "OpenType", category: FontCategory = .other, coversBasicLatin: Bool = true,
-        hasColorGlyphs: Bool = false, fileModified: Date? = nil
+        hasColorGlyphs: Bool = false, fileModified: Date? = nil, foundry: String? = nil, version: String? = nil
     ) {
         self.id = FontFace.makeID(postScriptName: postScriptName, path: path)
         self.postScriptName = postScriptName
@@ -52,6 +55,8 @@ public struct FontFace: Codable, Hashable, Sendable, Identifiable {
         self.coversBasicLatin = coversBasicLatin
         self.hasColorGlyphs = hasColorGlyphs
         self.fileModified = fileModified
+        self.foundry = foundry
+        self.version = version
     }
 
     public static func makeID(postScriptName: String, path: String?) -> String {
@@ -61,6 +66,18 @@ public struct FontFace: Codable, Hashable, Sendable, Identifiable {
     public var location: FontLocation { FontLocation(path: path) }
 
     /// How far this face is from a plain Regular: used to pick a family's representative.
+    /// CSS-style weight (100...900) from CoreText's -1...1 weight trait.
+    public var cssWeight: Int {
+        FontFace.cssWeight(fromTrait: weight)
+    }
+
+    /// Maps CoreText's weight trait to the nearest CSS weight. CoreText's table: 100 -0.8,
+    /// 200 -0.6, 300 -0.4, 400 0, 500 0.23, 600 0.3, 700 0.4, 800 0.56, 900 0.62.
+    public static func cssWeight(fromTrait trait: Double) -> Int {
+        let table: [(Double, Int)] = [(-0.8, 100), (-0.6, 200), (-0.4, 300), (0, 400), (0.23, 500), (0.3, 600), (0.4, 700), (0.56, 800), (0.62, 900)]
+        return table.min { abs($0.0 - trait) < abs($1.0 - trait) }?.1 ?? 400
+    }
+
     public var distanceFromRegular: Double {
         abs(weight) * 4 + abs(width) * 2 + (isItalic || abs(slant) > 0.01 ? 3 : 0)
     }

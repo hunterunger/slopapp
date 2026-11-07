@@ -16,9 +16,9 @@ struct MainView: View {
         } detail: {
             VStack(spacing: 0) {
                 previewBar
-                Divider()
+                Hairline()
                 ZStack {
-                    gridArea
+                    libraryArea
                         .opacity(model.screen == .grid ? 1 : 0)
                         .allowsHitTesting(model.screen == .grid)
                         .accessibilityHidden(model.screen != .grid)
@@ -59,11 +59,21 @@ struct MainView: View {
         .sheet(item: $model.pending) { pending in
             ActivationPrompt(model: model, pending: pending)
         }
+        .sheet(item: $model.sheet) { sheet in
+            LibrarySheetView(model: model, sheet: sheet)
+        }
+        // Font files dropped anywhere on the window are added (File ▸ Add Fonts…).
+        .dropDestination(for: URL.self) { urls, _ in
+            let fonts = urls.filter { $0.isFileURL }
+            guard !fonts.isEmpty else { return false }
+            model.addFonts(fonts)
+            return true
+        }
     }
 
     private var navigationTitle: String {
         switch model.screen {
-        case .grid: model.sidebar.title
+        case .grid: model.title(for: model.sidebar)
         case .detail(let family): model.family(named: family)?.displayName ?? family
         case .compare: "Compare"
         }
@@ -76,12 +86,14 @@ struct MainView: View {
         return "\(count.formatted()) \(noun)"
     }
 
-    @ViewBuilder private var gridArea: some View {
+    @ViewBuilder private var libraryArea: some View {
         if !model.hasLoaded {
             ProgressView("Loading fonts…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.items.isEmpty {
             emptyState
+        } else if model.viewMode == .list {
+            FontListView(model: model)
         } else {
             FontGrid(model: model)
         }
@@ -92,9 +104,25 @@ struct MainView: View {
             ContentUnavailableView {
                 Label("No fonts match “\(model.search)”", systemImage: "magnifyingglass")
             } description: {
-                Text(model.sidebar == .all ? "Try another name or style." : "Searching in \(model.sidebar.title). Try All Fonts.")
+                Text(model.sidebar == .all ? "Try another name or style." : "Searching in \(model.title(for: model.sidebar)). Try All Fonts.")
             } actions: {
                 Button("Clear Search") { model.search = "" }
+            }
+        } else if model.hideUncovered, model.isCheckingCoverage || PreviewText.coverageText(model.previewText) != nil {
+            ContentUnavailableView {
+                Label("No fonts can show this text", systemImage: "character.cursor.ibeam")
+            } description: {
+                Text("Every font here is missing at least one of its characters.")
+            } actions: {
+                Button("Show All Fonts Anyway") { model.hideUncovered = false }
+            }
+        } else if case .tag(let name) = model.sidebar {
+            ContentUnavailableView {
+                Label("Nothing tagged “\(name)”", systemImage: "tag")
+            } description: {
+                Text("Select fonts and press ⌘T, or drag them onto the tag in the sidebar.")
+            } actions: {
+                Button("Show All Fonts") { model.sidebar = .all }
             }
         } else if model.sidebar == .favorites {
             ContentUnavailableView {
@@ -108,7 +136,7 @@ struct MainView: View {
             ContentUnavailableView {
                 Label("No fonts here", systemImage: model.sidebar.systemImage)
             } description: {
-                Text(model.showSystemFonts ? "Nothing in \(model.sidebar.title) right now." : "Nothing in \(model.sidebar.title). macOS fonts are hidden.")
+                Text(model.showSystemFonts ? "Nothing in \(model.title(for: model.sidebar)) right now." : "Nothing in \(model.title(for: model.sidebar)). macOS fonts are hidden.")
             } actions: {
                 if model.showSystemFonts {
                     Button("Show All Fonts") { model.sidebar = .all }
@@ -143,7 +171,18 @@ struct MainView: View {
             .fixedSize()
             .accessibilityLabel("Preview Text Presets")
             .help("Preview text presets")
-            Divider().frame(height: 16).padding(.horizontal, Spacing.xs)
+            Toggle(isOn: $model.hideUncovered) {
+                Label("Hide Fonts That Can’t Show This Text", systemImage: "eye.slash")
+            }
+            .toggleStyle(.button)
+            .labelStyle(.iconOnly)
+            .help(model.hideUncovered ? "Showing only fonts that have every character of your text. Click to show all." : "Hide fonts that can’t show every character of your text")
+            .accessibilityLabel("Hide Fonts That Can’t Show This Text")
+            if model.isCheckingCoverage {
+                ProgressView().controlSize(.small)
+                    .accessibilityLabel("Checking which fonts can show the text")
+            }
+            Hairline(axis: .vertical).frame(height: 16).padding(.horizontal, Spacing.xs)
             Image(systemName: "textformat.size.smaller")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
@@ -175,18 +214,55 @@ struct MainView: View {
             }
             .help("Back to all fonts (Esc)")
             .keyboardShortcut(model.screen == .grid ? nil : KeyboardShortcut.cancelAction)
+            // Always there (disabled on the grid, like Finder's): on macOS 26 a toolbar item
+            // faded to 0 still draws its empty glass bubble, and adding it on demand would
+            // shift the title when a page opens.
             .disabled(model.screen == .grid)
-            .opacity(model.screen == .grid ? 0 : 1)
-            .accessibilityHidden(model.screen == .grid)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Picker("View", selection: $model.viewMode) {
+                ForEach(ViewMode.allCases) { mode in
+                    Label(mode.title, systemImage: mode.systemImage).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelStyle(.iconOnly)
+            .help("Show fonts as a grid (⌘1) or a list (⌘2)")
+            .accessibilityLabel("View")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            // Text and checkmarks only (Golden Gate menus), the same items as View ▸ Sort By.
+            Menu {
+                ForEach(LibrarySort.Key.allCases) { key in
+                    Toggle(key.title, isOn: Binding(get: { model.sort.key == key }, set: { _ in model.sort = model.sort.choosing(key) }))
+                }
+                Divider()
+                Toggle("Ascending", isOn: Binding(get: { model.sort.ascending }, set: { model.sort = LibrarySort(key: model.sort.key, ascending: $0) }))
+                Toggle("Descending", isOn: Binding(get: { !model.sort.ascending }, set: { model.sort = LibrarySort(key: model.sort.key, ascending: !$0) }))
+            } label: {
+                Label("Sort By", systemImage: "arrow.up.arrow.down")
+            }
+            .menuIndicator(.hidden)
+            .help("Sort by \(model.sort.key.title.lowercased())")
+            .accessibilityLabel("Sort By")
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
-                model.openCompare()
+                model.toggleTrayScreen()
             } label: {
-                Label("Compare", systemImage: "rectangle.split.1x2")
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: model.screen == .compare ? "rectangle.stack.fill" : "rectangle.stack")
+                    Text("\(model.tray.count)").monospacedDigit()
+                }
+                .accessibilityHidden(true)
             }
-            .help(model.compareIsCapped ? "Compare the first 8 selected fonts (⌘K)" : "Compare the selected fonts (⌘K)")
-            .disabled(!model.canCompare)
+            .help(model.tray.isEmpty ? "Compare: collect fonts with Return or the ⊕ on a card" : "Compare \(model.tray.count) fonts side by side (⌘K)")
+            .accessibilityLabel("Compare, \(model.tray.count) fonts")
+            .disabled(model.tray.isEmpty && model.screen != .compare)
+            .contextMenu {
+                Button("Clear Compare") { model.clearTray() }
+                    .disabled(model.tray.isEmpty)
+            }
         }
     }
 }
@@ -195,9 +271,28 @@ struct Sidebar: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        List(selection: Binding(get: { model.sidebar }, set: { if let value = $0 { model.sidebar = value } })) {
+        List(selection: Binding(get: { model.sidebar }, set: { if let value = $0 { model.sidebar = value; model.screen = .grid } })) {
             Section("Library") {
                 ForEach(SidebarItem.libraryItems, id: \.self, content: row)
+            }
+            Section {
+                ForEach(model.tags.names, id: \.self) { name in
+                    tagRow(name)
+                }
+            } header: {
+                sectionHeader("Tags", add: "New Tag (⌘N)") { model.sheet = .newTag }
+            }
+            Section {
+                ForEach(model.smartCollections) { collection in
+                    row(.smart(collection.id))
+                        .help(collection.rules.summary)
+                        .contextMenu {
+                            Button("Edit Smart Collection…") { model.sheet = .smartCollection(collection, isNew: false) }
+                            Button("Delete Smart Collection") { model.deleteSmartCollection(collection.id) }
+                        }
+                }
+            } header: {
+                sectionHeader("Smart Collections", add: "New Smart Collection from the current filters (⌥⌘N)") { model.newSmartCollection() }
             }
             Section("Categories") {
                 ForEach(SidebarItem.categoryItems, id: \.self, content: row)
@@ -219,11 +314,55 @@ struct Sidebar: View {
         }
     }
 
+    private func sectionHeader(_ title: String, add help: String, action: @escaping () -> Void) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Button(action: action) {
+                Image(systemName: "plus")
+            }
+            .buttonStyle(.borderless)
+            .help(help)
+            .accessibilityLabel(title == "Tags" ? "New Tag" : "New Smart Collection")
+            // Section headers run 16 pt further right than the rows' count badges: pull the
+            // + in so its right edge lines up with the counts below it.
+            .padding(.trailing, Spacing.l)
+        }
+    }
+
+    private func tagRow(_ name: String) -> some View {
+        row(.tag(name))
+            .contextMenu {
+                let families = model.actionFamilies
+                if !families.isEmpty {
+                    let membership = model.tags.membership(name, families: families)
+                    Button(membership == .all ? "Remove from Selected Fonts" : "Add to Selected Fonts") {
+                        model.toggleTag(name, families: families)
+                    }
+                    Divider()
+                }
+                Button("Rename Tag…") { model.sheet = .renameTag(name) }
+                Button("New Smart Collection with This Tag") {
+                    model.sheet = .smartCollection(SmartCollection(name: name, rules: SmartRules(tag: name)), isNew: true)
+                }
+                Divider()
+                Button("Delete Tag") { model.deleteTag(name) }
+            }
+            // Drag cards from the grid onto a tag to tag them.
+            .dropDestination(for: String.self) { names, _ in
+                let families = names.flatMap { $0.split(separator: "\n").map(String.init) }.filter { model.family(named: $0) != nil }
+                guard !families.isEmpty else { return false }
+                model.attachTag(name, families: families)
+                return true
+            }
+    }
+
     private func row(_ item: SidebarItem) -> some View {
-        Label(item.title, systemImage: item.systemImage)
+        let title = model.title(for: item)
+        return Label(title, systemImage: item.systemImage)
             .badge(model.counts[item] ?? 0)
             .tag(item)
-            .accessibilityLabel("\(item.title), \(model.counts[item] ?? 0)")
+            .accessibilityLabel("\(title), \(model.counts[item] ?? 0)")
     }
 }
 

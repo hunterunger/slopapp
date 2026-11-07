@@ -10,11 +10,30 @@ struct ContextMenuBuilder {
     func menu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(ClosureMenuItem("Show Details", key: "") { model.openDetail() })
+        menu.addItem(ClosureMenuItem(model.selectionIsInTray ? "Remove from Compare" : "Add to Compare", key: "") { model.toggleTraySelection() })
         let compare = ClosureMenuItem("Compare", key: "k") { model.openCompare() }
         compare.isEnabled = model.canCompare
         menu.addItem(compare)
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem(model.allActionFamiliesAreFavorites ? "Remove from Favorites" : "Add to Favorites", key: "d") { model.toggleFavorite() })
+        let tagsItem = NSMenuItem(title: "Tags", action: nil, keyEquivalent: "")
+        let tagsMenu = NSMenu()
+        let families = model.actionFamilies
+        for tag in model.tags.names {
+            let item = ClosureMenuItem(tag, key: "") { model.toggleTag(tag, families: families) }
+            switch model.tags.membership(tag, families: families) {
+            case .all: item.state = .on
+            case .some: item.state = .mixed
+            case .none: item.state = .off
+            }
+            tagsMenu.addItem(item)
+        }
+        if !model.tags.isEmpty { tagsMenu.addItem(.separator()) }
+        tagsMenu.addItem(ClosureMenuItem("New Tag…", key: "") { model.sheet = .newTag })
+        tagsMenu.addItem(ClosureMenuItem("Edit Tags…", key: "t") { model.sheet = .tags })
+        tagsMenu.autoenablesItems = false
+        tagsItem.submenu = tagsMenu
+        menu.addItem(tagsItem)
         let category = NSMenuItem(title: "Category", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         let names = model.actionFamilies
@@ -69,15 +88,17 @@ struct PreviewLine: NSViewRepresentable {
     var text: String
     var size: CGFloat
     var allowSample = true
+    var variation: [Int: Double] = [:]
+    var centered = false
 
     func makeNSView(context: Context) -> PreviewLineView { PreviewLineView() }
 
     func updateNSView(_ view: PreviewLineView, context: Context) {
-        view.configure(face: face, text: text, size: size, allowSample: allowSample)
+        view.configure(face: face, text: text, size: size, allowSample: allowSample, variation: variation, centered: centered)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: PreviewLineView, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? 400, height: FontCardView.previewHeight(for: size))
+        CGSize(width: proposal.width ?? 400, height: PreviewMetrics.height(for: size))
     }
 }
 
@@ -86,15 +107,26 @@ final class PreviewLineView: NSView {
     private var text = ""
     private var size: CGFloat = 36
     private var allowSample = true
+    private var variation: [Int: Double] = [:]
+    private var centered = false
 
     override var isFlipped: Bool { true }
 
-    func configure(face: FontFace, text: String, size: CGFloat, allowSample: Bool) {
-        guard face != self.face || text != self.text || size != self.size || allowSample != self.allowSample else { return }
+    /// The cached line is per appearance; repaint when it changes so colours re-resolve.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    func configure(face: FontFace, text: String, size: CGFloat, allowSample: Bool, variation: [Int: Double] = [:], centered: Bool = false) {
+        guard face != self.face || text != self.text || size != self.size || allowSample != self.allowSample
+            || variation != self.variation || centered != self.centered else { return }
         self.face = face
         self.text = text
         self.size = size
         self.allowSample = allowSample
+        self.variation = variation
+        self.centered = centered
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         setAccessibilityLabel("\(PreviewText.line(for: text, familyName: face.displayFamilyName)), in \(face.fullName)")
@@ -104,15 +136,17 @@ final class PreviewLineView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let face, let context = NSGraphicsContext.current?.cgContext else { return }
         let lineText = PreviewText.line(for: text, familyName: face.displayFamilyName)
-        let line = PreviewRenderer.shared.line(for: face, text: lineText, size: size, width: bounds.width, allowSample: allowSample)
+        let line = PreviewRenderer.shared.line(for: face, text: lineText, size: size, width: bounds.width, allowSample: allowSample,
+                                               variation: variation)
         context.saveGState()
         context.clip(to: bounds)
         if line.unavailable {
-            ("Can't preview this font" as NSString).draw(at: NSPoint(x: 0, y: 4), withAttributes: [
-                .font: NSFont.preferredFont(forTextStyle: .body), .foregroundColor: NSColor.tertiaryLabelColor,
+            ("Can't preview this font" as NSString).draw(at: NSPoint(x: 0, y: PreviewMetrics.topPadding), withAttributes: [
+                .font: NSFont.preferredFont(forTextStyle: .body), .foregroundColor: NSColor.secondaryLabelColor,
             ])
         } else {
-            line.draw(in: context, x: 0, baseline: 4 + min(line.ascent, size * 1.05), color: .labelColor)
+            let x = centered && line.width < bounds.width ? (bounds.width - line.width) / 2 : 0
+            line.draw(in: context, x: x, baseline: PreviewMetrics.baseline(for: size), color: .labelColor)
         }
         context.restoreGState()
     }

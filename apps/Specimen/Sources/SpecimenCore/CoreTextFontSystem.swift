@@ -83,8 +83,12 @@ public struct CoreTextFontSystem: FontSystem {
                 defaultValue: (axis[kCTFontVariationAxisDefaultValueKey] as? NSNumber)?.doubleValue ?? 0
             )
         }
+        func name(_ key: CFString) -> String? {
+            (CTFontCopyName(font, key) as String?).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+        }
         return FaceDetails(panose: panose, equalAdvances: equalAdvances, coversBasicLatin: coversLatin,
-                           hasColorGlyphs: hasColor, axes: axes)
+                           hasColorGlyphs: hasColor, axes: axes, foundry: name(kCTFontManufacturerNameKey),
+                           version: name(kCTFontVersionNameKey).map(FontFormat.shortVersion))
     }
 
     public func modificationDate(path: String) -> Date? {
@@ -144,6 +148,15 @@ public enum FontFormat {
         case "": "Font suitcase"
         default: ext.uppercased()
         }
+    }
+
+    /// "Version 1.000;PS 001.000;hotconv" → "1.000".
+    public static func shortVersion(_ raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespaces)
+        if text.lowercased().hasPrefix("version") { text = String(text.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
+        let cut = text.firstIndex { $0 == ";" || $0 == " " } ?? text.endIndex
+        let short = String(text[..<cut])
+        return short.isEmpty ? raw : short
     }
 
     /// The exact format of a loaded font.

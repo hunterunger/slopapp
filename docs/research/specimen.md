@@ -778,6 +778,215 @@ browser, variable-axis sliders, flat tags (owner decision 2), compare tray, Add 
 to `~/Library/Fonts`, drop), List view, sort options, Open With document types, and
 in-place activation from the owner's folders (owner decision 1).
 
+## Parity pass (2026-11-03)
+
+Owner's direction (`docs/parity-pass.md`): look and work much more like Typeface, and don't be
+missing features. **The screen was locked for this whole pass**, so `scripts/drive`
+walkthroughs, `drive tree` and window screenshots weren't possible. UI was checked with a new
+offscreen render hook (`SPECIMEN_SNAPSHOT_DIR`: Specimen draws its *own* window and sheets
+to PNGs in light and dark, then quits), unit tests and test hooks. Typeface's look was
+studied from the official screenshots on typefaceapp.com (grid, list, sidebar, characters,
+variables, body text; downloaded to `/tmp/specimen-parity/`, not committed) and its help
+pages (Quick Collection, list view, tags). Typeface itself was not launched (it opened its
+recovery screen last time); none of the owner's tags or collections were looked at.
+
+### Gap table
+
+| Typeface feature / design item | Before | Now | Notes |
+|---|---|---|---|
+| Card: small status dot + small grey name top-left, member count top-right, big centred preview, airy white tile | headline name, "N styles · category", state icon, star, left-aligned preview | **done** | Filled accent dot = on, hollow = off, half = mixed, small lock = protected. Name in subheadline secondary; count top-right; preview centred; tiles in `controlBackgroundColor` with a hairline. Category moved to VoiceOver/Info only, like the original. |
+| Grid density (~3 columns at 30–36 pt) | 2 columns | **done** | Column minimum 6.5 × size (≥ 210 pt). |
+| Quick Collection: corner collect button, Return collects, toolbar button with count, survives browsing and relaunch, clear | compare used the selection only (2–8) | **done** as the **compare tray** | ⊕ in each card's bottom-right corner (on hover, stays when collected), Return / Enter in grid and list, toolbar button with count (click toggles the tray view; right-click Clear), ⌥⌘K clears, persisted in UserDefaults, undoable. The tray view is the stacked compare (style picker, drag to reorder, details, remove). No 8-font cap. |
+| Space opens details, Return collects | Return/Space both opened | **done** (matches the original) | Space toggles the family page (also closes it); Return collects. Double-click and ⌘↓ still open. |
+| Tags: + button / ⌘N, drag fonts onto a tag, multi-tag panel ⌘T with type-to-filter, Return/Tab, rename, delete | none (v1.1) | **done** (flat) | Sidebar "Tags" section with counts and +; ⌘T panel (filter, ↑/↓, Return toggles or creates, Tab toggles, mixed state for partial selections); ⌘N with "added to the selected fonts"; drag cards onto a tag; right-click Rename / Delete / New Smart Collection with This Tag; Font ▸ Tags submenu and grid/list context menus; undo. Stored in `collections.json`. |
+| Library tags: All, User, System, Activated, … | All, Favorites, Active, Inactive, Variable | **done** | Added **Your Fonts** and **macOS Fonts**. |
+| Collections / smart tags | none | **done** as **Smart Collections** | Rules: name contains, category, state, location, tag, variable only, favourites only, minimum styles; live match count; ⌥⌘N starts from the current sidebar item + search; edit/delete from the sidebar. |
+| Characters tab: Unicode grid by group, search, copy | none | **done** | Groups (letters, numbers, punctuation, symbols, currency, marks, other), search by character, Unicode name or `U+XXXX`, inspector with big glyph, name, code point, HTML entity, Copy buttons, ⌘C. Built off the main thread from `CTFontCopyCharacterSet` (planes with members only, capped at 70k). |
+| Variables tab: slider per axis, sample glyphs along each axis, named instances, Copy CSS | axes listed in Info | **done** | Five sample letters across each axis (click one to jump), slider with min/max, instance picker (faces in the same file), Reset, Copy CSS. Preview at the preview size follows the sliders. |
+| Text tab (body text layouts, waterfall) | waterfall on the one-page detail | **done** (one layout) | Heading + paragraph at a chosen body size (our own sample text) and a 9–96 pt waterfall. Book/magazine/custom layouts deferred. |
+| Detail as tabs (⌘1–⌘7) | one scrolling page | **done** | Segmented tabs Styles · Characters · Text · Variables (variable fonts only) · Info, ⌘1–⌘5 while the page is open; a style picker in the header shared by every tab; header holds favourite, tags, compare and activate. |
+| Info tab incl. tags and a list of every style | info only | **done** | Adds weight, licence, tags with Edit Tags…, and an "All Styles" table (Typeface's second Styles tab). |
+| List view (⌘3 in Typeface) with family rows, disclosure, sortable columns, preview of the selection on top | none | **done** | `Table` with state, name (★ / in-compare marks), styles, weight range, category, format, version, foundry, location, date added; disclosure for styles; column headers sort; preview pane above. ⌘1 Grid / ⌘2 List (we have two views, not three). Foundry and version are now indexed (cache v4). Column hide/reorder: deferred. |
+| Sort options | name only | **done** | Name, Date Added, Number of Styles, Category, Foundry; same key again reverses; View ▸ Sort By, toolbar menu, list headers; persisted. |
+| Hide fonts that can't show the text | none | **done** | Eye toggle in the preview bar and View menu (⇧⌘H). Background check of every face (~60 ms for 666 faces after a 150 ms typing debounce), empty state with "Show All Fonts Anyway". Counts ignore it, like search. |
+| Add Fonts… / drop font files | none | **done** | ⌘O open panel (files or folders) and drop on the window: validates with CoreText, copies into `~/Library/Fonts`, skips exact copies and installed PostScript names, selects the new fonts, sheet lists what was skipped. **Test mode** copies into `<test folder>/Added` and registers for the session only. The real `~/Library/Fonts` path was not exercised (it would install a font on the owner's Mac). |
+| Toolbar: sidebar toggle, collect, "Pr", view switch, size slider, search | sidebar, back, compare, search; preview bar | **partly** | View switch, sort menu and compare-tray count added to the toolbar. Preview text + size stay in a permanent bar under the toolbar (kept from v1: in the toolbar they collapsed into overflow when search expanded). |
+| Activate from watched folders (Typeface's library model) | — | **deferred** (v1.1) | ~1.5 days: locations model, security of `.persistent` registration, FSEvents watching, sidebar "Locations" with subfolders, rescan, and a safe test story. |
+| Temporary activation (orange) | — | deferred | ~0.5 day once locations exist (`.session` scope + clear on quit). |
+| Nested tags (`a/b`), OR/AND/inverse tag logic, tag export/backup | — | deferred | ~0.5 day nesting; ~0.5 day JSON export/import. Reviewers found the OR/AND logic confusing. |
+| OpenType features tab + Typography menu | — | deferred | ~1 day (`CTFontCopyFeatures`, examples per feature). |
+| Overlay compare, Pairing Studio | — | deferred | ~1 day overlay; pairing layouts ~2 days. |
+| Tracking, auto size, alignment, metrics/outline overlays | — | deferred | ~0.5 day each; not needed to choose a font. |
+| Weight/width/x-height/feature/language filters | — | deferred | ~1 day for a filter popover. |
+| List column show/hide/reorder | — | deferred | ~2 h (`TableColumnCustomization`). |
+| Duplicate finder, Move to Trash | — | skipped (owner decision 9) | Destructive. |
+| Google/Adobe sources, auto-activation, Font Switch | — | skipped | Network / per-app automation (see inventory). |
+| PDF specimen / print | — | deferred | ~0.5 day. |
+
+### Deviations from the design system (and why)
+
+- **Return collects into the compare tray** instead of opening (Finder convention): it's the
+  original's keyboard model and the fastest shortlist flow. Space/⌘↓/double-click open.
+- **Hover-revealed card buttons** (star, ⊕): the original's corner collect button. They're
+  never hidden from VoiceOver (alpha 0, still in the tree) and stay visible when they carry
+  state; every action is also in the menus.
+- **State shown as a small accent dot** (filled/hollow/half/lock): shape differs per state
+  and VoiceOver reads it, so colour isn't the only signal.
+- Cards are drawn tiles (`controlBackgroundColor` + separator) rather than plain list
+  rows, as before; only system colours.
+
+### New shared-looking pieces (candidates for SlopKit later)
+
+`MixedCheckboxStyle` (three-state checkbox, `Sheets.swift`) and the offscreen window
+snapshot hook (`Snapshots.swift`; same idea as Convert's and Zones').
+
+### Gates (2026-11-03, parity pass)
+
+- `scripts/check.sh Specimen --perf`: **72 tests** (14 suites) pass; bundle, smoke pass. Perf
+  (final run, load 3.0): launch 133 ms, first window 433 ms, idle CPU 0.056 %, footprint
+  95.6 MB (an earlier run at load 5.4: 131 / 441 ms / 0.067 % / 96.0 MB). All within budget.
+- **Scroll/typing bench** (release, real fonts, 1120×740, `SPECIMEN_BENCH`): scroll p50/p95/max
+  12 pt 8.2/15/21 ms (3 of 54 steps over 16 ms; 4 columns now vs 3), 36 pt 4.6/6.5/8.8 ms,
+  72 pt 2.8/5.4/7.1 ms, 200 pt 3.1/6.4/11 ms. Typing at 36 pt: card draw CPU 2.4 ms per
+  keystroke (max 2.6), keystroke → all 18 visible cards drawn p50 17 ms (the next refresh).
+  Footprint after paging the whole library at four sizes: 194–216 MB; the unchanged v1 build
+  measured 201 MB in the same session (locked screen), so not a regression from this pass.
+- **Coverage filter:** 199–256 ms from toggle to result for 668 faces (150 ms of it is the
+  typing debounce).
+- **Offscreen renders** (release bundle, test mode, light + dark), looked at:
+  `/tmp/specimen-parity/shots/` — `grid`, `grid-tag`, `grid-coverage`, `list`,
+  `detail-styles`, `detail-characters`, `detail-text`, `detail-variables` (Skia),
+  `detail-info`, `compare`, `sheet-tags`, `sheet-smart`, `sheet-install`, each
+  `-light.png` / `-dark.png`. Add Fonts success path: `/tmp/specimen-parity/shots-add/`
+  (`SPECIMEN_SNAPSHOT_ADD` copied Silkscreen into the test folder's `Added/`, registered it
+  for the session, selected it; cleaned up on quit — `specimen-fixture status` showed it
+  unregistered afterwards).
+- Fixed from the renders: two columns → three; Smart Collection sheet clipped its toggles;
+  narrow axes (Skia 0.5–3.2) showed "1" (now two decimals); list "State" header truncated;
+  the snapshot run hung on quit while a sheet was closing (left the test font registered
+  until `specimen-fixture clean`).
+- **Owed on-screen checks** (need an unlocked screen): `scripts/drive tree` for
+  `[unlabeled]` controls in the grid, list, every detail tab, compare and the four sheets;
+  hover reveal of the card star/⊕ and clicking them; Return/Space in the grid **and in the
+  list** (Table may eat Return before `.onKeyPress`); drag a card onto a sidebar tag; drag to
+  reorder in compare; ⌘1/⌘2 vs ⌘1–⌘5 menu switching; ⌘T panel keyboard (↑/↓/Tab/Return);
+  ⌘C in the Characters tab; the open panel (⌘O) and dropping files on the window; Space not
+  closing the page while typing in a field; list context menu acting on the right-clicked
+  rows.
+
 ## Blind test log
 
 One section per round, newest last. See docs/dev-cycle.md step 5.
+
+## Polish pass (2026-11-05)
+
+Brief: `docs/polish-pass.md` (detail rules, §10 items 15–26). Release build, test mode
+(`SPECIMEN_DATA_DIR` scratch folders under `/tmp/specimen-test/`, `SPECIMEN_TEST_FONTS=/tmp/specimen-test`),
+`SLOP_APPEARANCE=light|dark`. The owner's `app.slopapp.specimen` defaults were exported first and
+re-imported at the end (verified identical); no tags, collections or fonts of theirs were
+touched, nothing was activated or installed. No real-mouse actions, no global keys, no
+clipboard writes (Copy buttons were not pressed). Surfaces were shot two ways: real windows
+with `scripts/drive shot` (chrome, materials, sidebar) and the app's offscreen
+`SPECIMEN_SNAPSHOT_DIR` walk (every tab and sheet, light + dark).
+
+### Defects found and fixed (before → after, measured with `scripts/measure`)
+
+| # | Surface | Before | After |
+|---|---|---|---|
+| 1 | Lint | 4 corner-radius literals (style row 8 ×2, glyph cell 3, inspector 8) + 1 spacing literal (toolbar `HStack(spacing: 4)`), and a hidden `xRadius: 8` on the card | `Radius.m` / `Radius.s` / `Spacing.xs` everywhere; `scripts/lint.sh Specimen` clean |
+| 2 | Grid: preview baselines | Baseline = each font's own ascent (clamped): baselines in one row differed by up to **7 pt** (Apple SD Gothic Neo 521 vs Apple Symbols 514 pt), 1.5 pt in calmer rows | One baseline per size for every font (`PreviewMetrics.baseline`: 4 + 0.95 em), shared by cards, style rows, Compare, list preview and axis samples: **0 pt** spread (AppleMyungjo / Arial / Arial Black all 656.5 pt); the remaining 1.5 pt in the Apple SD Gothic Neo row is that font's own Latin design |
+| 3 | Grid: card border | 1.0 pt stroke, inset 1 pt (13 pt visible gap between 12 pt-spaced cards) | One device pixel (0.5 pt) inside the bounds, `Radius.m`; gap 12 pt |
+| 4 | Grid: card insets | Status mark 10 pt from the edge, caption and preview 12, count 10 from the right; name and count on different baselines (drawn at y 5 and 7) | Everything on a 12 pt (`Spacing.m`) inset; header items (mark, name caps, count, star) centred 13 pt from the top, footer items (caption, ⊕) 13 pt from the bottom; name and count share one baseline; ⊕ and star glyph edges on the inset line |
+| 5 | Grid: contrast | Count, "Sample"/"n characters missing" caption, hollow/lock state marks and "Can't preview" in `tertiaryLabelColor`: count measured **1.66:1** on the card | `secondaryLabelColor`: **3.06:1** on thin anti-aliased digits in light (system floor, accepted), **6.29:1** in dark |
+| 6 | Grid: hover | Only the buttons faded in; the name re-truncated (moved) when the star appeared | Hover adds a faint `quaternarySystemFill` tint; the star's slot is always reserved, so the name never moves (seen live with the pointer resting on a card) |
+| 7 | Toolbar | Back hidden with opacity 0: on macOS 26+ its **empty glass bubble** still showed next to the title on the grid | Always present, disabled on the grid (like Finder); title never shifts |
+| 8 | Hairlines | 1 pt `Divider` under the preview bar, in the bar, under the detail header, Characters bar + inspector rule, Variables rows, Compare header, list preview | `Hairline()` / `Hairline(axis: .vertical)` (0.5 pt) |
+| 9 | Styles tab | Style rows' content at 28 pt, family name above at 20 pt; selection ring 1.5 pt | Rows hang their 8 pt padding into the margin: names and previews at **20 pt**, aligned with the header; ring 2 pt like the cards |
+| 10 | Characters grid | Cells `controlBackgroundColor`, invisible on the pane in **both** modes; fixed 56 pt cells centred with leftover margins; selected cell's square fill poked out of a 3 pt rounded stroke; glyphs placed by their line box | Square cells that stretch to fill the row exactly at the 20 pt margins (left edge 20, right edge on the count text above), 4 pt gaps, `Radius.s` tiles in `.fill.quaternary`; selection a solid accent tile with white glyph; glyphs drawn by `GlyphView`: ink centred left–right, cap height centred on a baseline shared by every cell (so "," still sits low and "'" high) |
+| 11 | Character inspector | Big-glyph tile `controlBackgroundColor`: invisible in light and dark; ragged Copy buttons | Visible square `.fill.quaternary` tile with hairline guides for baseline, x-height and cap height; three full-width Copy buttons; empty-group state ("No currency in this style") instead of "No results for ''" |
+| 12 | Text tab waterfall | Size numbers vertically centred: **2 pt** above the sample's baseline at 18 pt, more at larger sizes | Baseline-aligned (`alignmentGuide`): **0 pt** |
+| 13 | Variables tab | Axis tag in `.tertiary`; Copy CSS → Copied changed the button width and moved Reset | `.secondary`; both labels share one fixed slot |
+| 14 | Compare | Rows at 28 pt under a 20 pt header; right buttons 31 pt from the edge; separators from 28 pt to the window edge | Rows, buttons and separators all on the 20 pt margins |
+| 15 | List view | Preview count `.tertiary`; lock mark accent-blue (grey in the grid); inactive mark `.tertiary` | Secondary, matching the grid; count `.monospacedDigit()` |
+| 16 | Tags sheet | List inset 17 pt inside a 20 pt field edge | Rounded `Radius.m` box with a hairline on the field's edges, row separators off |
+| 17 | Smart Collection sheet | Form sections 40 pt in while title and buttons were at 20 pt; `minHeight: 450` left ~100 pt of dead space | Form, title and buttons share the 20 pt edges; height fits the form |
+| 18 | Info tab | Tag chips 18.5 pt next to a 24 pt Edit Tags… button | 24 pt chips (centres already matched) |
+| 19 | Sidebar | Section "+" glyph 17 pt right of the count badges' right edge (197–206 vs 189 pt) | Right edges aligned (±1 pt) |
+| 20 | Settings | Explanation as a separate grey row under two toggles | Subtitles under their toggle; added one for "Group styles into families" |
+| 21 | New Tag error text | Plain `.red` | `.textRed` |
+
+### Golden Gate + light/dark
+
+- **Sidebar**: the system `NavigationSplitView` sidebar, edge to edge; icons not forced to a
+  colour (they follow the system: grey in background windows). No inset card.
+- **Menus**: all text. The toolbar Sort menu showed a chevron image beside the current key;
+  it's now the same text + checkmark items as View ▸ Sort By (key, Ascending, Descending).
+  Context menus (grid `NSMenu`, list `FontMenuItems`) were already text-only.
+- **Toolbar**: the standard toolbar (back, view switch, sort, compare count, search); the
+  invisible-Back glass bubble is gone (row 7). The preview text bar under it is a content
+  accessory bar (like Mail's filter bar) on the system `.bar` material, not a fake toolbar,
+  and nothing scrolls under it (it's outside the scroll views).
+- **Inactive windows** (new): selections and accent marks go grey when the window isn't the
+  active one. Cards: `unemphasizedSelectedContentBackgroundColor` fill and system-grey ring,
+  grey status dots, stars and ⊕ checkmarks; repainted on key/main changes. SwiftUI: style-row
+  selection, glyph-cell selection, Compare/list/style status dots, list ★/✓ marks, Info tag
+  chips and the tag sheet's checkboxes, via `controlActiveState` (`WindowAccent.swift`).
+  Inactive shots: `real-grid-inactive-dark.png`, and every `after-snap/*` render (offscreen
+  windows are never key).
+- **Live appearance and accent changes**: cards and preview lines repaint on
+  `viewDidChangeEffectiveAppearance`; the cached state-mark bitmaps are cleared and visible
+  cards redrawn on `NSColor.systemColorsDidChangeNotification` (before, a new accent colour
+  left old-colour dots until relaunch). The snapshot walk switches light → dark in one run and
+  every dark render came out right.
+- **Light and dark**: every surface shot in both; no drawn black/white (cards
+  `controlBackgroundColor`, hairlines `separatorColor`, cells `.fill.quaternary`). The two
+  invisible-in-both-modes surfaces (glyph cells, inspector tile) were the main light/dark
+  finding.
+- **Glass**: system materials only.
+
+### Screenshots (`/tmp/slopapp-polish/specimen/`)
+
+- Before: `before/*.png` (offscreen walk, light + dark: grid, grid-tag, grid-coverage, list,
+  detail-styles/characters/text/variables/info, compare, sheet-tags, sheet-smart,
+  sheet-install), `before/real-grid-light.png`, `before/real-settings-light.png`, plus the
+  interrupted run's `before-*.png`.
+- After (final build): `after-snap/*.png` (same set, light + dark), and real windows in
+  `after/`: `real-grid-light.png`, `real-yours-light.png`, `real-grid-inactive-dark.png`,
+  `real-detail-{styles,characters,text,info}-light.png`, `real-list-light.png`,
+  `real-noresults-dark.png`, `real-favorites-empty-dark.png`, `real-settings-dark.png`,
+  `real-stress-list-light.png`, `real-stress-grid-small-light.png` (1,888 families at 9 pt).
+  (`after/*-{light,dark}.png` without `real-` are an intermediate render.)
+
+### Gates
+
+- `scripts/check.sh Specimen --perf`: all pass. 72 tests in 14 suites. Perf (load 5.6, busy
+  machine): launch 135 ms, first window 499 ms, idle CPU 0.058 %, footprint 96.6 MB.
+- Scroll/typing bench (1120×740, real fonts): scroll p50/p95 12 pt 10.1/12.5 ms, 36 pt
+  5.8/8.0, 72 pt 1.8/3.7, 200 pt 1.3/3.4 ms; typing at 36 pt card draw CPU 3.0 ms p50
+  (parity: 2.4 at load 3). Bench footprint after paging the library at four sizes: 453–524 MB
+  vs 194–216 MB in the parity pass: `footprint` shows 203 MB of it is window-server graphics
+  memory ("owned physical footprint (graphics)") that only exists with an unlocked display
+  (the parity numbers were taken with the screen locked); heap (Malloc Small ~96 MB) is in
+  line. Not a budget metric, but worth re-checking on a quiet machine.
+- `scripts/drive tree`: 0 `[unlabeled]` in the grid, list, every detail tab and Settings;
+  close button 16×16 in the main and Settings windows.
+- Lint clean.
+
+### Not done, and why
+
+- **Active-window screenshot** (accent sidebar icons, accent card selection): needs
+  Specimen frontmost; the owner was using the Mac throughout (idle 1–55 s at every check), so
+  I didn't take focus. Every shot is of a background window. Owed.
+- **Hover with the real pointer** wasn't driven (owner present); a hover state was captured
+  incidentally with the owner's pointer resting on a card.
+- **Tag colours** (the brief mentions "tags with colours"): Specimen's tags have no colour
+  attribute; adding one is a feature (model, storage, picker), not polish. Deferred.
+- **Long single-family names**: no installed font has one long enough to test end to end;
+  the card name now truncates against a fixed slot (it can't reflow on hover).
+
+### Shared-looking pieces made in-app
+
+`WindowAccent.swift` (accent/selection colours that grey out in background windows; could
+move to SlopKit as-is; **moved 2026-11-06**: now SlopKit's `WindowState.swift`, the app copy
+is deleted), `GlyphView` + `GlyphMetrics` (optically centred glyph on a shared
+baseline) and `PreviewMetrics` (shared preview baseline) in the app.
