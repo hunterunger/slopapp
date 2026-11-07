@@ -14,8 +14,10 @@ public enum HUD {
         let panel = self.panel ?? makePanel()
         self.panel = panel
         let hosting = NSHostingView(rootView: HUDView(message: message, systemImage: systemImage))
-        panel.contentView = FloatingPanel.materialView(wrapping: hosting, cornerRadius: 14)
         let size = hosting.fittingSize
+        // A capsule: the radius is half the height, so the ends are concentric with the
+        // symbol and text whatever the Dynamic Type size.
+        panel.contentView = FloatingPanel.materialView(wrapping: hosting, cornerRadius: HUD.cornerRadius(height: size.height))
         let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main
         let visible = screen?.visibleFrame ?? .zero
         panel.setFrame(CGRect(x: visible.midX - size.width / 2, y: visible.minY + visible.height * 0.12,
@@ -37,6 +39,9 @@ public enum HUD {
             panel.orderOut(nil)
         }
     }
+
+    /// The HUD's corner radius for a given height: a capsule.
+    static func cornerRadius(height: CGFloat) -> CGFloat { (height / 2).rounded(.down) }
 
     private static func makePanel() -> NSPanel {
         let panel = NSPanel(contentRect: .zero, styleMask: [.nonactivatingPanel, .borderless],
@@ -60,7 +65,8 @@ struct HUDView: View {
         Label(message, systemImage: systemImage)
             .symbolRenderingMode(.hierarchical)
             .font(.headline)
-            .padding(.horizontal, Spacing.l)
+            // A little more side padding than top/bottom, so the label clears the round ends.
+            .padding(.horizontal, Spacing.xl)
             .padding(.vertical, Spacing.m)
     }
 }

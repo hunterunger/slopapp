@@ -45,11 +45,11 @@ final class OverlayView: NSView {
         imageLayer.frame = bounds
         imageLayer.contentsGravity = .resize
         dimLayer.fillRule = .evenOdd
-        dimLayer.fillColor = NSColor.black.withAlphaComponent(0.35).cgColor
+        dimLayer.fillColor = OverlayPalette.scrim
         outlineLayer.fillColor = nil
-        outlineLayer.strokeColor = NSColor.white.cgColor
+        outlineLayer.strokeColor = OverlayPalette.ring
         outlineLayer.lineWidth = 1
-        outlineLayer.shadowColor = NSColor.black.cgColor
+        outlineLayer.shadowColor = OverlayPalette.ringShadow
         outlineLayer.shadowOpacity = 0.6
         outlineLayer.shadowRadius = 1
         outlineLayer.shadowOffset = .zero
@@ -260,16 +260,20 @@ final class OverlayView: NSView {
 /// A small dark rounded label (size readout, hint). Reusable in other overlays.
 public final class BadgeLayer: CALayer {
     private let textLayer = CATextLayer()
-    private let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .callout).pointSize, weight: .medium)
+    private let font = BadgeLayer.font
+    /// Callout size, medium, with monospaced digits so changing numbers don't jiggle.
+    static var font: NSFont {
+        NSFont.monospacedDigitSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .callout).pointSize, weight: .medium)
+    }
 
     override public init() {
         super.init()
-        backgroundColor = NSColor.black.withAlphaComponent(0.72).cgColor
-        cornerRadius = 7
+        backgroundColor = OverlayPalette.badgeFill
+        cornerRadius = Radius.s
         cornerCurve = .continuous
         textLayer.font = font
         textLayer.fontSize = font.pointSize
-        textLayer.foregroundColor = NSColor.white.cgColor
+        textLayer.foregroundColor = OverlayPalette.badgeText
         textLayer.alignmentMode = .center
         addSublayer(textLayer)
     }
@@ -287,14 +291,22 @@ public final class BadgeLayer: CALayer {
         didSet { textLayer.string = text }
     }
 
+    /// The height of any one-line badge (it depends only on the font).
+    static var height: CGFloat {
+        ceil(("0" as NSString).size(withAttributes: [.font: font]).height) + insets.height * 2
+    }
+
+    /// Padding around the text: `Spacing.s` at the sides, `Spacing.xs` above and below.
+    static let insets = CGSize(width: Spacing.s, height: Spacing.xs)
+
     override public func preferredFrameSize() -> CGSize {
         let size = (text as NSString).size(withAttributes: [.font: font])
-        return CGSize(width: ceil(size.width) + 16, height: ceil(size.height) + 8)
+        return CGSize(width: ceil(size.width) + Self.insets.width * 2, height: ceil(size.height) + Self.insets.height * 2)
     }
 
     override public func layoutSublayers() {
         super.layoutSublayers()
-        textLayer.frame = bounds.insetBy(dx: 8, dy: 4)
+        textLayer.frame = bounds.insetBy(dx: Self.insets.width, dy: Self.insets.height)
     }
 }
 
@@ -303,6 +315,8 @@ public final class BadgeLayer: CALayer {
 public final class LoupeLayer: CALayer {
     public static let cells = 21
     public static let cellSize: CGFloat = 6
+    /// Room under the zoomed square for the position label: its height plus a `Spacing.s` gap.
+    static let labelArea: CGFloat = ceil(BadgeLayer.height) + Spacing.s
     private let zoomed = CALayer()
     private let marker = CALayer()
     private let label = BadgeLayer()
@@ -310,21 +324,21 @@ public final class LoupeLayer: CALayer {
     override public init() {
         super.init()
         let side = CGFloat(Self.cells) * Self.cellSize
-        zoomed.frame = CGRect(x: 0, y: 30, width: side, height: side)
+        zoomed.frame = CGRect(x: 0, y: Self.labelArea, width: side, height: side)
         zoomed.magnificationFilter = .nearest
-        zoomed.cornerRadius = 12
+        zoomed.cornerRadius = Radius.l
         zoomed.cornerCurve = .continuous
         zoomed.masksToBounds = true
         zoomed.borderWidth = 2
-        zoomed.borderColor = NSColor.white.cgColor
-        zoomed.backgroundColor = NSColor.black.cgColor
+        zoomed.borderColor = OverlayPalette.ring
+        zoomed.backgroundColor = OverlayPalette.ink.cgColor
         marker.borderWidth = 1.5
-        marker.borderColor = NSColor.white.cgColor
-        marker.shadowColor = NSColor.black.cgColor
+        marker.borderColor = OverlayPalette.ring
+        marker.shadowColor = OverlayPalette.ringShadow
         marker.shadowOpacity = 0.8
         marker.shadowRadius = 1
         marker.shadowOffset = .zero
-        shadowColor = NSColor.black.cgColor
+        shadowColor = OverlayPalette.ringShadow
         shadowOpacity = 0.35
         shadowRadius = 6
         shadowOffset = CGSize(width: 0, height: -2)
@@ -345,7 +359,7 @@ public final class LoupeLayer: CALayer {
     }
 
     override public func preferredFrameSize() -> CGSize {
-        CGSize(width: CGFloat(Self.cells) * Self.cellSize, height: CGFloat(Self.cells) * Self.cellSize + 30)
+        CGSize(width: CGFloat(Self.cells) * Self.cellSize, height: CGFloat(Self.cells) * Self.cellSize + Self.labelArea)
     }
 
     /// Shows the pixels around `centerPixel` (image pixels, top-left origin).
@@ -364,6 +378,6 @@ public final class LoupeLayer: CALayer {
         marker.frame = CGRect(x: CGFloat(column) * cell, y: side - CGFloat(row + 1) * cell, width: cell, height: cell)
         label.text = pointLabel
         let size = label.preferredFrameSize()
-        label.frame = CGRect(x: (side - size.width) / 2, y: 0, width: size.width, height: size.height)
+        label.frame = CGRect(x: ((side - size.width) / 2).rounded(), y: 0, width: size.width, height: size.height)
     }
 }

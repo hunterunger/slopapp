@@ -217,7 +217,15 @@ See `apps/Slopapp/README.md` for the scenarios (`bump`, `bad-sha`, `bad-sig`, `c
 
 ### Full-art app icons
 
-An app can ship `AppIcon.svg` (a finished, square icon such as `brand/logo.svg`) instead of
-the Lucide glyph `Icon.svg`. `bundle.sh` renders it with `icongen.swift --full-art` on
-Apple's icon grid with the standard shadow. Only the launcher uses this; every other app
-keeps the glyph-on-forest family look.
+An app can ship its own finished icon instead of the Lucide glyph `Icon.svg`, in one of two
+forms (`bundle.sh` checks them in this order):
+
+1. **`AppIcon.icon`**, an Icon Composer document (layered; Liquid Glass on macOS 26+, with
+   the Dark, Clear and Tinted looks). `bundle.sh` compiles it with `actool` into
+   `Assets.car` + a flat `AppIcon.icns` fallback for older systems, sets
+   `CFBundleIconName`, and writes a preview to `build/<Name>-icon.png` with `ictool`. The
+   launcher (`apps/Slopapp/AppIcon.icon`) uses this.
+2. **`AppIcon.svg`**, a finished square SVG (such as `brand/logo.svg`), rendered with
+   `icongen.swift --full-art` on Apple's icon grid with the standard shadow.
+
+Every other app keeps the glyph-on-forest family look.

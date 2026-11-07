@@ -23,7 +23,7 @@
       "size": "M",
       "menuBarOnly": false,
       "hub": true,
-      "spec": "The hub app. Library window (Discover, Installed, Updates, Also great) plus a menu bar item. Browse and search every app from the release feed, install (sha256 + code signature checked), open, update, update all, uninstall to the Trash. Finds apps installed elsewhere. Background update check at most every 6 hours, no telemetry. Links to great free apps we do not rebuild.",
+      "spec": "The hub app. Library window laid out like a store (Discover with a featured banner and category rows, Installed, Updates, Favorites, All Apps by category, app pages) plus a menu bar item. Browse and search every app from the release feed, install (sha256 + code signature checked), open, update, update all, uninstall to the Trash. Finds apps installed elsewhere. Background update check at most every 6 hours, no telemetry.",
       "priority": 0
     },
     {

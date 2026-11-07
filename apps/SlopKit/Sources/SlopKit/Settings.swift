@@ -111,6 +111,9 @@ public struct AboutSettingsTab: View {
     public var body: some View {
         AboutView(info: info)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, Spacing.l)
+            // The icon artwork has about 9 pt of transparent margin at 96 pt, so a little
+            // less padding on top makes the visible gaps above and below equal.
+            .padding(.top, Spacing.s)
+            .padding(.bottom, Spacing.l)
     }
 }

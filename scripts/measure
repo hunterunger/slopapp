@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Pixel checks on window screenshots: corner radii and concentricity, spacing along a line,
+# colours and contrast. See tools/Measure/main.swift. Example:
+#   scripts/drive shot Tally -o /tmp/tally.png && scripts/measure corners /tmp/tally.png
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SRC="$ROOT/tools/Measure/main.swift"
+BIN="$ROOT/build/tools/measure"
+if [[ ! -x "$BIN" || "$SRC" -nt "$BIN" ]]; then
+  mkdir -p "$(dirname "$BIN")"
+  swiftc -O "$SRC" -o "$BIN"
+fi
+exec "$BIN" "$@"

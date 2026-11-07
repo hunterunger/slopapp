@@ -61,6 +61,28 @@ public enum SettingsWindow {
         NSApp.windows.first { $0.identifier?.rawValue.contains("Settings") == true }
     }
 
+    /// Opens the Settings window from anywhere, including AppKit code with no SwiftUI view
+    /// around (an app delegate, a status item): activates the app, triggers SwiftUI's own
+    /// Settings… command, and brings the window to the front. In a view, prefer
+    /// `@Environment(\.openSettings)` followed by `bringToFront()`.
+    public static func open() {
+        AppActivation.activate()
+        if let item = settingsMenuItem(in: NSApp.mainMenu), let menu = item.menu {
+            // SwiftUI's "Settings…" item in the app menu (hidden in menu bar apps, but there)
+            // works before any SwiftUI view has appeared, where `showSettingsWindow:` doesn't.
+            menu.performActionForItem(at: menu.index(of: item))
+        } else {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
+        bringToFront()
+    }
+
+    /// The app menu's ⌘, item.
+    static func settingsMenuItem(in menu: NSMenu?) -> NSMenuItem? {
+        guard let appMenu = menu?.items.first?.submenu else { return nil }
+        return appMenu.items.first { $0.keyEquivalent == "," && $0.keyEquivalentModifierMask == .command }
+    }
+
     /// Activates the app and makes the Settings window key and frontmost. Call right after
     /// `openSettings()`: SwiftUI creates the window on a later turn of the run loop, so this
     /// retries for a moment until it exists.

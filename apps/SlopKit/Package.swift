@@ -14,8 +14,10 @@ let package = Package(
     targets: [
         .target(
             name: "SlopKit",
-            dependencies: [.product(name: "KeyboardShortcuts", package: "KeyboardShortcuts")]
+            dependencies: ["SlopKitLaunch", .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts")]
         ),
+        // Launch-time hooks that must work whatever an app's delegate is (SLOP_APPEARANCE).
+        .target(name: "SlopKitLaunch"),
         // Every component on one screen: swift run --package-path apps/SlopKit SlopKitGallery
         .executableTarget(name: "SlopKitGallery", dependencies: ["SlopKit"]),
         .testTarget(name: "SlopKitTests", dependencies: ["SlopKit"]),

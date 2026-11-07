@@ -18,12 +18,28 @@ public enum Brand {
         public static let ink: UInt32 = 0x13201A
     }
 
-    public static let forest = Color(hex: Hex.forest)
-    public static let leaf = Color(hex: Hex.leaf)
-    public static let mint = Color(hex: Hex.mint)
-    public static let cream = Color(hex: Hex.cream)
-    public static let ember = Color(hex: Hex.ember)
-    public static let ink = Color(hex: Hex.ink)
+    public static let forest = Color(hex: Hex.forest) // lint:allow brand palette
+    public static let leaf = Color(hex: Hex.leaf) // lint:allow brand palette
+    public static let mint = Color(hex: Hex.mint) // lint:allow brand palette
+    public static let cream = Color(hex: Hex.cream) // lint:allow brand palette
+    public static let ember = Color(hex: Hex.ember) // lint:allow brand palette
+    public static let ink = Color(hex: Hex.ink) // lint:allow brand palette
+
+    /// The launcher's and website's palette (brand.json `candy`): translucent sugar-candy
+    /// plastic over frosted ice. Only the Slopapp launcher uses it; the apps keep the
+    /// system look and the user's accent colour.
+    public enum Candy {
+        public static let strawberry = Color(hex: 0xF0407A) // lint:allow brand palette
+        public static let tangerine = Color(hex: 0xF28A0C) // lint:allow brand palette
+        public static let lime = Color(hex: 0x6CCB2F) // lint:allow brand palette
+        public static let lagoon = Color(hex: 0x0A9DBF) // lint:allow brand palette
+        public static let blueberry = Color(hex: 0x2F6FE4) // lint:allow brand palette
+        public static let grape = Color(hex: 0x8A4BD1) // lint:allow brand palette
+        public static let ice = Color(hex: 0xF3F6F9) // lint:allow brand palette
+        public static let graphite = Color(hex: 0x1C1F24) // lint:allow brand palette
+        /// Every flavour, in the order they cycle (category tints, decorative accents).
+        public static let flavours: [Color] = [strawberry, tangerine, lime, lagoon, blueberry, grape]
+    }
 }
 
 /// sRGB components (0...1) of a 0xRRGGBB value.

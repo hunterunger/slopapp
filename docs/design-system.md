@@ -34,7 +34,10 @@ Pick one per app (an app can add a second, e.g. a menu bar app with a library wi
 - Menu order: status line (if any) → main actions → options → `MenuFooter`
   (Settings…, About, Quit).
 - `LSUIElement` (no Dock icon). The icon can be hidden in Settings; launching the app again
-  brings it back (`SlopAppDelegate` does this).
+  brings it back and opens Settings (`SlopAppDelegate` does both), because macOS can hide the
+  icon where the app can't see it (a full menu bar, System Settings › Menu Bar). An app whose
+  reopen handler shows its own window wins; `opensSettingsOnReopen = false` turns it off.
+  From AppKit code, open Settings with `SettingsWindow.open()`.
 
 ### b. Drop-in utility window (Squish, Convert, Iconsmith, Crate)
 - One `Window` scene (not `WindowGroup`), compact (about 520×420), resizable.
@@ -94,7 +97,8 @@ Pick one per app (an app can add a second, e.g. a menu bar app with a library wi
 - **About**: `AboutView` (icon, name, tagline, version, "Part of Slopapp", source link).
   Menu bar apps open it from the menu; window apps from the app menu; all apps in the
   About tab.
-- **Global shortcuts**: `KeyboardShortcuts` (re-exported by SlopKit) with `ShortcutRow` in
+- **Global shortcuts**: `KeyboardShortcuts` (re-exported by SlopKit) with `ShortcutRow` (an
+  optional `subtitle:` explains it, like every Settings explanation) in
   the Shortcuts tab. Ship sensible defaults only when they won't collide with macOS
   (prefer ⌃⌥ or ⌥⇧ combos), otherwise leave them unset and show the recorder on first use.
 - **Permissions**: `PermissionGate` only on the screen that needs the permission, the first
@@ -117,6 +121,101 @@ Pick one per app (an app can add a second, e.g. a menu bar app with a library wi
   replace movement and scale with a fade.
 - **Windows**: remember size and position (SwiftUI does for scenes). Don't center a window
   the user moved.
+
+### Detail rules
+
+The difference between "works" and "feels made with care". `scripts/lint.sh` catches the
+source-level ones; `scripts/measure` checks the rest on screenshots (see §10, items 15–24).
+
+- **Current look.** Every binary is stamped with the real SDK (`scripts/bundle.sh` does it and
+  fails otherwise). Stamped with an old SDK, macOS 26+ draws the app in its compatibility look:
+  small window buttons, older controls.
+- **Corners come from `Radius`** (`xs 4, s 6, m 8, l 12, xl 16, xxl 22`), never literals.
+- **Nested corners are concentric**: a shape inset `p` inside a container of radius `R` has
+  radius `R − p` (`Radius.nested(in:padding:)`). A panel inset from the window edge uses
+  `windowConcentric(fill:inset:)`, which reads the window's real radius on macOS 26+.
+  Thumbnails inside cards, selection pills inside rows, fields inside panels all follow this.
+  Inside a `FloatingPanel`, read the panel's radius from
+  `@Environment(\.floatingPanelCornerRadius)` (the panel also sets it as the container shape,
+  so `ConcentricRectangle` works there). When the inset is as large as the container's radius
+  or more (a `DropZone` 20 pt inside a window, grouped `Form` sections), concentricity no longer
+  applies: use the shape's own token. `scripts/measure corners` reports those as "too tight";
+  that's expected, not a defect.
+- **Even insets**: a shape inset from its container has the same gap on every side it doesn't
+  touch, unless the layout says otherwise (e.g. a header).
+- **Alignment**: things that look like they line up do, to the point: leading edges of text
+  in a column, icons in a list, a header's controls on the window buttons' centre line, text
+  baselines across a row. Optical alignment (symbols that need a nudge) is fine; measure it.
+- **Spacing from `Spacing`** (4 pt multiples). Same kind of gap, same size, everywhere in the app.
+- **Hairlines** are 0.5 pt (one device pixel), in `separatorColor`: SlopKit `Hairline()` and
+  `.hairlineBorder(shape)`. Not SwiftUI `Divider` (1 pt on macOS), never 1 pt grey borders.
+  `Hairline` takes 1 pt of layout and draws the pixel along its top (leading) edge, so it's
+  safe in self-sizing windows (`MenuBarExtra(.window)`); never size a view by `displayScale`.
+- **Screenshots in both modes**: `scripts/drive launch build/<Name>.app --env SLOP_APPEARANCE=dark`
+  (or `light`) works in every app that links SlopKit, whatever its app delegate.
+- **Full-size window buttons** (16×16 on macOS 26+). Custom title areas line their controls up
+  with the buttons' centre line; nothing crowds them.
+- **Icon tiles** (app-icon-like squares) use `Radius.iconTile(side:)`, not a fixed radius.
+- **Contrast**: body text 4.5:1, large text and meaningful UI 3:1 against its background, in
+  light and dark mode (`scripts/measure contrast`). Secondary text still passes.
+  - Coloured status text uses SlopKit's `.textGreen`, `.textOrange`, `.textRed` (and
+    `.textAccent` for the user's accent as text). Plain `.green`/`.orange` text measures about
+    2:1 on a light window. Fills, dots and symbols next to a text label can stay plain `.green`.
+  - Any other colour shown as text or a symbol (a theme colour, an annotation colour, a
+    yellow accent) goes through `.readable(_:on:target:)` / `NSColor.readable(_:on:target:)`:
+    same hue, darkened in light mode or lightened in dark mode only as much as the target
+    needs (`ReadableColor.textTarget` 4.5, `.symbolTarget` 3).
+  - `.secondary` is the lightest colour for text: the system's own floor, accepted. It
+    measures about 3.9:1 on white on macOS 26 but about 3.1:1 in light mode on 27.2 (6.4:1
+    in dark), so keep it for supporting text, never for the only copy of something people
+    must read; use `.primary` for that. Never `.tertiary`/`.quaternary` for text you expect
+    people to read (1.9:1).
+  - On a selected (accent-filled) row, coloured text switches to
+    `alternateSelectedControlTextColor`.
+- **States**: hover, pressed, selected, disabled, focus ring and empty/loading/error states
+  are each designed, not left to chance. Truncation happens at sensible places (middle for
+  file names), never mid-word in a label you control.
+- **Edge content**: long names, 0 items, 1 item, 1,000 items, huge numbers and RTL-length
+  strings don't break the layout.
+
+### Fitting in on macOS 27 Golden Gate
+
+The owner runs macOS 27 (Golden Gate), and every app should look like it shipped with it.
+Golden Gate refines Tahoe's Liquid Glass rather than replacing it:
+
+- **Sidebars run edge to edge** (Tahoe floated them inset). Use the system sidebar
+  (`NavigationSplitView` / `.listStyle(.sidebar)` / `NSSplitViewItem(sidebarWithViewController:)`)
+  and don't draw your own inset, rounded or shadowed sidebar card.
+- **Sidebar icons are coloured** (accent tint by default, as in Finder and Mail). Don't force
+  sidebar symbols to `.secondary` or monochrome; give an item a fixed colour only when the
+  colour means something (a tag, a category).
+- **Menus are mostly text.** Golden Gate removed Tahoe's decorative icons beside menu commands.
+  Menu items (menu bar menus, context menus, `MenuBarExtra` menus, pull-downs) are plain text
+  unless the image carries information: an app's icon, a colour swatch, a state checkmark, a
+  font preview. Use `Button("…")`/`Text`, not `Label(_, systemImage:)`, in menus.
+- **One window corner everywhere**: nothing inside a window may assume a radius. Use
+  `windowConcentric` / `ConcentricRectangle` for anything inset from the window edge.
+- **Standard toolbars**: use the real toolbar (`.toolbar` / `NSToolbar`) and let the system
+  draw its glass; no fake toolbar strips drawn in content, no custom backgrounds behind
+  toolbar items. Check toolbar item legibility over scrolled content.
+- **Active vs inactive windows look different**: selections, accent-coloured icons and custom
+  highlights go grey when the window isn't key (`@Environment(\.appearsActive)` in SwiftUI,
+  `unemphasizedSelectedContentBackgroundColor` / `window.isKeyWindow` in AppKit). SlopKit's
+  `Color.windowAccent`, `.selectionTint`, `.selectionFill` and `.selectionRing` take the
+  window's `controlActiveState` (or `active:`) and pick the right colour; the gallery's Colour
+  page shows them active and inactive. Shoot one inactive-window screenshot per app.
+- **Glass is the system's**: people set it from clear to tinted with a slider in System
+  Settings › Appearance. Use system materials, `.glassEffect` or `FloatingPanel`; never fake
+  glass with a hardcoded translucent colour, and never put readable text straight on clear
+  glass without a backing that keeps 4.5:1 at the clearest setting.
+- **Light and dark are equals.** Every surface is designed and screenshotted in both
+  (`SLOP_APPEARANCE`). Colours are semantic (`labelColor`, `windowBackgroundColor`,
+  `controlBackgroundColor`, `separatorColor`, accent) or resolve per appearance; layer and
+  CGColor values re-resolve on appearance change; images and illustrations have dark variants
+  or are templates; shadows read in dark mode (darker and tighter, never a light glow); no
+  pure-black or pure-white surfaces you drew yourself. Overlays drawn over the screen (capture,
+  measuring, magnifiers) use SlopKit's `OverlayPalette`: the dark appearance's system colours,
+  the same in both modes because they sit on arbitrary content.
 
 ## 5. Writing
 
@@ -177,6 +276,7 @@ version. Approved so far:
 | Package | Version | Why |
 |---|---|---|
 | [sindresorhus/KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) | 1.10.0 (exact) | Global hotkeys + recorder UI, sandbox-safe, used by hundreds of Mac apps. Re-exported by SlopKit. |
+| [jpsim/Yams](https://github.com/jpsim/Yams) | 6.2.2 (exact) | YAML parsing for Devkit (MIT; wraps libyaml, MIT). The de facto Swift YAML library; a correct YAML parser is too much to hand-roll. Devkit only. |
 
 Add new ones to this table with the reason.
 
@@ -200,3 +300,25 @@ Grade each item pass/fail. QA and the blind test use this list.
 12. VoiceOver can name every control (no unlabeled icon buttons).
 13. Reduce Motion: no sliding or scaling animations.
 14. Window size/position persist; the app relaunches in a sensible state.
+
+Detail (§4 detail rules), checked on `scripts/drive shot` screenshots of every window, sheet,
+popover and menu-bar panel, light and dark:
+
+15. `scripts/lint.sh <Name>` passes (no corner-radius literals, no hardcoded colours).
+16. Window buttons are full size: `scripts/drive tree <Name> | grep closeButton` shows 16x16
+    on macOS 26+.
+17. Every inset rounded shape is concentric with its container
+    (`scripts/measure corners shot.png` for window-inset panels; for nested shapes,
+    `scripts/measure line` across the corner and the straight edge).
+18. Insets and gaps are even and on the 4 pt grid (`scripts/measure line` across them).
+19. Columns, icons, baselines and header controls line up (measure; don't eyeball).
+20. Hairlines are 0.5 pt separator colour; no doubled borders where two edges meet.
+21. Text and meaningful UI pass contrast (§4) in light and dark.
+22. Hover, pressed, selected, disabled and focus states all look intentional.
+23. Long, empty, single and huge content doesn't break the layout or truncate badly.
+24. Nothing jumps: no layout shift when content loads, a sheet opens, or a value changes
+    width (use `.monospacedDigit()` and fixed slots).
+25. Fits in on Golden Gate (§4): edge-to-edge system sidebar with coloured icons, text-only
+    menu items, standard toolbar, inactive windows grey out their selections and accents.
+26. Every surface checked in light and dark: semantic colours, no drawn pure black/white,
+    dark-mode shadows and images, layer colours follow appearance changes live.

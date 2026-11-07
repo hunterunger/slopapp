@@ -12,6 +12,14 @@ import SwiftUI
 ///     panel.show(at: .nearMouse)
 ///
 /// Esc and clicking elsewhere dismiss it (`dismissesOnResignKey`).
+///
+/// Corners: the panel's radius (default `Radius.xl`) reaches the content as
+/// `@Environment(\.floatingPanelCornerRadius)`, and the content's container shape is the
+/// panel's own, so inner shapes stay concentric:
+///
+///     .padding(Spacing.s)                                  // around the rows
+///     RoundedRectangle(cornerRadius: Radius.nested(in: panelRadius, padding: Spacing.s))
+///     // or, on macOS 26+, ConcentricRectangle() / windowConcentric(fill:inset:)
 @MainActor
 public final class FloatingPanel: NSPanel {
     /// Called for every key press before SwiftUI sees it. Return true to swallow it.
@@ -21,10 +29,13 @@ public final class FloatingPanel: NSPanel {
     /// Hide when the user clicks outside or switches apps. Default true.
     public var dismissesOnResignKey = true
 
+    /// The panel's corner radius. Content gets it as `floatingPanelCornerRadius`.
+    public let cornerRadius: CGFloat
     private let hostingView: NSHostingView<AnyView>
 
-    public init<Content: View>(cornerRadius: CGFloat = 16, @ViewBuilder content: () -> Content) {
-        hostingView = NSHostingView(rootView: AnyView(content()))
+    public init<Content: View>(cornerRadius: CGFloat = Radius.xl, @ViewBuilder content: () -> Content) {
+        self.cornerRadius = cornerRadius
+        hostingView = NSHostingView(rootView: Self.root(content(), cornerRadius: cornerRadius))
         super.init(
             contentRect: .zero,
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
@@ -47,7 +58,16 @@ public final class FloatingPanel: NSPanel {
 
     /// Replaces the panel's SwiftUI content.
     public func setContent<Content: View>(@ViewBuilder _ content: () -> Content) {
-        hostingView.rootView = AnyView(content())
+        hostingView.rootView = Self.root(content(), cornerRadius: cornerRadius)
+    }
+
+    /// The content with the panel's radius in its environment and as its container shape.
+    private static func root(_ content: some View, cornerRadius: CGFloat) -> AnyView {
+        AnyView(
+            content
+                .environment(\.floatingPanelCornerRadius, cornerRadius)
+                .containerShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        )
     }
 
     override public var canBecomeKey: Bool { true }
@@ -103,6 +123,10 @@ public final class FloatingPanel: NSPanel {
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             let glass = NSGlassEffectView()
+            // Regular (never `.clear`): the text-bearing style, which follows the person's
+            // clear-to-tinted setting in System Settings › Appearance and Reduce Transparency
+            // and keeps text legible over anything. No tint: that would fake the setting.
+            glass.style = .regular
             glass.cornerRadius = cornerRadius
             glass.contentView = content
             return pinned(glass)
@@ -143,6 +167,12 @@ public final class FloatingPanel: NSPanel {
         ])
         return container
     }
+}
+
+extension EnvironmentValues {
+    /// The corner radius of the `FloatingPanel` (or `HUD`) this view is in; `Radius.xl`
+    /// outside one. Use it for concentric inner shapes: `Radius.nested(in: radius, padding: p)`.
+    @Entry public var floatingPanelCornerRadius: CGFloat = Radius.xl
 }
 
 extension NSEvent {

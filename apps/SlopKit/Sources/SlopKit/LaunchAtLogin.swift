@@ -43,7 +43,8 @@ public struct LaunchAtLoginToggle: View {
         if let error = launchAtLogin.lastError {
             Text(error)
                 .font(.caption)
-                .foregroundStyle(.red)
+                .foregroundStyle(.textRed)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

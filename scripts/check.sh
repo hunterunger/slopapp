@@ -5,7 +5,8 @@
 #   scripts/check.sh Awake      # just these apps (plus SlopKit tests)
 #   scripts/check.sh --perf     # also run scripts/perf.sh (needs Accessibility; not in CI)
 #
-# Per app: unit tests, release bundle (universal, signed, zipped), launch smoke test.
+# Per app: source lint (design-system detail rules), unit tests, release bundle (universal,
+# signed, zipped, real SDK stamp), launch smoke test.
 # Then regenerates the website catalog. Exits non-zero if anything failed.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
@@ -40,6 +41,7 @@ record "SlopKit  test" "$ROOT/scripts/test.sh" SlopKit
 
 for app in "${APPS[@]}"; do
   say "$app"
+  record "$app  lint"   "$ROOT/scripts/lint.sh" "$app"
   record "$app  test"   "$ROOT/scripts/test.sh" "$app"
   record "$app  bundle" "$ROOT/scripts/bundle.sh" "$app"
   if [[ -x "$BUILD_DIR/$app.app/Contents/MacOS/$app" ]]; then

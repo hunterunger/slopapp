@@ -9,19 +9,30 @@ import SwiftUI
 //     }
 //     KeyboardShortcuts.onKeyUp(for: .togglePanel) { ... }
 
-/// One labeled shortcut recorder for the Shortcuts tab in Settings.
+/// One labeled shortcut recorder for the Shortcuts tab in Settings, with an optional
+/// explanation shown as the row's subtitle (secondary text under the title, like every
+/// Settings explanation):
+///
+///     ShortcutRow("Show or hide Tally", subtitle: "Works from any app.", name: .toggleWindow)
 public struct ShortcutRow: View {
     let title: String
+    let subtitle: String?
     let name: KeyboardShortcuts.Name
 
-    public init(_ title: String, name: KeyboardShortcuts.Name) {
+    public init(_ title: String, subtitle: String? = nil, name: KeyboardShortcuts.Name) {
         self.title = title
+        self.subtitle = subtitle
         self.name = name
     }
 
     public var body: some View {
-        LabeledContent(title) {
+        LabeledContent {
             KeyboardShortcuts.Recorder(for: name)
+        } label: {
+            Text(title)
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+            }
         }
     }
 }

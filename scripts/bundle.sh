@@ -19,9 +19,18 @@ IDENTITY="${SLOPAPP_SIGN_IDENTITY:--}"
 # 1. Compile.
 ARCH_FLAGS=()
 [[ "$CONFIG" == "release" ]] && ARCH_FLAGS=(--arch arm64 --arch x86_64)
-say "Building $NAME ($CONFIG)"
-run_logged "$LOG_DIR/$NAME-build.log" swift build --package-path "$DIR" -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"}
-BIN_PATH="$(swift build --package-path "$DIR" -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --show-bin-path)"
+# Stamp the real SDK version into the binary. SwiftPM's driver tells the linker the SDK is
+# the deployment target (14.0), and macOS 26+ then runs the app in its old compatibility
+# look: small window buttons, older controls. The deployment target stays as it is.
+MIN_MACOS="$(json_get "$MANIFEST" .minimumMacOS)"; MIN_MACOS="${MIN_MACOS:-14.0}"
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+LINK_FLAGS=(-Xlinker -platform_version -Xlinker macos -Xlinker "$MIN_MACOS" -Xlinker "$SDK_VERSION")
+say "Building $NAME ($CONFIG, macOS $MIN_MACOS+, SDK $SDK_VERSION)"
+run_logged "$LOG_DIR/$NAME-build.log" swift build --package-path "$DIR" -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} "${LINK_FLAGS[@]}"
+BIN_PATH="$(swift build --package-path "$DIR" -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} "${LINK_FLAGS[@]}" --show-bin-path)"
+# Fail rather than ship the compatibility look again.
+STAMPED_SDK="$(otool -l "$BIN_PATH/$NAME" | awk '/LC_BUILD_VERSION/{f=1} f && $1=="sdk" {print $2; exit}')"
+[[ "${STAMPED_SDK%%.*}" -ge 26 ]] || die "$NAME is stamped with SDK ${STAMPED_SDK:-?} (want 26+): macOS would show it in the old compatibility look"
 
 # 2. Assemble the .app.
 rm -rf "$APP"
@@ -34,9 +43,24 @@ for bundle in "$BIN_PATH"/*.bundle "$BIN_PATH"/*.resources; do
 done
 shopt -u nullglob
 
-# 3. Icon: AppIcon.svg (finished full-art icon, e.g. the brand logo) wins; otherwise
-#    Icon.svg (a Lucide glyph on the forest tile).
-if [[ -f "$DIR/AppIcon.svg" ]]; then
+# 3. Icon: AppIcon.icon (an Icon Composer document: layered Liquid Glass icon on macOS 26+,
+#    with a flat .icns fallback for older systems) wins; then AppIcon.svg (finished full-art
+#    icon); otherwise Icon.svg (a Lucide glyph on the forest tile).
+ICON_NAME=""
+if [[ -d "$DIR/AppIcon.icon" ]]; then
+  ICON_TMP="$(mktemp -d)"
+  run_logged "$LOG_DIR/$NAME-icon.log" xcrun actool --compile "$ICON_TMP" --app-icon AppIcon --platform macosx \
+    --minimum-deployment-target "$MIN_MACOS" --output-partial-info-plist "$ICON_TMP/partial.plist" \
+    "$DIR/AppIcon.icon"
+  cp "$ICON_TMP/AppIcon.icns" "$ICON_TMP/Assets.car" "$APP/Contents/Resources/"
+  rm -rf "$ICON_TMP"
+  ICON_NAME="AppIcon"
+  ICTOOL="$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool"
+  if [[ -x "$ICTOOL" ]]; then
+    "$ICTOOL" "$DIR/AppIcon.icon" --export-image --output-file "$BUILD_DIR/$NAME-icon.png" \
+      --platform macOS --rendition Default --width 512 --height 512 --scale 2 >/dev/null 2>&1 || true
+  fi
+elif [[ -f "$DIR/AppIcon.svg" ]]; then
   swift "$ROOT/scripts/icongen.swift" "$DIR/AppIcon.svg" "$APP/Contents/Resources/AppIcon.icns" \
     --png "$BUILD_DIR/$NAME-icon.png" --full-art >/dev/null
 elif [[ -f "$DIR/Icon.svg" ]]; then
@@ -64,6 +88,7 @@ set_string CFBundlePackageType APPL
 set_string CFBundleShortVersionString "$(json_get "$MANIFEST" .version)"
 set_string CFBundleVersion "$(json_get "$MANIFEST" .build)"
 set_string CFBundleIconFile AppIcon
+[[ -n "$ICON_NAME" ]] && set_string CFBundleIconName "$ICON_NAME"
 set_string LSMinimumSystemVersion "$(json_get "$MANIFEST" .minimumMacOS)"
 set_string LSApplicationCategoryType "$CATEGORY"
 set_string NSPrincipalClass NSApplication

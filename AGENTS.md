@@ -30,7 +30,9 @@ scripts/test.sh [Name...]        # unit tests (default: SlopKit + all apps)
 scripts/run.sh <Name>            # debug .app, open it
 scripts/bundle.sh <Name>         # release .app (universal, ad-hoc signed) + zip in build/
 scripts/smoke.sh <Name>          # launch the .app, fail if it crashes
-scripts/check.sh [Name...] [--perf]  # full gate: test + bundle + smoke + catalog (+ perf). CI runs this.
+scripts/check.sh [Name...] [--perf]  # full gate: lint + test + bundle + smoke + catalog (+ perf). CI runs this.
+scripts/lint.sh <Name>           # design-system detail rules grep can catch (radius literals, hex colours)
+scripts/measure corners <png>    # pixel checks on a window shot: corners, spacing (line), contrast
 scripts/perf.sh <Name>           # launch time, idle CPU, memory footprint vs budgets
 scripts/drive help               # drive a running app: tree/click/menubar/type/key/shot
 node scripts/catalog.mjs         # regenerate the website catalog
@@ -50,7 +52,8 @@ Logs: `build/logs/<Name>-{build,test,sign,smoke}.log`.
 
 ## Rules
 
-- Follow `docs/design-system.md`. Pick an archetype (menu bar utility, drop-in window, library
+- Follow `docs/design-system.md`, including the §4 detail rules (concentric corners from
+  `Radius`, even insets, alignment, hairlines, full-size window buttons). Pick an archetype (menu bar utility, drop-in window, library
   window, overlay) before writing UI, and grade against its review checklist.
 - Use SlopKit instead of rolling your own: `SlopSettings` for every Settings window, `MenuFooter`
   in menu bar menus, `FloatingPanel`/`HUD` for overlays, `DropZone`, `PermissionGate`, `ShortcutRow`.

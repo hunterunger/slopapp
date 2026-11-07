@@ -15,10 +15,10 @@ public enum PanelPlacement: Sendable, Equatable {
     }
 
     /// Gap between the cursor and a `.nearMouse` panel.
-    public static let cursorGap: CGFloat = 12
+    public static let cursorGap: CGFloat = Spacing.m
 
     /// The panel frame for `size`, kept fully inside `visibleFrame` (inset by `margin`).
-    public func frame(size: CGSize, mouse: CGPoint, visibleFrame: CGRect, margin: CGFloat = 16) -> CGRect {
+    public func frame(size: CGSize, mouse: CGPoint, visibleFrame: CGRect, margin: CGFloat = Spacing.l) -> CGRect {
         let bounds = visibleFrame.insetBy(dx: margin, dy: margin)
         var origin: CGPoint
         switch self {

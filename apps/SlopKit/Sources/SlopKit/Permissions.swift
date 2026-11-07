@@ -150,7 +150,9 @@ public struct PermissionPrompt: View {
                  ? "After you turn it on, restart the app."
                  : "Turn it on in System Settings. This screen updates by itself.")
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary) // .tertiary text fails contrast (1.9:1 in light mode)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Spacing.xxl)
         .frame(maxWidth: 360)

@@ -79,7 +79,7 @@ public struct FileQueueView<MenuExtras: View>: View {
                     ForEach(queue.items) { item in
                         FileQueueRow(item: item, queue: queue, isSelected: selection.contains(item.id))
                             .listRowBackground(highlighted.contains(item.id)
-                                               ? RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15)) : nil)
+                                               ? FileQueueRowHighlight() : nil)
                             .tag(item.id)
                             .id(item.id)
                     }
@@ -111,9 +111,9 @@ public struct FileQueueView<MenuExtras: View>: View {
                 .onDeleteCommand { removeRows(items(for: selection)) }
                 .overlay {
                     if listTargeted {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: Radius.m, style: .continuous)
                             .strokeBorder(Color.accentColor, lineWidth: 2)
-                            .padding(2)
+                            .padding(Spacing.xs / 2)
                             .allowsHitTesting(false)
                     }
                 }
@@ -125,9 +125,10 @@ public struct FileQueueView<MenuExtras: View>: View {
                 } isTargeted: { listTargeted = $0 }
                 }
 
+                // Even inset on the three sides that don't touch the list.
                 DropStrip(types: dropTypes) { take($0) }
-                    .padding(.horizontal, Spacing.m)
-                    .padding(.vertical, Spacing.s)
+                    .padding([.horizontal, .bottom], FileQueueMetrics.stripInset)
+                    .padding(.top, Spacing.s)
             }
         }
     }
@@ -160,6 +161,7 @@ struct DropStrip: View {
     let types: [UTType]
     let onFiles: ([URL]) -> Void
     @State private var isTargeted = false
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         Button {
@@ -170,14 +172,10 @@ struct DropStrip: View {
                 .foregroundStyle(isTargeted ? Color.accentColor : .secondary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Spacing.s)
-                .background {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(isTargeted ? Color.accentColor : Color.secondary.opacity(0.35),
-                                      style: StrokeStyle(lineWidth: 1, dash: isTargeted ? [] : [5, 4]))
-                }
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DropStripStyle(isTargeted: isTargeted, isFocused: isFocused))
+        .focused($isFocused)
+        .focusEffectDisabled() // DropStripStyle draws a rounded focus ring instead
         .accessibilityLabel("Add Files")
         .accessibilityHint("Opens a file chooser")
         .dropDestination(for: URL.self) { urls, _ in
@@ -186,6 +184,96 @@ struct DropStrip: View {
             onFiles(accepted)
             return true
         } isTargeted: { isTargeted = $0 }
+    }
+}
+
+/// Sizes shared by the queue's pieces.
+enum FileQueueMetrics {
+    /// The drop strip's inset from the window's sides and bottom.
+    /// How far an inset-style list draws its selection from its sides (10 pt, AppKit's
+    /// `NSTableView.Style.inset`). The drop strip and the new-row tint line up with it.
+    static let selectionInset: CGFloat = 10
+    /// The corner radius of that selection (measured: matches `Radius.m`).
+    static let selectionRadius: CGFloat = Radius.m
+    /// The drop strip's inset from the window's sides and bottom: the selection's, so the
+    /// strip's edges line up with a selected row's.
+    static let stripInset: CGFloat = selectionInset
+}
+
+/// The slim strip's look: dashed outline (solid accent while targeted), hover and pressed
+/// fills, and a rounded focus ring.
+struct DropStripStyle: ButtonStyle {
+    let isTargeted: Bool
+    let isFocused: Bool
+    @State private var isHovered = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The strip sits in the window's bottom corners, so on macOS 26+ its corners follow the
+    /// window's (`ConcentricRectangle`); before that, the 10 pt window radius minus the inset.
+    static var shape: AnyShape {
+        if #available(macOS 26, *) {
+            return AnyShape(ConcentricRectangle(corners: .concentric(minimum: .fixed(Radius.xs)), isUniform: true))
+        }
+        return AnyShape(RoundedRectangle(cornerRadius: Radius.nested(in: Radius.legacyWindow, padding: FileQueueMetrics.stripInset,
+                                                                     minimum: Radius.xs),
+                                         style: .continuous))
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = Self.shape
+        configuration.label
+            .background {
+                shape.fill(isTargeted ? Color.accentColor.opacity(0.1)
+                           : Color.primary.opacity(DropZoneStyle.fillOpacity(pressed: configuration.isPressed, hovered: isHovered) - 0.03))
+                // A 2 pt stroke clipped to the inside: a crisp 1 pt line (the shape isn't insettable).
+                GeometryReader { proxy in
+                    shape.stroke(isTargeted ? Color.accentColor : DropZoneStyle.outlineColor(colorScheme),
+                                 style: StrokeStyle(lineWidth: isTargeted ? 4 : 2,
+                                                    dash: isTargeted ? [] : DashPattern.fitted(dash: 5, gap: 4, size: proxy.size,
+                                                                                               cornerRadius: Radius.s, lineWidth: 0)))
+                }
+                .clipShape(shape)
+            }
+            .overlay {
+                if isFocused && !isTargeted {
+                    shape.stroke(Color(nsColor: .keyboardFocusIndicatorColor), lineWidth: 3)
+                        .padding(-Spacing.xs / 2)
+                        .allowsHitTesting(false)
+                }
+            }
+            .contentShape(shape)
+            .animation(.easeOut(duration: 0.1), value: isHovered)
+            .onHover { isHovered = $0 }
+    }
+}
+
+/// The row's trailing Cancel / Try Again / Show in Finder buttons: a filled circle in
+/// `.secondary` (3:1 or better in both modes), `.primary` on hover, dimmed while pressed.
+struct RowIconButtonStyle: ButtonStyle {
+    let onSelection: Bool
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(onSelection ? AnyShapeStyle(Color(nsColor: .alternateSelectedControlTextColor))
+                             : isHovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .contentShape(Circle())
+            .onHover { isHovered = $0 }
+            .animation(.easeOut(duration: 0.1), value: isHovered)
+    }
+}
+
+/// The brief tint on rows that were just added (`fileQueueFollowsNewFiles`), shaped like
+/// the list's own selection so the two line up.
+struct FileQueueRowHighlight: View {
+    @Environment(\.controlActiveState) private var activeState
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: FileQueueMetrics.selectionRadius, style: .continuous)
+            .fill(Color.selectionTint(activeState, opacity: 0.15))
+            .padding(.horizontal, FileQueueMetrics.selectionInset)
     }
 }
 
@@ -235,10 +323,13 @@ struct FileQueueRow: View {
             HStack(spacing: Spacing.m) {
                 FileThumbnail(url: thumbnailURL)
                     .frame(width: 36, height: 36)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     title
                     detail
                 }
+                // Separators start under the file name, even when the detail line leads
+                // with a symbol (a failed row's warning triangle).
+                .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
                 Spacer(minLength: Spacing.s)
             }
             .accessibilityElement(children: .ignore)
@@ -282,7 +373,7 @@ struct FileQueueRow: View {
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
                 // On a selected (accent-filled) row, orange is hard to read.
-                .foregroundStyle(isSelected && activeState == .key ? AnyShapeStyle(Color(nsColor: .alternateSelectedControlTextColor)) : AnyShapeStyle(.orange))
+                .foregroundStyle(onSelection ? AnyShapeStyle(Color(nsColor: .alternateSelectedControlTextColor)) : AnyShapeStyle(.textOrange))
                 .lineLimit(3)
                 .help(message)
         case .cancelled:
@@ -296,7 +387,7 @@ struct FileQueueRow: View {
                 Text(FileQueueText.percent(saved: fraction))
                     .font(.callout.weight(.semibold))
                     .monospacedDigit()
-                    .foregroundStyle(.green)
+                    .foregroundStyle(onSelection ? AnyShapeStyle(Color(nsColor: .alternateSelectedControlTextColor)) : AnyShapeStyle(.textGreen))
                     .accessibilityHidden(true)
             }
             switch item.state {
@@ -314,14 +405,15 @@ struct FileQueueRow: View {
         }
     }
 
+    /// Whether this row is drawn on the accent-coloured selection (coloured text won't read).
+    private var onSelection: Bool { isSelected && activeState == .key }
+
     private func iconButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.title3)
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(RowIconButtonStyle(onSelection: onSelection))
         .help(title)
         .accessibilityLabel(title)
     }
@@ -545,7 +637,6 @@ extension View {
         environment(\.fileQueueFollowsNewFiles, follows)
     }
 
-    /// The context menu's "run it again" item. Default "Process Again".
     /// Whether a row whose output has another name shows it ("Photo.webp → Photo-small.jpg").
     /// Default true.
     public func fileQueueShowsOutputName(_ shows: Bool) -> some View {
@@ -558,6 +649,7 @@ extension View {
         environment(\.fileQueueRemove, FileQueueRemoveHandler(remove: remove))
     }
 
+    /// The context menu's "run it again" item. Default "Process Again".
     public func fileQueueRetryTitle(_ title: String) -> some View {
         environment(\.fileQueueRetryTitle, title)
     }
