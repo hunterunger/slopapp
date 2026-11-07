@@ -1,0 +1,44 @@
+{
+  "appVersion" : "0.2.0",
+  "date" : "2026-11-07",
+  "shots" : [
+    {
+      "dark" : "hero-dark.webp",
+      "dark1x" : "hero-dark@1x.webp",
+      "height" : 1800,
+      "id" : "hero",
+      "light" : "hero-light.webp",
+      "light1x" : "hero-light@1x.webp",
+      "width" : 2880
+    },
+    {
+      "dark" : "card-dark.webp",
+      "dark1x" : "card-dark@1x.webp",
+      "height" : 1800,
+      "id" : "card",
+      "light" : "card-light.webp",
+      "light1x" : "card-light@1x.webp",
+      "width" : 2880
+    },
+    {
+      "dark" : "background-dark.webp",
+      "dark1x" : "background-dark@1x.webp",
+      "height" : 1800,
+      "id" : "background",
+      "light" : "background-light.webp",
+      "light1x" : "background-light@1x.webp",
+      "width" : 2880
+    },
+    {
+      "dark" : "history-dark.webp",
+      "dark1x" : "history-dark@1x.webp",
+      "height" : 1800,
+      "id" : "history",
+      "light" : "history-light.webp",
+      "light1x" : "history-light@1x.webp",
+      "width" : 2880
+    }
+  ],
+  "showcaseVersion" : 1,
+  "slug" : "snapper"
+}

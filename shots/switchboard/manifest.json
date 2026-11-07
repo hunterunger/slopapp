@@ -1,0 +1,35 @@
+{
+  "appVersion" : "0.2.0",
+  "date" : "2026-11-07",
+  "shots" : [
+    {
+      "dark" : "hero-dark.webp",
+      "dark1x" : "hero-dark@1x.webp",
+      "height" : 1800,
+      "id" : "hero",
+      "light" : "hero-light.webp",
+      "light1x" : "hero-light@1x.webp",
+      "width" : 2880
+    },
+    {
+      "dark" : "rules-dark.webp",
+      "dark1x" : "rules-dark@1x.webp",
+      "height" : 1800,
+      "id" : "rules",
+      "light" : "rules-light.webp",
+      "light1x" : "rules-light@1x.webp",
+      "width" : 2880
+    },
+    {
+      "dark" : "browsers-dark.webp",
+      "dark1x" : "browsers-dark@1x.webp",
+      "height" : 1800,
+      "id" : "browsers",
+      "light" : "browsers-light.webp",
+      "light1x" : "browsers-light@1x.webp",
+      "width" : 2880
+    }
+  ],
+  "showcaseVersion" : 1,
+  "slug" : "switchboard"
+}
