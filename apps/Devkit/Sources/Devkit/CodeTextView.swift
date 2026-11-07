@@ -194,10 +194,10 @@ struct CodeTextView: NSViewRepresentable {
 
     static func attribute(for style: TextStyleRun.Style) -> (NSAttributedString.Key, NSColor) {
         switch style {
-        case .key: (.foregroundColor, .systemBlue)
-        case .string: (.foregroundColor, .systemRed)
-        case .number: (.foregroundColor, .systemPurple)
-        case .keyword: (.foregroundColor, .systemPink)
+        case .key: (.foregroundColor, SyntaxColor.key)
+        case .string: (.foregroundColor, SyntaxColor.string)
+        case .number: (.foregroundColor, SyntaxColor.number)
+        case .keyword: (.foregroundColor, SyntaxColor.keyword)
         case let .match(index):
             (.backgroundColor, NSColor.controlAccentColor.withAlphaComponent(index.isMultiple(of: 2) ? 0.28 : 0.16))
         case .added: (.backgroundColor, NSColor.systemGreen.withAlphaComponent(0.16))
@@ -323,4 +323,26 @@ final class CodeNSTextView: NSTextView {
 enum LargeText {
     /// Inputs above this size (UTF-8 bytes, roughly) aren't shown in an editor.
     static let limit = 8 * 1024 * 1024
+}
+
+/// The highlight theme: system colours, darkened in light mode so they read as body text on
+/// the editor background (measured on textBackgroundColor: systemBlue 3.5:1, systemRed 3.6:1,
+/// systemPurple 4.2:1 and systemPink 3.7:1 in light mode; 5.8–6.6:1 darkened by 30%). Dark mode
+/// keeps the system colours (4.6–5.2:1). Dynamic, so they follow an appearance change live.
+enum SyntaxColor {
+    static let lightModeDarkening: CGFloat = 0.3
+
+    static let key = readable(.systemBlue)
+    static let string = readable(.systemRed)
+    static let number = readable(.systemPurple)
+    static let keyword = readable(.systemPink)
+
+    static func readable(_ base: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
+            guard appearance.bestMatch(from: [.aqua, .darkAqua]) != .darkAqua else { return base }
+            var resolved = base
+            appearance.performAsCurrentDrawingAppearance { resolved = base.usingColorSpace(.sRGB) ?? base }
+            return resolved.blended(withFraction: lightModeDarkening, of: .black) ?? resolved
+        }
+    }
 }

@@ -10,6 +10,14 @@ public protocol Clipboard: AnyObject {
     /// A file copied in Finder, if any.
     func fileURL() -> URL?
     func setString(_ string: String)
+    /// Image data (PNG or TIFF) on the clipboard, for reading QR codes.
+    func imageData() -> Data?
+    func setPNG(_ data: Data)
+}
+
+extension Clipboard {
+    public func imageData() -> Data? { nil }
+    public func setPNG(_ data: Data) {}
 }
 
 public enum ClipboardPolicy {

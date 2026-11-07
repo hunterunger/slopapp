@@ -65,6 +65,8 @@ public enum JWT {
         case unsigned
         case unsupported(String)
         case needsSecret
+        /// The public key couldn't be used, with why.
+        case badKey(String)
     }
 
     static let registered: [(String, String)] = [

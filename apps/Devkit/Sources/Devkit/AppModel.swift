@@ -36,10 +36,47 @@ final class AppModel {
     @ObservationIgnored lazy var color = ColorToolModel()
     @ObservationIgnored lazy var numberBase = NumberBaseToolModel()
     @ObservationIgnored lazy var textCase = CaseToolModel()
+    @ObservationIgnored lazy var urlParser = URLParserToolModel()
+    @ObservationIgnored lazy var stringInspector = StringInspectorToolModel()
+    @ObservationIgnored lazy var lorem = LoremToolModel()
+    @ObservationIgnored lazy var randomString = RandomStringToolModel()
+    @ObservationIgnored lazy var qrCode = QRToolModel()
+    @ObservationIgnored lazy var certificate = CertificateToolModel()
+    @ObservationIgnored lazy var cron = CronToolModel()
+    /// Converters and formatters share one model type, made on first use.
+    @ObservationIgnored private var transforms: [Tool: TransformToolModel] = [:]
+
+    /// Tools hidden from the sidebar (Settings ▸ Tools, or the sidebar's context menu).
+    var hiddenTools: Set<Tool> {
+        didSet {
+            Diagnostics.defaults.set(hiddenTools.map(\.rawValue).sorted(), forKey: SettingsKey.hiddenTools)
+        }
+    }
+
+    /// The window floats above other apps' windows.
+    var keepOnTop: Bool {
+        didSet {
+            Diagnostics.defaults.set(keepOnTop, forKey: SettingsKey.keepOnTop)
+            applyWindowLevel()
+        }
+    }
 
     init(clipboard: Clipboard = SystemClipboard.current()) {
         self.clipboard = clipboard
         selection = Diagnostics.defaults.string(forKey: SettingsKey.selectedTool).flatMap(Tool.init(rawValue:)) ?? .json
+        hiddenTools = Set((Diagnostics.defaults.stringArray(forKey: SettingsKey.hiddenTools) ?? []).compactMap(Tool.init(rawValue:)))
+        keepOnTop = Diagnostics.defaults.bool(forKey: SettingsKey.keepOnTop)
+    }
+
+    func transform(_ tool: Tool) -> TransformToolModel {
+        if let model = transforms[tool] { return model }
+        let model = TransformToolModel(spec: TransformSpec.make(tool)!)
+        transforms[tool] = model
+        return model
+    }
+
+    func applyWindowLevel() {
+        mainWindow?.level = keepOnTop ? .floating : .normal
     }
 
     func model(for tool: Tool) -> ToolModel {
@@ -56,6 +93,16 @@ final class AppModel {
         case .color: color
         case .numberBase: numberBase
         case .textCase: textCase
+        case .urlParser: urlParser
+        case .stringInspector: stringInspector
+        case .lorem: lorem
+        case .randomString: randomString
+        case .qrCode: qrCode
+        case .certificate: certificate
+        case .cron: cron
+        case .yamlToJSON, .jsonToYAML, .csvToJSON, .jsonToCSV, .htmlEntities, .backslash, .htmlFormat, .cssFormat,
+             .xmlFormat, .sqlFormat, .svgToCSS, .hexText, .lineSort, .gzip:
+            transform(tool)
         }
     }
 
@@ -65,7 +112,20 @@ final class AppModel {
         NSApp.windows.first { $0.identifier?.rawValue == "main" }
     }
 
-    var visibleTools: [Tool] { Tool.allCases.filter { $0.matches(filter: sidebarFilter) } }
+    /// Sidebar tools: not hidden, matching the filter. A hidden tool still shows while a filter
+    /// matches it, so typing its name always finds it.
+    var visibleTools: [Tool] {
+        let query = sidebarFilter.trimmingCharacters(in: .whitespaces)
+        return Tool.allCases.filter { (!hiddenTools.contains($0) || !query.isEmpty) && $0.matches(filter: query) }
+    }
+
+    /// Tools in sidebar order without the hidden ones (⌘1…⌘9 follow this).
+    var shownTools: [Tool] { Tool.allCases.filter { !hiddenTools.contains($0) } }
+
+    func hide(_ tool: Tool) {
+        hiddenTools.insert(tool)
+        if selection == tool, let next = shownTools.first { selection = next }
+    }
 
     // MARK: - Actions
 
@@ -116,6 +176,13 @@ final class AppModel {
 
     /// ⇧⌘C
     func copyOutput() {
+        if selection == .qrCode, qrCode.mode == .generate {
+            guard let png = qrCode.pngData else { NSSound.beep(); return }
+            clipboard.setPNG(png)
+            reader.noteOwnWrite(clipboard)
+            HUD.show("Copied QR Code", systemImage: "doc.on.doc")
+            return
+        }
         guard let output = current.primaryOutput, !output.isEmpty else {
             NSSound.beep()
             return
@@ -148,6 +215,7 @@ final class AppModel {
         // Reversible tools flip direction, so decode → output → encode round-trips.
         if let base64 = model as? Base64ToolModel { base64.mode = base64.mode == .encode ? .decode : .encode }
         if let url = model as? URLToolModel { url.mode = url.mode == .encode ? .decode : .encode }
+        if let transform = model as? TransformToolModel { transform.flipMode() }
         setInput(output, on: model, actionName: "Use Output as Input")
         model.editor.focus()
     }
@@ -186,14 +254,101 @@ final class AppModel {
         }
     }
 
+    // MARK: - Input header buttons
+
+    /// "Clipboard": the clipboard's text into this tool, without detection.
+    func pasteClipboardIntoCurrentTool() {
+        if selection == .qrCode, qrCode.mode == .read {
+            readQRFromClipboard()
+            return
+        }
+        guard let text = clipboard.string(), !text.isEmpty else {
+            HUD.show("The clipboard has no text", systemImage: "doc.on.clipboard")
+            return
+        }
+        reader.noteOwnWrite(clipboard)
+        let model = current
+        model.receive(Detector.Detection(tool: selection, input: text, hint: Detector.detect(text)?.hint ?? .none))
+        setInput(text, on: model, actionName: "Paste")
+        model.editor.focus()
+    }
+
+    /// "Sample": an example input, so a tool can be tried right away.
+    func loadSample() {
+        switch selection {
+        case .regex:
+            regex.pattern = Samples.regexPattern
+            setInput(Samples.regexText, on: regex, actionName: "Sample")
+        case .diff:
+            diff.changed = Samples.diffChanged
+            setInput(Samples.diffOriginal, on: diff, actionName: "Sample")
+        case .uuid:
+            uuid.mode = .inspect
+            setInput(uuid.sampleInput ?? "", on: uuid, actionName: "Sample")
+        case .lorem:
+            lorem.generate()
+        case .randomString:
+            randomString.generate()
+        default:
+            guard let sample = current.sampleInput else { NSSound.beep(); return }
+            if selection == .qrCode { qrCode.mode = .generate }
+            setInput(sample, on: current, actionName: "Sample")
+        }
+        current.editor.focus()
+    }
+
+    var canLoadSample: Bool {
+        switch selection {
+        case .regex, .diff, .uuid, .lorem, .randomString: true
+        default: current.sampleInput != nil
+        }
+    }
+
+    func readQRFromClipboard() {
+        if let data = clipboard.imageData() {
+            selection = .qrCode
+            qrCode.read(imageData: data)
+        } else if let file = clipboard.fileURL() {
+            selection = .qrCode
+            qrCode.read(url: file)
+        } else {
+            HUD.show("The clipboard has no image", systemImage: "photo")
+        }
+    }
+
+    /// ⇧⌘R: detect what's on the clipboard, run the tool, and put the result back.
+    func replaceClipboard() {
+        guard let text = clipboard.string(), !text.isEmpty, let detection = Detector.detect(text) else {
+            NSSound.beep()
+            HUD.show("No tool recognizes the clipboard", systemImage: "doc.on.clipboard")
+            return
+        }
+        apply(detection, actionName: "Replace Clipboard")
+        let model = model(for: detection.tool)
+        Task { @MainActor in
+            // Small inputs are converted at once; large ones on a background thread.
+            for _ in 0..<60 {
+                await Task.yield()
+                if model.input == detection.input, let output = model.primaryOutput, !output.isEmpty {
+                    clipboard.setString(output)
+                    reader.noteOwnWrite(clipboard)
+                    HUD.show("Clipboard replaced (\(detection.tool.title))", systemImage: "arrow.triangle.2.circlepath")
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            NSSound.beep()
+        }
+    }
+
     func select(index: Int) {
-        let tools = Tool.allCases
+        let tools = shownTools
         guard tools.indices.contains(index) else { return }
         selection = tools[index]
     }
 
     func selectNext(_ offset: Int) {
-        let tools = visibleTools.isEmpty ? Tool.allCases : visibleTools
+        let tools = visibleTools.isEmpty ? shownTools : visibleTools
         guard let index = tools.firstIndex(of: selection) else {
             selection = tools.first ?? .json
             return

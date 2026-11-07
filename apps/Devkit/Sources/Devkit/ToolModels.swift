@@ -12,11 +12,14 @@ protocol ToolModel: AnyObject {
     var primaryOutput: String? { get }
     /// Shown in the HUD after Copy Output, e.g. "Copied SHA-256".
     var primaryOutputName: String { get }
+    /// What the Sample button fills in (nil: no sample).
+    var sampleInput: String? { get }
     func receive(_ detection: Detector.Detection)
 }
 
 extension ToolModel {
     var primaryOutputName: String { "Output" }
+    var sampleInput: String? { nil }
     func receive(_ detection: Detector.Detection) {}
 }
 
@@ -34,6 +37,9 @@ enum SettingsKey {
     static let jsonSortKeys = "jsonSortKeys"
     static let stackVertically = "stackVertically"
     static let selectedTool = "selectedTool"
+    static let hiddenTools = "hiddenTools"
+    static let showMenuBarIcon = "showMenuBarIcon"
+    static let keepOnTop = "keepOnTop"
 }
 
 /// Output shown in a text view is capped so a 50 MB result doesn't stall the UI; Copy
@@ -304,6 +310,9 @@ final class JWTToolModel: ToolModel {
     var input = "" { didSet { if input != oldValue { update() } } }
     var secret = "" { didSet { verify() } }
     var secretIsBase64 = false { didSet { verify() } }
+    /// PEM, certificate or JWK, for RS/PS/ES tokens.
+    var publicKey = "" { didSet { if publicKey != oldValue { verify() } } }
+    let publicKeyEditor = EditorHandle()
 
     private(set) var decoded: JWT.Decoded?
     private(set) var error: String?
@@ -345,6 +354,10 @@ final class JWTToolModel: ToolModel {
     private func verify() {
         secretError = nil
         guard let decoded else { verification = nil; return }
+        if JWT.isAsymmetric(decoded.algorithm) {
+            verification = JWT.verify(decoded, publicKey: publicKey)
+            return
+        }
         let key: Data
         if secretIsBase64 {
             guard secret.isEmpty || (try? Base64.decode(secret)) != nil else {
@@ -856,7 +869,7 @@ final class ColorToolModel: ToolModel {
 
     func setFromPicker(_ nsColor: NSColor) {
         guard let srgb = nsColor.usingColorSpace(.sRGB) else { return }
-        let picked = RGBAColor(red: srgb.redComponent, green: srgb.greenComponent, blue: srgb.blueComponent, alpha: srgb.alphaComponent)
+        let picked = RGBAColor(red: srgb.redComponent, green: srgb.greenComponent, blue: srgb.blueComponent, alpha: srgb.alphaComponent) // lint:allow the colour the user picked
         let hex = ColorConverter.rows(for: picked)[0].value
         if hex != rows.first?.value { input = hex }
     }

@@ -11,8 +11,9 @@ struct JWTToolView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            NoteBar("Decoding doesn't check the signature: add the secret or public key under the claims to verify it.")
             SplitPanes {
-                Pane("Token") {
+                Pane("Token", accessory: { InputActions(app: app) }) {
                     CodeTextView(text: $model.input,
                                  placeholder: "Paste a JWT (header.payload.signature), or press ⇧⌘V to paste and detect. Nothing leaves your Mac.",
                                  accessibilityLabel: "JWT", handle: model.editor)
@@ -71,7 +72,7 @@ struct JWTToolView: View {
                 StatusLine(kind: .info, text: "This token has no expiry (exp) claim.", hint: "⇧⌘C copies the payload")
             }
         } else {
-            StatusLine(kind: .info, text: "", hint: "Decoding never checks the signature; add the secret below the claims to verify HMAC tokens.")
+            StatusLine(kind: .info, text: "")
         }
     }
 }
@@ -118,7 +119,7 @@ struct ClaimsView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
-                Divider()
+                Hairline()
                 if token.algorithm?.hasPrefix("HS") == true {
                     HStack(spacing: Spacing.s) {
                         CodeField(text: $model.secret, placeholder: "Secret, to check the signature", accessibilityLabel: "Secret")
@@ -126,9 +127,25 @@ struct ClaimsView: View {
                             .help("The secret is Base64 or base64url encoded")
                             .accessibilityLabel("Secret is Base64")
                     }
+                } else if JWT.isAsymmetric(token.algorithm) {
+                    verification
+                        .font(.callout)
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("Public key")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        CodeTextView(text: $model.publicKey,
+                                     placeholder: "PEM (-----BEGIN PUBLIC KEY-----), a certificate, a JWK or a JWK Set",
+                                     accessibilityLabel: "Public key", handle: model.publicKeyEditor)
+                            .frame(height: 96)
+                            .clipShape(RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+                            .hairlineBorder(RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+                    }
                 }
-                verification
-                    .font(.callout)
+                if !JWT.isAsymmetric(token.algorithm) {
+                    verification
+                        .font(.callout)
+                }
             }
             .padding(Spacing.m)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -137,20 +154,25 @@ struct ClaimsView: View {
 
     @ViewBuilder private var verification: some View {
         if let error = model.secretError {
-            Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red)
+            Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.textRed)
         } else {
             switch model.verification {
             case .verified?:
-                Label("Signature verified", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                Label("Signature verified", systemImage: "checkmark.seal.fill").foregroundStyle(.textGreen)
             case .mismatch?:
-                Label("The signature doesn't match this secret", systemImage: "xmark.seal.fill").foregroundStyle(.red)
+                Label(JWT.isAsymmetric(token.algorithm) ? "The signature doesn't match this key" : "The signature doesn't match this secret",
+                      systemImage: "xmark.seal.fill").foregroundStyle(.textRed)
+            case let .badKey(reason)?:
+                Label(reason, systemImage: "key.slash").foregroundStyle(.textOrange)
             case .unsigned?:
-                Label("Unsigned token (alg: none). Anyone could have written it.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Label("Unsigned token (alg: none). Anyone could have written it.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.textOrange)
             case let .unsupported(algorithm)?:
-                Text("\(algorithm) signatures need a public key; only HMAC (HS256, HS384, HS512) can be checked here.")
+                Text("\(algorithm) signatures can't be checked here. Supported: HS, RS, PS and ES (256/384/512).")
                     .foregroundStyle(.secondary)
             case .needsSecret?, nil:
-                Text("Type the secret to check the signature. It stays on this Mac.")
+                Text(JWT.isAsymmetric(token.algorithm)
+                     ? "Paste the public key to check the signature. It stays on this Mac."
+                     : "Type the secret to check the signature. It stays on this Mac.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -166,12 +188,14 @@ struct RegexToolView: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: Spacing.s) {
                 HStack(spacing: Spacing.s) {
-                    Text("/").foregroundStyle(.tertiary).font(.title3.monospaced()).accessibilityHidden(true)
+                    Text("/").foregroundStyle(.secondary).font(.title3.monospaced()).accessibilityHidden(true)
                     CodeField(text: $model.pattern, placeholder: "Regular expression, e.g. (\\w+)@(\\w+)\\.com",
                               accessibilityLabel: "Pattern", size: .large, focusOnAppear: model.pattern.isEmpty)
                         .frame(height: 30)
-                    Text("/").foregroundStyle(.tertiary).font(.title3.monospaced()).accessibilityHidden(true)
+                    Text("/").foregroundStyle(.secondary).font(.title3.monospaced()).accessibilityHidden(true)
                 }
+                // One line per flag; a narrow window scrolls the row rather than wrapping labels.
+                ScrollView(.horizontal) {
                 HStack(spacing: Spacing.l) {
                     Toggle("Ignore case", isOn: flag(.caseInsensitive))
                         .help("i: letters match either case")
@@ -181,18 +205,21 @@ struct RegexToolView: View {
                         .help("s: the dot also matches line breaks")
                     Toggle("Allow comments", isOn: flag(.extended))
                         .help("x: whitespace in the pattern is ignored and # starts a comment")
-                    Spacer(minLength: 0)
                     if model.job.isBusy {
                         ProgressView().controlSize(.small).accessibilityLabel("Working")
                     }
                 }
-                .font(.callout)
+                .lineLimit(1)
+                .fixedSize()
+                }
+                .scrollIndicators(.never)
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             }
             .padding(.horizontal, Spacing.m)
             .padding(.vertical, Spacing.m)
-            Divider()
+            Hairline()
             SplitPanes {
-                Pane("Test Text") {
+                Pane("Test Text", accessory: { InputActions(app: app) }) {
                     InputEditor(text: $model.input, placeholder: "Type or paste text to test the pattern against. Matches are highlighted.",
                                 accessibilityLabel: "Test text", handle: model.editor,
                                 styles: model.styles, stylesVersion: model.stylesVersion) { app.clearInput() }
@@ -211,7 +238,7 @@ struct RegexToolView: View {
                             CodeField(text: $model.template, placeholder: "Replacement, e.g. $2:$1 or ${name}",
                                       accessibilityLabel: "Replacement template")
                                 .padding(Spacing.s)
-                            Divider()
+                            Hairline()
                             CodeTextView(text: .constant(model.template.isEmpty ? "" : (model.replaced ?? "")), isEditable: false,
                                          placeholder: model.template.isEmpty ? "Type a replacement to preview the result." : "",
                                          accessibilityLabel: "Replacement result")
@@ -277,7 +304,7 @@ struct MatchesList: View {
                             Spacer(minLength: Spacing.s)
                             Text("\(match.range.location)–\(match.range.location + match.range.length)")
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.secondary)
                                 .help("Position in UTF-16 code units")
                             CopyButton(label: "Match \(match.index)") { copy(match.text) }
                         }
@@ -289,16 +316,18 @@ struct MatchesList: View {
                                     .frame(minWidth: 60, alignment: .trailing)
                                 Text(group.text ?? "no match")
                                     .font(.callout.monospaced())
-                                    .foregroundStyle(group.text == nil ? .tertiary : .primary)
+                                    .foregroundStyle(group.text == nil ? .secondary : .primary)
                                     .textSelection(.enabled)
                                     .lineLimit(2)
                             }
                         }
                     }
                     .padding(.vertical, 2)
+                    .paneListRow()
                     .accessibilityElement(children: .combine)
                 }
             }
+            .paneList()
         }
     }
 }
@@ -326,7 +355,7 @@ struct DiffToolView: View {
             }
             SplitStack(axis: .vertical, fraction: $inputsFraction, minimum: 120, accessibilityLabel: "Texts and differences divider") {
                 SplitStack(axis: .horizontal, fraction: $sidesFraction, minimum: 200, accessibilityLabel: "Original and changed divider") {
-                    Pane("Original") {
+                    Pane("Original", accessory: { InputActions(app: app) }) {
                         InputEditor(text: $model.input, placeholder: "Paste the original text.",
                                     accessibilityLabel: "Original text", handle: model.editor) { model.input = "" }
                     }
@@ -392,7 +421,7 @@ struct SideBySideDiff: View {
                         HStack(spacing: 0) {
                             side(number: row.oldLine, text: row.oldText, highlights: row.oldHighlights,
                                  tint: row.kind == .removed || row.kind == .changed ? .red : nil, width: oldWidth)
-                            Divider()
+                            Hairline(axis: .vertical)
                             side(number: row.newLine, text: row.newText, highlights: row.newHighlights,
                                  tint: row.kind == .added || row.kind == .changed ? .green : nil, width: newWidth)
                         }
@@ -420,7 +449,7 @@ struct SideBySideDiff: View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
             Text(number.map(String.init) ?? "")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .frame(width: 40, alignment: .trailing)
             Text(attributed(text ?? "", highlights: highlights, tint: tint))
                 .font(.body.monospaced())

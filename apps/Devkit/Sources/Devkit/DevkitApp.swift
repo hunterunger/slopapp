@@ -22,6 +22,41 @@ struct DevkitApp: App {
             DevkitSettings(info: info, model: model)
                 .defaultAppStorage(Diagnostics.defaults)
         }
+
+        // Optional, off by default: click to show the window, like a status-bar utility.
+        MenuBarExtra(isInserted: $showMenuBarIcon) {
+            DevkitMenuBarMenu(model: model, info: info)
+        } label: {
+            Label(info.name, systemImage: "curlybraces.square")
+        }
+    }
+
+    @AppStorage(SettingsKey.showMenuBarIcon, store: Diagnostics.defaults) private var showMenuBarIcon = false
+}
+
+struct DevkitMenuBarMenu: View {
+    let model: AppModel
+    let info: AppInfo
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Show \(info.name)") { show() }
+        Button("Paste and Detect") {
+            show()
+            model.pasteAndDetect()
+        }
+        Button("Replace Clipboard") { model.replaceClipboard() }
+            .help("Convert what's on the clipboard with the tool that recognizes it")
+        MenuFooter(info: info)
+    }
+
+    private func show() {
+        AppActivation.activate()
+        if let window = model.mainWindow {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            openWindow(id: "main")
+        }
     }
 }
 
@@ -51,12 +86,28 @@ struct DevkitCommands: Commands {
             Button("Clear Input") { model.clearInput() }
                 .keyboardShortcut("k")
                 .disabled(!model.canClearInput)
-            if model.selection == .uuid {
+            Button("Paste Clipboard into Tool") { model.pasteClipboardIntoCurrentTool() }
+                .keyboardShortcut("v", modifiers: [.command, .option])
+            Button("Load Sample") { model.loadSample() }
+                .disabled(!model.canLoadSample)
+            Divider()
+            Button("Replace Clipboard with Output") { model.replaceClipboard() }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            switch model.selection {
+            case .uuid:
                 Button("Generate New IDs") {
                     model.uuid.mode = .generate
                     model.uuid.generate()
                 }
                 .keyboardShortcut("r")
+            case .lorem:
+                Button("Generate New Text") { model.lorem.generate() }
+                    .keyboardShortcut("r")
+            case .randomString:
+                Button("Generate New Strings") { model.randomString.generate() }
+                    .keyboardShortcut("r")
+            default:
+                EmptyView()
             }
         }
         CommandGroup(after: .textEditing) {
@@ -79,7 +130,7 @@ struct DevkitCommands: Commands {
             Divider()
         }
         CommandMenu("Tools") {
-            ForEach(Array(Tool.allCases.enumerated()), id: \.element) { index, tool in
+            ForEach(Array(model.shownTools.enumerated()), id: \.element) { index, tool in
                 if index < 9 {
                     Toggle(tool.title, isOn: selected(tool))
                         .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
@@ -95,6 +146,14 @@ struct DevkitCommands: Commands {
             Divider()
             Button("Filter Tools") { WindowFocus.focusSearchField() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
+            Button("Search Tools") { WindowFocus.focusSearchField() }
+                .keyboardShortcut("/")
+            Divider()
+            Toggle("Keep Window on Top", isOn: $model.keepOnTop)
+                .keyboardShortcut("t", modifiers: [.command, .option])
+            if !model.hiddenTools.isEmpty {
+                Button("Show \(model.hiddenTools.count) Hidden \(model.hiddenTools.count == 1 ? "Tool" : "Tools")") { model.hiddenTools = [] }
+            }
         }
         CommandGroup(replacing: .help) {
             Button("\(info.name) Help") {
@@ -180,6 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if Snapshot.runIfAsked() { return }
         KeyboardShortcuts.onKeyUp(for: .showAndDetect) {
             NSApp.activate(ignoringOtherApps: true)
             if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
@@ -198,7 +258,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        standard.applicationShouldTerminateAfterLastWindowClosed(sender)
+        // With the menu bar icon on, Devkit stays there after its window closes.
+        if Diagnostics.defaults.bool(forKey: SettingsKey.showMenuBarIcon) { return false }
+        return standard.applicationShouldTerminateAfterLastWindowClosed(sender)
     }
 }
 
@@ -207,23 +269,72 @@ struct DevkitSettings: View {
     let model: AppModel
     @AppStorage(SettingsKey.readClipboardOnOpen) private var readClipboard = false
     @AppStorage(SettingsKey.jsonIndent) private var jsonIndent = JSONFormatter.Indent.two.rawValue
+    @AppStorage(SettingsKey.showMenuBarIcon) private var showMenuBarIcon = false
 
     var body: some View {
         SlopSettings(info: info, isMenuBarApp: false) {
-            Toggle("Read the clipboard when Devkit opens", isOn: $readClipboard)
-            Text("When the clipboard holds something a tool recognizes, like a JWT or JSON, Devkit opens that tool with it. Passwords and other private clipboard items are skipped. Off by default; ⇧⌘V always works.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Toggle(isOn: $readClipboard) {
+                Text("Read the clipboard when Devkit opens")
+                Text("When the clipboard holds something a tool recognizes, like a JWT or JSON, Devkit opens that tool with it. Passwords and other private clipboard items are skipped. ⇧⌘V always works.")
+            }
             Picker("JSON indent", selection: $jsonIndent) {
                 ForEach(JSONFormatter.Indent.allCases) { Text($0.title).tag($0.rawValue) }
             }
             .onChange(of: jsonIndent) { model.json.reloadSettings() }
+            Toggle(isOn: $showMenuBarIcon) {
+                Text("Show in menu bar")
+                Text("Click the icon to bring Devkit forward, paste and detect, or replace the clipboard. Closing the window keeps Devkit in the menu bar.")
+            }
         } shortcuts: {
-            ShortcutRow("Show Devkit and paste and detect", name: .showAndDetect)
-            Text("Works from any app. Not set by default.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            ShortcutRow("Show Devkit and paste and detect", subtitle: "Works from any app. Not set by default.",
+                        name: .showAndDetect)
+        } advanced: {
+            ToolVisibilitySettings(model: model)
         }
+    }
+}
+
+/// Settings ▸ Advanced: which tools the sidebar shows.
+struct ToolVisibilitySettings: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        Section {
+            // Two columns of checkboxes keep 33 tools to a window that fits a laptop screen.
+            let tools = Tool.allCases
+            let half = (tools.count + 1) / 2
+            Grid(alignment: .leading, horizontalSpacing: Spacing.xl, verticalSpacing: Spacing.xs) {
+                ForEach(0..<half, id: \.self) { row in
+                    GridRow {
+                        toggle(tools[row])
+                        if row + half < tools.count { toggle(tools[row + half]) }
+                    }
+                }
+            }
+        } header: {
+            Text("Tools in the Sidebar")
+        } footer: {
+            HStack {
+                Text("Hidden tools still appear when you search for them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Show All") { model.hiddenTools = [] }
+                    .disabled(model.hiddenTools.isEmpty)
+            }
+        }
+    }
+
+    private func toggle(_ tool: Tool) -> some View {
+        // Each column takes half the section, so the grid fills it evenly.
+        Toggle(tool.title, isOn: Binding(
+            get: { !model.hiddenTools.contains(tool) },
+            set: { show in
+                if show { model.hiddenTools.remove(tool) } else { model.hide(tool) }
+            }
+        ))
+        .toggleStyle(.checkbox)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .disabled(!model.hiddenTools.contains(tool) && model.shownTools.count <= 1)
     }
 }

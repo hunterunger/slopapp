@@ -40,8 +40,13 @@ struct MainView: View {
                 }
                 .help("Copy the output (⇧⌘C)")
                 .disabled(!model.canCopyOutput)
+                Toggle(isOn: $model.keepOnTop) {
+                    Label("Keep on Top", systemImage: model.keepOnTop ? "pin.fill" : "pin")
+                }
+                .help(model.keepOnTop ? "Stop floating above other windows" : "Float above other windows")
             }
         }
+        .background(WindowAccessor { _ in model.applyWindowLevel() })
         .frame(minWidth: 760, minHeight: 460)
     }
 }
@@ -66,7 +71,13 @@ struct Sidebar: View {
                         .frame(width: 22)
                 }
                 .tag(tool)
-                    .help(tool.subtitle)
+                .help(tool.subtitle)
+                .contextMenu {
+                    Button("Hide “\(tool.title)”") { model.hide(tool) }
+                        .disabled(model.shownTools.count <= 1)
+                    Button("Show Hidden Tools") { model.hiddenTools = [] }
+                        .disabled(model.hiddenTools.isEmpty)
+                }
             }
         }
         .searchable(text: $model.sidebarFilter, placement: .sidebar, prompt: "Filter Tools")
@@ -99,6 +110,29 @@ struct ToolDetail: View {
         case .color: ColorToolView(model: model.color, app: model)
         case .numberBase: NumberBaseToolView(model: model.numberBase, app: model)
         case .textCase: CaseToolView(model: model.textCase, app: model)
+        case .urlParser: URLParserToolView(model: model.urlParser, app: model)
+        case .stringInspector: StringInspectorToolView(model: model.stringInspector, app: model)
+        case .lorem: LoremToolView(model: model.lorem, app: model)
+        case .randomString: RandomStringToolView(model: model.randomString, app: model)
+        case .qrCode: QRToolView(model: model.qrCode, app: model)
+        case .certificate: CertificateToolView(model: model.certificate, app: model)
+        case .cron: CronToolView(model: model.cron, app: model)
+        case .yamlToJSON, .jsonToYAML, .csvToJSON, .jsonToCSV, .htmlEntities, .backslash, .htmlFormat, .cssFormat,
+             .xmlFormat, .sqlFormat, .svgToCSS, .hexText, .lineSort, .gzip:
+            TransformToolView(model: model.transform(model.selection), app: model)
         }
     }
+}
+
+/// Calls back when the view lands in a window (to apply the window level on launch).
+struct WindowAccessor: NSViewRepresentable {
+    let onWindow: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { if let window = view.window { onWindow(window) } }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

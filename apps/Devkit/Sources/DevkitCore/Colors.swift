@@ -58,7 +58,7 @@ public struct RGBAColor: Sendable, Equatable {
         let x = c * (1 - abs(h.truncatingRemainder(dividingBy: 2) - 1))
         let m = lightness - c / 2
         let (r, g, b) = sector(h, c, x)
-        return RGBAColor(red: r + m, green: g + m, blue: b + m, alpha: alpha)
+        return RGBAColor(red: r + m, green: g + m, blue: b + m, alpha: alpha) // lint:allow colour-tool data, not UI
     }
 
     public static func fromHSB(hue: Double, saturation: Double, brightness: Double, alpha: Double = 1) -> RGBAColor {
@@ -67,7 +67,7 @@ public struct RGBAColor: Sendable, Equatable {
         let x = c * (1 - abs(h.truncatingRemainder(dividingBy: 2) - 1))
         let m = brightness - c
         let (r, g, b) = sector(h, c, x)
-        return RGBAColor(red: r + m, green: g + m, blue: b + m, alpha: alpha)
+        return RGBAColor(red: r + m, green: g + m, blue: b + m, alpha: alpha) // lint:allow colour-tool data, not UI
     }
 
     private static func sector(_ h: Double, _ c: Double, _ x: Double) -> (Double, Double, Double) {
@@ -122,7 +122,7 @@ public enum ColorConverter {
             let alpha = parts.count == 4 ? try fraction(parts[3]) : 1
             switch name {
             case "rgb", "rgba":
-                return RGBAColor(red: try channel(parts[0]), green: try channel(parts[1]), blue: try channel(parts[2]), alpha: alpha)
+                return RGBAColor(red: try channel(parts[0]), green: try channel(parts[1]), blue: try channel(parts[2]), alpha: alpha) // lint:allow colour-tool data, not UI
             case "hsl", "hsla":
                 return .fromHSL(hue: try degrees(parts[0]), saturation: try fraction(parts[1]), lightness: try fraction(parts[2]), alpha: alpha)
             case "hsb", "hsba", "hsv", "hsva":
@@ -144,7 +144,7 @@ public enum ColorConverter {
         var digits = Array(body)
         if digits.count <= 4 { digits = digits.flatMap { [$0, $0] } }
         func byte(_ index: Int) -> Double { Double(Int(String(digits[index * 2...index * 2 + 1]), radix: 16)!) / 255 }
-        return RGBAColor(red: byte(0), green: byte(1), blue: byte(2), alpha: digits.count == 8 ? byte(3) : 1)
+        return RGBAColor(red: byte(0), green: byte(1), blue: byte(2), alpha: digits.count == 8 ? byte(3) : 1) // lint:allow colour-tool data, not UI
     }
 
     static func number(_ text: String) throws -> Double {
@@ -195,15 +195,15 @@ public enum ColorConverter {
         }
         let alpha = n(color.alpha, 2)
         func component(_ value: Double) -> String { String(format: "%.3f", value) }
-        let white = RGBAColor(red: 1, green: 1, blue: 1)
-        let black = RGBAColor(red: 0, green: 0, blue: 0)
+        let white = RGBAColor(red: 1, green: 1, blue: 1) // lint:allow colour-tool data, not UI
+        let black = RGBAColor(red: 0, green: 0, blue: 0) // lint:allow colour-tool data, not UI
         return [
             Row("Hex", hex),
             Row("RGB", opaque ? "rgb(\(r) \(g) \(b))" : "rgb(\(r) \(g) \(b) / \(alpha))"),
             Row("RGB (legacy)", opaque ? "rgb(\(r), \(g), \(b))" : "rgba(\(r), \(g), \(b), \(alpha))"),
             Row("HSL", "hsl(\(n(hsl.hue)) \(n(hsl.saturation * 100))% \(n(hsl.lightness * 100))%" + (opaque ? ")" : " / \(alpha))")),
             Row("HSB", "hsb(\(n(hsb.hue)) \(n(hsb.saturation * 100))% \(n(hsb.brightness * 100))%" + (opaque ? ")" : " / \(alpha))")),
-            Row("SwiftUI", "Color(red: \(component(color.red)), green: \(component(color.green)), blue: \(component(color.blue))" + (opaque ? ")" : ", opacity: \(component(color.alpha)))")),
+            Row("SwiftUI", "Color(red: \(component(color.red)), green: \(component(color.green)), blue: \(component(color.blue))" + (opaque ? ")" : ", opacity: \(component(color.alpha)))")), // lint:allow colour-tool data, not UI
             Row("AppKit", "NSColor(srgbRed: \(component(color.red)), green: \(component(color.green)), blue: \(component(color.blue)), alpha: \(component(color.alpha)))"),
             Row("Contrast", "\(n(color.contrast(with: white), 2)):1 on white, \(n(color.contrast(with: black), 2)):1 on black"),
         ]

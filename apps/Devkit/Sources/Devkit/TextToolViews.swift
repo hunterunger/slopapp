@@ -28,7 +28,7 @@ struct JSONToolView: View {
                 Toggle("Sort keys", isOn: $model.sortKeys)
             }
             SplitPanes {
-                Pane("Input") {
+                Pane("Input", accessory: { InputActions(app: app) }) {
                     InputEditor(text: $model.input, placeholder: "Paste JSON, \(pastePrompt)",
                                 accessibilityLabel: "JSON input", handle: model.editor) { app.clearInput() }
                 }
@@ -82,13 +82,11 @@ struct Base64ToolView: View {
                     Toggle("URL-safe (base64url)", isOn: $model.urlSafe)
                     Toggle("Padding", isOn: $model.padding)
                 } else {
-                    Text("Accepts standard and URL-safe Base64, with or without padding.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    ToolNote("Accepts standard and URL-safe Base64, with or without padding.")
                 }
             }
             SplitPanes {
-                Pane(model.mode == .encode ? "Text" : "Base64") {
+                Pane(model.mode == .encode ? "Text" : "Base64", accessory: { InputActions(app: app) }) {
                     InputEditor(text: $model.input,
                                 placeholder: model.mode == .encode ? "Type or paste text to encode, \(pastePrompt)" : "Paste Base64 to decode, \(pastePrompt)",
                                 accessibilityLabel: model.mode == .encode ? "Text to encode" : "Base64 to decode", handle: model.editor) { app.clearInput() }
@@ -137,7 +135,7 @@ struct URLToolView: View {
                 }
             }
             SplitPanes {
-                Pane(model.mode == .encode ? "Text" : "Encoded") {
+                Pane(model.mode == .encode ? "Text" : "Encoded", accessory: { InputActions(app: app) }) {
                     InputEditor(text: $model.input,
                                 placeholder: model.mode == .encode ? "Type or paste text to percent-encode, \(pastePrompt)" : "Paste percent-encoded text, \(pastePrompt)",
                                 accessibilityLabel: model.mode == .encode ? "Text to encode" : "Text to decode", handle: model.editor) { app.clearInput() }
@@ -177,12 +175,13 @@ struct HashToolView: View {
                     .help("Hash with a secret key (HMAC) instead of a plain digest.")
                 if model.useHMAC {
                     CodeField(text: $model.hmacKey, placeholder: "Key", accessibilityLabel: "HMAC key")
-                        .frame(maxWidth: 200)
+                        // A fixed width: the options row sizes controls to their ideal width.
+                        .frame(width: 180, height: ToolMetrics.rowControlHeight)
                 }
                 Button("Hash a File…") { choosingFile = true }
             }
             SplitPanes {
-                Pane(model.file == nil ? "Text" : "File") {
+                Pane(model.file == nil ? "Text" : "File", accessory: { InputActions(app: app) }) {
                     if let file = model.file {
                         FileCard(file: file) { model.cancelFile() }
                     } else {
@@ -206,17 +205,17 @@ struct HashToolView: View {
                                 app.copy(row.value, name: row.label)
                             }
                         }
-                        Divider()
+                        Hairline()
                         HStack(spacing: Spacing.s) {
                             CodeField(text: $model.expected, placeholder: "Paste a checksum to compare",
                                       accessibilityLabel: "Checksum to compare")
                             if !model.expected.isEmpty, !model.rows.isEmpty {
                                 if let matched = model.matched {
                                     Label("Matches \(matched.title)", systemImage: "checkmark.circle.fill")
-                                        .foregroundStyle(.green)
+                                        .foregroundStyle(.textGreen)
                                 } else {
                                     Label("No match", systemImage: "xmark.circle.fill")
-                                        .foregroundStyle(.orange)
+                                        .foregroundStyle(.textOrange)
                                 }
                             }
                         }
@@ -267,7 +266,7 @@ struct FileCard: View {
             if let error = file.error {
                 Text(error)
                     .font(.callout)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.textRed)
                     .multilineTextAlignment(.center)
             }
             if file.isHashing {
@@ -288,8 +287,9 @@ struct CaseToolView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            NoteBar("Each line is converted on its own. Words split at spaces, punctuation and case changes; acronyms stay together.")
             SplitPanes {
-                Pane("Text") {
+                Pane("Text", accessory: { InputActions(app: app) }) {
                     InputEditor(text: $model.input,
                                 placeholder: "Type or paste words or identifiers. Each line is converted on its own.",
                                 accessibilityLabel: "Text to convert", handle: model.editor) { app.clearInput() }

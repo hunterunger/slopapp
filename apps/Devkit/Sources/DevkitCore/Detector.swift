@@ -14,6 +14,12 @@ public enum Detector {
         public var tool: Tool
         public var input: String
         public var hint: Hint
+
+        public init(tool: Tool, input: String, hint: Hint) {
+            self.tool = tool
+            self.input = input
+            self.hint = hint
+        }
     }
 
     /// Detection never runs on more text than this.
@@ -35,9 +41,32 @@ public enum Detector {
         if let first = trimmed.first, first == "{" || first == "[", JSONFormatter.isValid(trimmed) {
             return Detection(tool: .json, input: trimmed, hint: .none)
         }
+        // Multi-line and structured formats.
+        if CertificateDecoder.looksLikeCertificate(trimmed) {
+            return Detection(tool: .certificate, input: trimmed, hint: .none)
+        }
+        if trimmed.hasPrefix("<") {
+            if MarkupFormatter.looksLikeHTML(trimmed) { return Detection(tool: .htmlFormat, input: trimmed, hint: .none) }
+            if trimmed.range(of: "<svg", options: .caseInsensitive) != nil, trimmed.hasSuffix("</svg>") {
+                return Detection(tool: .svgToCSS, input: trimmed, hint: .none)
+            }
+            if MarkupFormatter.looksLikeXML(trimmed) { return Detection(tool: .xmlFormat, input: trimmed, hint: .none) }
+        }
+        if SQLFormatter.looksLikeSQL(trimmed) { return Detection(tool: .sqlFormat, input: trimmed, hint: .none) }
+        if Cron.looksLikeCron(trimmed) { return Detection(tool: .cron, input: trimmed, hint: .none) }
+        if CSSFormatter.looksLikeCSS(trimmed) { return Detection(tool: .cssFormat, input: trimmed, hint: .none) }
+        if trimmed.contains("\n") || trimmed.hasPrefix("---") {
+            if YAMLConverter.looksLikeYAML(trimmed) { return Detection(tool: .yamlToJSON, input: trimmed, hint: .none) }
+            if CSVConverter.looksLikeCSV(trimmed) { return Detection(tool: .csvToJSON, input: trimmed, hint: .none) }
+        }
+        if let scheme = trimmed.range(of: "^[a-zA-Z][a-zA-Z0-9+.-]*://[^\\s/]+", options: .regularExpression), scheme.lowerBound == trimmed.startIndex,
+           singleToken, trimmed.contains("?"), !URLCoding.containsEscape(String(trimmed[scheme])) {
+            // URLs with a query string; a bare link isn't worth switching tools for.
+            return Detection(tool: .urlParser, input: trimmed, hint: .none)
+        }
         guard singleToken || trimmed.lowercased().hasPrefix("rgb") || trimmed.lowercased().hasPrefix("hsl") else {
-            // Multi-word text: only URL escapes can still apply.
-            return urlEncoded(trimmed)
+            // Multi-word text: only escapes can still apply.
+            return urlEncoded(trimmed) ?? escapes(trimmed)
         }
         // 3. UUID / ULID
         if Identifiers.parseUUID(trimmed) != nil || (trimmed.count == 26 && Identifiers.decodeULID(trimmed) != nil && isULIDShaped(trimmed)) {
@@ -53,7 +82,10 @@ public enum Detector {
         }
         // 6. URL-encoded
         if let detection = urlEncoded(trimmed) { return detection }
-        // 7. Base64
+        // 7. Compressed data, then Base64
+        if GZip.looksLikeCompressedBase64(trimmed) {
+            return Detection(tool: .gzip, input: trimmed, hint: .decode)
+        }
         if isLikelyBase64(trimmed) {
             return Detection(tool: .base64, input: trimmed, hint: .decode)
         }
@@ -61,6 +93,20 @@ public enum Detector {
         let lower = trimmed.lowercased()
         if ["0x", "0b", "0o"].contains(where: lower.hasPrefix), (try? NumberBase.parse(trimmed)) != nil {
             return Detection(tool: .numberBase, input: trimmed, hint: .none)
+        }
+        return escapes(trimmed)
+    }
+
+    /// HTML entities or backslash escapes that decode to something different.
+    static func escapes(_ text: String) -> Detection? {
+        if HTMLEntities.containsReferences(text), HTMLEntities.decode(text) != text {
+            return Detection(tool: .htmlEntities, input: text, hint: .decode)
+        }
+        // "C:\new\temp" is a Windows path, not escapes.
+        if text.range(of: "\\\\(n|t|r|\"|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2})", options: .regularExpression) != nil,
+           text.range(of: "^[A-Za-z]:\\\\", options: .regularExpression) == nil, !text.contains("\n"),
+           let decoded = try? BackslashEscapes.unescape(text), decoded != text {
+            return Detection(tool: .backslash, input: text, hint: .decode)
         }
         return nil
     }

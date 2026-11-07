@@ -16,7 +16,9 @@ struct SplitStack<First: View, Second: View>: View {
     @ViewBuilder var second: () -> Second
 
     @State private var dragStart: Double?
-    private let handle: CGFloat = 1
+    @Environment(\.displayScale) private var displayScale
+    /// One device pixel, like every other hairline (0.5 pt on Retina).
+    private var handle: CGFloat { 1 / max(displayScale > 1 ? displayScale : (NSScreen.main?.backingScaleFactor ?? 2), 1) }
 
     var body: some View {
         GeometryReader { proxy in
@@ -44,7 +46,7 @@ struct SplitStack<First: View, Second: View>: View {
             .fill(Color(nsColor: .separatorColor))
             .frame(width: axis == .horizontal ? handle : nil, height: axis == .vertical ? handle : nil)
             .overlay {
-                // A wider invisible grab area than the 1 pt line.
+                // A wider invisible grab area than the hairline.
                 Color.clear
                     .frame(width: axis == .horizontal ? 9 : nil, height: axis == .vertical ? 9 : nil)
                     .contentShape(Rectangle())

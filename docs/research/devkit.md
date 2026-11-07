@@ -288,6 +288,224 @@ uses SlopKit's KeyboardShortcuts like the other apps.
 | 13 | Reduce Motion | Pass: no custom animations |
 | 14 | Window state persists | Pass: window frame, tool, options, split sizes |
 
+## Parity pass (2026-11-03)
+
+Per [`docs/parity-pass.md`](../parity-pass.md): look and work more like DevUtils, and close the
+feature gap. DevUtils isn't installed, so this was studied from devutils.com (tool list,
+per-tool docs, changelog) and its product screenshots and video posters (downloaded to
+`/tmp/devkit-parity/`, viewed, not committed). The Mac's screen was locked for the whole
+pass, so UI was verified with an offscreen render hook (`DEVKIT_SNAPSHOT`), unit tests and
+test hooks instead of `scripts/drive`.
+
+### What the original's layout is
+
+- Window: sidebar (search field on top, flat list of tools with icons, reorderable, groups
+  optional), tool title in the toolbar, a pin button (float on top) at the top right.
+- Every tool: `Input:` header with **Clipboard**, **Sample**, **Clear** (and a gear for tool
+  settings); input on the left; `Output:` header with option pop-ups and **Copy** on the
+  right. Value tools (Unix time, UUID decode, color) put one input field at the top and a
+  grid of labeled read-only fields, each with a copy button, below.
+- App: status-bar icon (click to show), global hotkey, smart detection from the clipboard on
+  activation, ⚡ "replace the clipboard with the output", ⇧⌘C copy output, ⌘/ search.
+
+### Gap table
+
+| Item (original) | Status | Notes |
+|---|---|---|
+| Sidebar of tools with search | done (already) | Flat list like the original, now 33 tools in the original's rough frequency order; ⇧⌘F and now ⌘/ focus search. |
+| Hide tools ("Manage Tools") | done | Right-click ▸ Hide, Settings ▸ Advanced checkboxes, Tools ▸ Show Hidden; hidden tools still match a search. |
+| Reorder tools by drag, tool groups | deferred (M, ~½ day) | Sidebar `onMove` plus persisted order; groups need a settings UI. Frequency order covers most of the value. |
+| Input header: Clipboard / Sample / Clear | done | `InputActions` on every tool's input pane (and value tools' input row). Clipboard pastes without detection (⌥⌘V). Sample has a real example per tool. |
+| Output header: Copy | done (already) | Copy on every output pane; options stay in the top bar (see deviations). |
+| Pin window on top | done | Toolbar pin toggle and Tools ▸ Keep Window on Top (⌥⌘T); persists. |
+| Status-bar icon | done (opt-in) | Settings ▸ General ▸ Show in menu bar (off by default). Menu: Show, Paste and Detect, Replace Clipboard, Settings, About, Quit. Closing the window keeps Devkit running while it's on. |
+| Global hotkey | done (already) | Unset by default (the original's ⌃⌥⌘Space could clash). |
+| Smart detection on activation | done (already, opt-in) | Detection now covers 22 tools (was 9). |
+| ⚡ Instant clipboard replace (⇧⌘R) | done | Edit ▸ Replace Clipboard with Output, also in the menu bar menu. |
+| Escape hides the window; option-click status icon copies | deferred (S) | Esc currently ends field editing, which matters more in a text tool. |
+| Multiple windows (⌘N) | deferred (M) | Single `Window` scene; models are app-wide. |
+| URL scheme, Alfred/Raycast, CLI, "Inspect in" service | deferred (M) | Same as v1. |
+| JSON format/validate | done (already) | |
+| JSON tree view with folding, JSON Path filter | deferred (L, 1 day) | Needs an outline view over `JSONTree` and a JSONPath evaluator. |
+| JSON ⇄ YAML | done | Yams (libyaml) for parsing with the YAML 1.2 core schema; our own emitter keeps order. YAML spec examples 2.1, 2.2, 2.10 as vectors; round-trip tests. |
+| JSON ⇄ CSV | done | Own RFC 4180 parser/writer (RFC §2 examples as vectors). |
+| HTML beautify/minify | done | Own tolerant parser; inline runs kept on one line, `<pre>`/`<textarea>` verbatim, `<script>`/`<style>` re-indented. |
+| CSS / LESS / SCSS beautify/minify | done | One formatter handles nesting, `//` comments and `#{}` interpolation. |
+| XML beautify/minify | done | Validated with Foundation's `XMLDocument`, formatted by the shared markup printer. |
+| SQL formatter | done | Own tokenizer/formatter, keyword case option, minify. |
+| JS beautify/minify, ERB | deferred (L, 1–2 days) | Needs a real JS tokenizer (regex literals, ASI, template strings); a sloppy one would corrupt code. |
+| Line sort/dedupe | done | Sort orders incl. natural and shuffle, dedupe (case-insensitive option), trim, drop empty. |
+| URL encode/decode | done (already) | |
+| URL parser / query string to JSON | done | Repeated keys and `key[]` become arrays. |
+| HTML entity encode/decode | done | All 2,125 WHATWG named references (generated table), numeric refs. |
+| Backslash escape/unescape | done | `\n \t \" \xHH \uXXXX \u{…}` octal, surrogate pairs. |
+| String inspector | done | Counts plus a per-scalar table (code point, Unicode name, UTF-8, kind). |
+| Number base, string case, Unix time, color, UUID/ULID, hash, diff, regex | done (already) | Unix time "+ - * /" math and Regex match navigation are deferred (S each). |
+| Cron job parser | done | English description and next runs (local or UTC); Vixie day-of-month OR day-of-week rule; macros, names, seconds field. |
+| Lorem ipsum | done | Paragraphs / sentences / words, classic opening optional. |
+| Random string | done | `SystemRandomNumberGenerator`, unbiased; look-alike filter, groups (license keys), entropy shown. |
+| QR code generate / read | done | Core Image generator (L/M/Q/H), PNG save/drag/copy; Vision reader from drop, file or pasted image. Wi-Fi/SMS templates and logo overlay deferred (S–M). |
+| Certificate decoder (X.509) | done | Own DER reader: names, validity, key, SANs, key usage, EKU, CA, key IDs, fingerprints; chains. |
+| JWT HMAC verify | done (already) | |
+| JWT RS/PS/ES verify | done | Security framework (RSA PKCS#1 v1.5 and PSS) and CryptoKit (P-256/384/521). Keys as PEM, PKCS#1, certificate, JWK or JWK Set (picks `kid`). |
+| JWT signing | deferred (M) | Needs private-key handling and UI to edit claims. |
+| Hex ⇄ ASCII | done | One tool with two modes. |
+| SVG to CSS | done | URL-encoded (compact, readable) or Base64 data URI. |
+| GZip / zlib / deflate | done (not in DevUtils; in the brief) | System deflate, own gzip/zlib framing and CRC-32/Adler-32. |
+| Base64 image encode/decode | deferred (S–M, ~½ day) | Drop image → data URI; data URI → preview. |
+| HTML to JSX, cURL to code, JSON to code | deferred (M–L each) | Niche, each needs its own generator per target language. |
+| PHP serializer/unserializer, PHP ⇄ JSON | deferred (M) | Niche. |
+| Keccak-256 hash | deferred (S–M) | Not in CryptoKit; needs our own Keccak-f. |
+| HTML preview, Markdown preview | skipped / deferred | HTML preview needs a web view that could load remote content: skipped (privacy, design system). Markdown preview could be native (`AttributedString(markdown:)` blocks) later (M). |
+
+Result: 33 tools (was 12) against the original's 47; of DevUtils' 47, 37 are covered
+(LESS/SCSS count as covered by CSS, Hex↔ASCII and YAML/CSV pairs count per direction).
+
+### Deviations and decisions
+
+| Decision | Why |
+|---|---|
+| Options stay in a slim bar above the panes, not in the output header | Several tools have 3–5 options; in a 280 pt pane header they'd clip at the minimum window width. The pane headers get the original's Clipboard / Sample / Clear and Copy, so the per-tool layout matches. |
+| Title on the left of the toolbar (native `navigationTitle` + subtitle), not centered | System window chrome; centering would be custom drawing for no gain. |
+| Menu bar icon off by default | v1 behaviour (closing the window quits) stays the default; the original's status-bar flow is one switch away. |
+| YAML uses the 1.2 core schema (`no`, `on`, `yes` stay strings) | What js-yaml (and most current tools) do; avoids the Norway problem. Emitting quotes those words so YAML 1.1 readers agree. |
+| One Hex tool with two modes, one tool per conversion direction for YAML/CSV | Matches the original's sidebar for the conversions people search by name; hex is rarely used either way. |
+| Detection adds certificate, HTML, SVG, XML, SQL, cron, CSS, YAML, CSV, URL-with-query, gzip, HTML entities, backslash escapes; bare URLs and prose stay put | Each rule has false-positive tests (prose with colons, "select … from the menu", `C:\new\temp`, "AT&T", "1 2 3 4 5"). |
+| Yams 6.2.2 added (pinned exact, MIT) and listed in design-system §9 | A correct YAML parser (flow style, block scalars, anchors, tags) is too much to hand-roll; JSON→YAML is our own code. |
+| New tools persist their options per tool (`tool.<id>.<option>`), never their input | Same rule as v1: inputs may hold secrets. |
+| No new SF Symbols in the icon; sidebar symbols only | Unchanged rule. |
+
+Shared components built in-app (SlopKit candidates): `TransformTool.swift` (spec-driven
+text→text tool), `InputActions` (Clipboard/Sample/Clear header), `ImageDropTarget`,
+`WindowAccessor`, `Snapshot.swift` (offscreen window renders).
+
+### Gates (parity pass)
+
+- `scripts/test.sh Devkit`: **150 tests in 27 suites pass** (was 86 in 15). New vectors:
+  YAML 1.2 spec examples 2.1, 2.2, 2.10 plus JSON→YAML→JSON round-trips (indent 2 and 4,
+  tricky strings); RFC 4180 §2 CSV quoting; WHATWG entity table (incl. two-code-point
+  `&NotEqualTilde;`); RFC 7515 A.2 (RS256, JWK and SPKI/PKCS#1 PEM) and A.3 (ES256) JWS
+  verified, tampered payload rejected; Let's Encrypt ISRG Root X1/X2 decoded with their
+  published SHA-256 fingerprints, serial and dates; CRC-32 check value `0xCBF43926`,
+  Adler-32 "Wikipedia" `0x11E60398`, `gzip -n` and `zlib.compress` outputs decoded; QR
+  generate→Vision read round-trip (L and H, PNG); cron next runs across a leap day and the
+  day-of-month-or-weekday rule; 8 invalid cron cases; 14 new detector fixtures and 5 new
+  false-positive cases.
+- `scripts/check.sh Devkit --perf`: **all pass**. Launch 161 ms, first window 424 ms, idle
+  CPU 0.019 % (lowest window), footprint 66.9 MB (budget 120; was 57 MB with 12 tools).
+- Offscreen renders (`DEVKIT_SNAPSHOT`, release build, private pasteboard, throwaway
+  defaults, fixed clock and seed): every tool with its sample, light and dark, plus the empty
+  state, JWT ES256 with a JWK, QR read mode, and Settings General / Shortcuts / Advanced:
+  78 PNGs in `/tmp/devkit-parity/shots/`, all reviewed. Fixed from the review: Settings ▸
+  Advanced was ~1,500 pt tall (now two columns of checkboxes), the RS/ES verification
+  result sat below the fold (now above the key field), a too-wide sidebar glyph for String
+  Inspector, inconsistent "2 spaces"/"2 Spaces".
+- **Owed on screen (the Mac was locked for the whole pass; `scripts/drive` refuses):**
+  `scripts/drive tree` for `[unlabeled]` controls on all 33 tools and Settings (an
+  in-process walk can't stand in: SwiftUI builds its accessibility tree only for a connected
+  client); a scripted walkthrough of Clipboard / Sample / Clear, ⇧⌘V detection into each new
+  tool, ⇧⌘R Replace Clipboard (private pasteboard), Keep on Top, hiding a tool from the
+  sidebar context menu, the menu bar icon (show, paste and detect, window close keeps the
+  app running), QR read by drag-and-drop and Paste Image, Save PNG panel, and the
+  certificate file drop; light/dark screenshots of the real window.
+
 ## Blind test log
 
 One section per round, newest last. See docs/dev-cycle.md step 5.
+
+## Polish pass (2026-11-05)
+
+Brief: `docs/polish-pass.md` (plus the mid-pass Golden Gate + light/dark addition). Worked on
+the release build with `DEVKIT_PASTEBOARD=devkit-polish` (private pasteboard: no real
+clipboard reads or writes; Copy and Replace Clipboard were never triggered),
+`DEVKIT_DEFAULTS=devkit-polish` (throwaway suite, deleted after), `DEVKIT_NOW`, `DEVKIT_SEED`.
+The owner's `app.slopapp.devkit` domain was exported first and re-imported at the end (verified
+identical). Inputs for error/edge states went through the private pasteboard and Edit ▸ Paste
+Clipboard into Tool. All 33 tools were shot with their sample, in light and dark, before and
+after, plus empty, error, minimum-size (760 pt) and active-window states, and every Settings tab.
+
+### Defects fixed (before → after)
+
+Shared layout (affects every tool):
+
+| # | Defect | Before | After |
+|---|---|---|---|
+| 1 | Panes started at different heights: 5 tools (JWT, Text Case, URL Parser, String Inspector, Certificate) had no options row; 5 single-value tools (Unix Time, Color, Number Base, Cron, UUID inspect) used their own top area | The Input header (and Clipboard/Sample/Clear) sat anywhere from 52 to about 108 pt down, depending on the tool | One 40 pt options row in every tool (a one-line `NoteBar` explaining the tool when it has no options), so every pane header sits at y = 92.5 pt and Clipboard/Sample/Clear are in the same row everywhere |
+| 2 | Single-value tools: own Input header (no bar background), 20 pt insets, field options inline | "Input" title 20 pt in, results text 16.5 pt in | Same `PaneHeader` as every pane (30 pt, 12 pt inset); field inset 12 pt top/left/right (measured 12.5/11.5/12); Unit/Now, From/Extra base/Uppercase, Time zone/Show moved to the options row |
+| 3 | SwiftUI `Divider` under options row, pane headers, status line, Hash checksum, Regex replace, JWT claims, Cron, Diff columns | 1 pt (2 px) | `Hairline()`: 1 device pixel (measured at y 92, 122.5, 647.5) |
+| 4 | Split-pane divider | 1 pt rectangle | 1 device pixel, same as the other hairlines (grab area unchanged at 9 pt) |
+| 5 | Status hints (`.tertiary`) | 1.88:1 light, 2.25:1 dark | `.secondary`: 3.95:1 light, 5.74:1 dark |
+| 6 | Status line grew from 1 to 2 lines with long messages, squeezing the panes | min 28 + 4 pt | Fixed 32 pt (fits two callout lines); hint truncates with a tooltip |
+| 7 | Options row `minHeight: 40` could grow | variable | Fixed 40 pt |
+| 8 | Labels wrapped mid-word at the minimum window size (560 pt detail): "Re-/move…", "Case-/sensi…", "Len/gth", "Cou/nt", ". matches/newlines", "Detect numbers/and booleans" | wrapped | One-line labels; an over-full row scrolls sideways (no indicator, no bounce when it fits); a note-only row truncates with a tooltip |
+| 9 | Result-list text out of line with the pane title | row text 16.5 pt in, title 12.5 pt (4 pt off); 10 pt top gap | Plain, full-width lists like the panes (Xcode/Console style) + 4 pt row padding: row text at 12.5 pt, row Copy buttons under the header's Copy |
+| 10 | Text fields in an options row taller than the pop-ups beside them | 26 pt vs 24 pt | 24 pt (`ToolMetrics.rowControlHeight`) |
+| 11 | Result-row notes ("Not for security") `.tertiary` | ~1.9:1 | `.secondary` |
+| 12 | Syntax colours on the editor background (light mode) | key 3.52, string 3.57, number 4.17, keyword 3.65 :1 | Darkened 30% in light mode only: 5.8–6.6:1; dark unchanged (4.6–5.2:1); dynamic, so they follow a live appearance change |
+
+Per tool:
+
+| Tool | Before | After |
+|---|---|---|
+| String Inspector | Fixed column widths (44+84+90+110 + Name) overflowed a 450 pt pane: Kind column cut off ("Upperca") | Flexible widths; all five columns fit, Name truncates in the middle with a tooltip |
+| URL Parser | "Query as JSON" was the only unhighlighted JSON output; "No query string" shown as if it were output | Highlighted like every JSON output; placeholder text when there's no query |
+| UUID and ULID | "Generate Again" in the output header, unlike Lorem Ipsum and Random String | "Generate" at the end of the options row in all three generators |
+| Hash | "Matches"/"No match" in plain green/orange text (~2:1); HMAC key field collapsed to ~6 pt once the row was sized to its content | `.textGreen`/`.textOrange`; key field fixed 180 × 24 pt |
+| JWT | Verification messages in plain `.green`/`.red`/`.orange` text; public-key box had a 4 pt corner literal with a 1 pt `.separator` stroke | `.textGreen`/`.textRed`/`.textOrange`; `Radius.s` with `hairlineBorder`, clipped |
+| Regex | `/` delimiters, match ranges and "no match" groups in `.tertiary`; flags in `.callout` (a different size from every other options row) | `.secondary`; flags at the standard control size |
+| Text Diff | Line numbers `.tertiary`; column divider 1 pt | `.secondary`; vertical `Hairline` |
+| Unix Time, Number Base, Color, Cron, UUID inspect | Error line was a whole sentence in plain red (~3.6:1 light) | Red symbol + primary text, one line, tooltip with the full text |
+| Color | Swatch: 6 pt corner literal and `.strokeBorder(.separator)` | `Radius.s` + `hairlineBorder` |
+| Number Base | "Extra base: 9" → "36" changed width and moved the toggle after it | Label slot sized for two digits |
+| Cron | Description inset 20 pt (rest of the pane 12 pt) | 12 pt |
+| QR Code | In dark mode the code's light quiet zone was a raw square-cornered white tile | Rounded with `Radius.m` + hairline (the quiet zone stays: scanners need it) |
+| Settings ▸ General/Shortcuts | Explanations were separate rows under their controls | Subtitles of the toggle / shortcut row |
+| Settings ▸ Advanced | Two checkbox columns sized to content, leaving the right third of the section empty | Two equal columns |
+| Lint | 4 corner literals, 8 hardcoded colours | 0; the colour-tool values (`Colors.swift`, the picked colour) are data, marked `// lint:allow` |
+
+### Golden Gate + light/dark
+
+- **Sidebar**: the system `NavigationSplitView` sidebar, edge to edge; tool symbols are accent
+  tinted in the active window and grey when inactive (both shot:
+  `after/active-hash-{light,dark}.png` vs any other shot). Nothing forces them monochrome.
+- **Menus**: text only already (Tools, Edit additions, Find, sidebar context menu, menu bar
+  extra). The toolbar keeps its symbols (toolbar items, not menu items).
+- **Toolbar**: the standard `.toolbar`; the system draws its glass. No drawn strips.
+- **Inactive window**: every routine shot is of the inactive window (`drive` never activates).
+  Selections go to the unemphasized grey, accent controls go grey. Checked in both modes.
+- **Glass**: none of our own; no text on glass.
+- **Light/dark**: every tool, state and Settings tab shot in both, side by side. Colours are
+  semantic or resolve per appearance (syntax theme, status colours); diff tints are system
+  colours at low opacity (read in both); the only drawn white is the QR code's quiet zone,
+  which is data.
+
+### Gates
+
+- `scripts/check.sh Devkit --perf`: all pass. 150 Devkit tests and 77 SlopKit tests; launch
+  154 ms, first window 523 ms, idle CPU 0.010%, footprint 66.6 MB (busy machine, load 13.6).
+- `scripts/lint.sh Devkit`: pass.
+- `scripts/drive tree`: 0 `[unlabeled]` across the 17 distinct tool layouts and Settings;
+  close/minimize buttons 16×16.
+
+### Screenshots (`/tmp/slopapp-polish/devkit/`)
+
+- Before: `before-live/<tool>-{light,dark}.png` (all 33), `before/` (offscreen snapshot mode).
+- After: `after/<tool>-{light,dark}.png` (all 33, release build), `after/active-hash-{light,dark}.png`.
+- States: `r5/json-empty-*`, `r5/json-error-*`, `r5/timestamp-error-*`, `r5/jwt-empty-*`,
+  `r5/regex-empty-*`, `r5/diff-empty-*`, `r5/jwt-es256-*`, `r5/hash-hmac-*`,
+  `r5/min-*.png` and `r5/min2-*.png` (760 pt window), `r4/settings-{general,shortcuts,advanced}-{light,dark}.png`.
+
+### Not done, and why
+
+- **Hover with the real pointer** (split-divider cursor, button hover): not checked; the owner
+  was active for most of the pass. Hover comes from system controls except the divider cursor.
+- **The menu bar extra and the About window** weren't shot (the menu bar icon is off by
+  default and turning it on writes the owner's setting; About is SlopKit's `AboutWindow`).
+  The menu is text only by code.
+- **Typed input into the JWT public-key editor** via `drive set` landed on its label (an
+  NSTextView inside SwiftUI); the ES256 state was shot with the token, and the offscreen
+  `DEVKIT_SNAPSHOT` run covers the key-filled state (`before/jwt-es256-*.png`).
+- **String Inspector table** keeps the system inset style (its column header row is its own
+  alignment reference); it isn't on the pane title's 12 pt line.
+- **Random String** keeps two options rows (length/count/groups, then character sets): one row
+  doesn't fit at the default width. Regex keeps its own pattern area above the panes.

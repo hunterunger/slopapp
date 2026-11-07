@@ -5,8 +5,13 @@ import SwiftUI
 
 // Tools built around one value and a list of results: Unix Time, Color, Number Base, UUID.
 
-/// Layout for single-value tools: a big field and its options, then the results.
+/// Layout for single-value tools, built from the same parts as the two-pane tools so the
+/// Input header and its Clipboard / Sample / Clear sit in the same place: an Input header, a
+/// big field with one line of feedback under it, then the results. The tool's options go in
+/// an `OptionsBar` above it.
 struct ValueToolLayout<Field: View, Results: View>: View {
+    /// Shows Clipboard / Sample / Clear in the Input header.
+    var app: AppModel?
     var error: String?
     var info: String?
     var hint: String?
@@ -15,54 +20,61 @@ struct ValueToolLayout<Field: View, Results: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            PaneHeader(title: "Input") {
+                if let app { InputActions(app: app) }
+            }
+            Hairline()
             VStack(alignment: .leading, spacing: Spacing.s) {
                 field()
+                // Always one line tall, so an error appearing doesn't move the results.
                 Group {
                     if let error {
-                        Label(error, systemImage: "xmark.octagon.fill")
-                            .foregroundStyle(.red)
+                        feedback(error, symbol: "xmark.octagon.fill", tint: .red, text: .primary)
                     } else if let info {
-                        Label(info, systemImage: "info.circle")
-                            .foregroundStyle(.secondary)
+                        feedback(info, symbol: "info.circle", tint: .secondary, text: .secondary)
                     } else {
                         Text(" ").accessibilityHidden(true)
                     }
                 }
                 .font(.callout)
-                .labelStyle(StatusLabelStyle())
+                .lineLimit(1)
                 .textSelection(.enabled)
             }
-            .padding(.horizontal, Spacing.xl)
-            .padding(.top, Spacing.l)
+            .padding(.horizontal, Spacing.m)
+            .padding(.top, Spacing.m)
             .padding(.bottom, Spacing.s)
-            Divider()
+            Hairline()
             results()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             StatusLine(kind: .info, text: "", hint: hint)
         }
     }
-}
 
-/// An icon that keeps its own color next to primary text.
-struct StatusLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
+    /// A status symbol in its own colour, with the message in a readable text colour (a whole
+    /// red sentence measures about 3.6:1 on a light window).
+    private func feedback(_ message: String, symbol: String, tint: Color, text: HierarchicalShapeStyle) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-            configuration.icon
-            configuration.title.foregroundStyle(.primary)
+            Image(systemName: symbol)
+                .foregroundStyle(tint)
+                .accessibilityHidden(true)
+            Text(message)
+                .foregroundStyle(text)
+                .truncationMode(.tail)
+                .help(message)
         }
+        .accessibilityElement(children: .combine)
     }
 }
+
+
 
 struct TimestampToolView: View {
     @Bindable var model: TimestampToolModel
     let app: AppModel
 
     var body: some View {
-        ValueToolLayout(error: model.error, info: model.detectedUnitDescription,
-                        hint: model.rows.isEmpty ? nil : "⇧⌘C copies \(model.primaryOutputName). Double-click a row to copy it.") {
-            HStack(spacing: Spacing.s) {
-                ValueField(title: "Timestamp or date", prompt: "1730592000, or a date like 2024-11-03 10:00",
-                           text: $model.input)
+        VStack(spacing: 0) {
+            OptionsBar {
                 Picker("Unit", selection: $model.unit) {
                     ForEach(Timestamps.Unit.allCases) { Text($0.title).tag($0) }
                 }
@@ -71,6 +83,16 @@ struct TimestampToolView: View {
                 Button("Now") { model.setNow() }
                     .help("Use the current time")
             }
+            layout
+        }
+        .onAppear { model.refresh() } // "Relative" depends on the time now.
+    }
+
+    private var layout: some View {
+        ValueToolLayout(app: app, error: model.error, info: model.detectedUnitDescription,
+                        hint: model.rows.isEmpty ? nil : "⇧⌘C copies \(model.primaryOutputName). Double-click a row to copy it.") {
+            ValueField(title: "Timestamp or date", prompt: "1730592000, or a date like 2024-11-03 10:00",
+                       text: $model.input)
         } results: {
             if model.rows.isEmpty {
                 EmptyResults(symbol: "clock", title: "No Time",
@@ -82,7 +104,6 @@ struct TimestampToolView: View {
                 }
             }
         }
-        .onAppear { model.refresh() } // "Relative" depends on the time now.
     }
 }
 
@@ -91,9 +112,16 @@ struct ColorToolView: View {
     let app: AppModel
 
     var body: some View {
-        ValueToolLayout(error: model.error, info: nil,
+        VStack(spacing: 0) {
+            NoteBar("Hex (3, 4, 6 or 8 digits), rgb(), hsl() or hsb(), with or without alpha.")
+            layout
+        }
+    }
+
+    private var layout: some View {
+        ValueToolLayout(app: app, error: model.error, info: nil,
                         hint: model.rows.isEmpty ? nil : "⇧⌘C copies \(model.primaryOutputName). Double-click a row to copy it.") {
-            HStack(spacing: Spacing.m) {
+            HStack(spacing: Spacing.s) {
                 Swatch(color: model.color)
                 ValueField(title: "Color", prompt: "#FF8800, rgb(255 136 0) or hsl(32 100% 50%)",
                            text: $model.input)
@@ -124,18 +152,15 @@ struct Swatch: View {
     let color: RGBAColor?
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
+        shape
             .fill(.background)
             .overlay {
                 if let color {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(.sRGB, red: color.red, green: color.green, blue: color.blue, opacity: color.alpha))
+                    shape.fill(Color(.sRGB, red: color.red, green: color.green, blue: color.blue, opacity: color.alpha))
                 }
             }
-            .overlay {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(.separator)
-            }
+            .hairlineBorder(shape)
             .frame(width: 44, height: 30)
             .accessibilityHidden(true)
     }
@@ -146,11 +171,8 @@ struct NumberBaseToolView: View {
     let app: AppModel
 
     var body: some View {
-        ValueToolLayout(error: model.error, info: model.value.map { "Read as base \($0.detectedRadix)" },
-                        hint: model.rows.isEmpty ? nil : "⇧⌘C copies \(model.primaryOutputName). Double-click a row to copy it.") {
-            HStack(spacing: Spacing.s) {
-                ValueField(title: "Number", prompt: "255, 0xFF, 0b1111_1111 or 0o377",
-                           text: $model.input)
+        VStack(spacing: 0) {
+            OptionsBar {
                 Picker("From", selection: $model.inputRadix) {
                     Text("Automatic").tag(0)
                     Divider()
@@ -163,15 +185,27 @@ struct NumberBaseToolView: View {
                 }
                 .fixedSize()
                 .help("Automatic reads 0x as hex, 0b as binary, 0o as octal, and anything else as decimal.")
-            }
-            HStack(spacing: Spacing.m) {
                 Stepper(value: $model.customRadix, in: 2...36) {
-                    Text("Extra base: \(model.customRadix)")
-                        .monospacedDigit()
+                    // Sized for two digits, so the controls after it don't shift as it counts.
+                    ZStack(alignment: .leading) {
+                        Text("Extra base: 36").hidden().accessibilityHidden(true)
+                        Text("Extra base: \(model.customRadix)")
+                    }
+                    .monospacedDigit()
                 }
+                .accessibilityLabel("Extra base")
+                .accessibilityValue("\(model.customRadix)")
                 Toggle("Uppercase letters", isOn: $model.uppercase)
             }
-            .font(.callout)
+            layout
+        }
+    }
+
+    private var layout: some View {
+        ValueToolLayout(app: app, error: model.error, info: model.value.map { "Read as base \($0.detectedRadix)" },
+                        hint: model.rows.isEmpty ? nil : "⇧⌘C copies \(model.primaryOutputName). Double-click a row to copy it.") {
+            ValueField(title: "Number", prompt: "255, 0xFF, 0b1111_1111 or 0o377",
+                       text: $model.input)
         } results: {
             if model.rows.isEmpty {
                 EmptyResults(symbol: "01.square", title: "No Number",
@@ -211,7 +245,7 @@ struct UUIDToolView: View {
                             get: { String(model.count) },
                             set: { if let value = Int($0.filter(\.isNumber)) { model.count = min(max(value, 1), 1000) } }
                         ), placeholder: "1", accessibilityLabel: "Count")
-                        .frame(width: 60)
+                        .frame(width: 60, height: ToolMetrics.rowControlHeight)
                         Stepper("Count", value: $model.count, in: 1...1000)
                             .labelsHidden()
                             .accessibilityLabel("Count")
@@ -220,6 +254,8 @@ struct UUIDToolView: View {
                         Toggle("Uppercase", isOn: $model.uppercase)
                         Toggle("Hyphens", isOn: $model.hyphens)
                     }
+                    Button("Generate") { model.generate() }
+                        .help("Generate new IDs (⌘R)")
                 }
             }
             switch model.mode {
@@ -232,9 +268,6 @@ struct UUIDToolView: View {
     private var generateView: some View {
         VStack(spacing: 0) {
             Pane(model.generated.count == 1 ? "Generated" : "Generated (\(model.generated.count))", accessory: {
-                Button("Generate Again") { model.generate() }
-                    .controlSize(.small)
-                    .help("Generate new IDs (⌘R)")
                 CopyButton(label: "All") { app.copyOutput() }
             }) {
                 CodeTextView(text: .constant(model.generatedText), isEditable: false, accessibilityLabel: "Generated IDs")
@@ -252,7 +285,7 @@ struct UUIDToolView: View {
     }
 
     private var inspectView: some View {
-        ValueToolLayout(error: model.error, info: nil,
+        ValueToolLayout(app: app, error: model.error, info: nil,
                         hint: model.rows.isEmpty ? nil : "⇧⌘C copies \(model.primaryOutputName). Double-click a row to copy it.") {
             ValueField(title: "UUID or ULID", prompt: "123e4567-e89b-12d3-a456-426614174000 or 01ARZ3NDEKTSV4RRFFQ69G5FAV",
                        text: $model.input)
