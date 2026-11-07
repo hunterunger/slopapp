@@ -81,7 +81,8 @@ The owner trimmed the later list. In order:
    unified diff only. Research: [`research/commit.md`](research/commit.md).
 2. **Dictate**: the owner's own Better Transcriber, moved into Slopapp (old repo archived
    after the switch-over).
-3. Eventually: **Gauge** (iStat Menus), **Tuck** (Bartender), **Triggers** (BetterTouchTool).
+3. Next: **Gauge** (iStat Menus, public APIs only, building) and **Triggers** (BetterTouchTool).
+   **Tuck** (Bartender) is skipped: hiding icons on macOS 27 needs private, fragile behaviour.
 4. Lower priority: a **disk map in Tidy** (DaisyDisk / GrandPerspective: a visual map of
    what fills the disk, reusing Tidy's scan) and **Shorthand** (TextExpander / Rocket Typist).
 

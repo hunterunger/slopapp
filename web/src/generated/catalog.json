@@ -847,22 +847,13 @@
       "menuBarOnly": true,
       "priority": 3,
       "favourite": false,
-      "status": "planned"
-    },
-    {
-      "slug": "tuck",
-      "name": "Tuck",
-      "tagline": "Tuck menu bar icons out of sight.",
-      "replaces": [
-        "Bartender"
-      ],
-      "category": "Utilities",
-      "icon": "panel-top-close",
-      "size": "L",
-      "menuBarOnly": true,
-      "priority": 3,
-      "favourite": false,
-      "status": "planned"
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.gauge",
+      "dir": "apps/Gauge",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/gauge-v0.1.0/Gauge.zip"
     },
     {
       "slug": "triggers",

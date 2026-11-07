@@ -12,6 +12,10 @@
     {
       "app": "Downie / Pulltube",
       "why": "Video downloaders: the owner wants no legal risk (site terms, takedowns), even though the tools themselves are legal."
+    },
+    {
+      "app": "Bartender",
+      "why": "On macOS 27 hiding other apps' menu bar icons only works through private Apple behaviour that breaks Notification Center and could vanish in any update. macOS 27's own overflow chevron and per-app switches cover most of it."
     }
   ],
   "apps": [
@@ -324,21 +328,6 @@
       "size": "M",
       "menuBarOnly": true,
       "spec": "Menu bar items for CPU, memory, network, disk, battery. Dropdown with sparkline history and top processes. Sampling via host_statistics64, sysctl, IOKit. Low CPU overhead is a requirement.",
-      "priority": 3,
-      "favourite": false
-    },
-    {
-      "slug": "tuck",
-      "name": "Tuck",
-      "tagline": "Tuck menu bar icons out of sight.",
-      "replaces": [
-        "Bartender"
-      ],
-      "category": "Utilities",
-      "icon": "panel-top-close",
-      "size": "L",
-      "menuBarOnly": true,
-      "spec": "Hide and reorder menu bar items; a hidden section revealed by click or hotkey; show items when they update. Uses the Accessibility API and the system's menu bar item ordering; check what macOS 26+ already offers natively before building.",
       "priority": 3,
       "favourite": false
     },
