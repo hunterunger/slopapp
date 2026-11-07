@@ -14,5 +14,20 @@
     "cream": "#FAF6EC",
     "ember": "#E5603D",
     "ink": "#13201A"
+  },
+  "candy": {
+    "_note": "Launcher + website palette: translucent sugar-candy plastic over frosted ice, after the 1998\u20132000 iMac era. Apps keep the system look.",
+    "strawberry": "#F0407A",
+    "tangerine": "#F28A0C",
+    "lime": "#6CCB2F",
+    "lagoon": "#0A9DBF",
+    "blueberry": "#2F6FE4",
+    "grape": "#8A4BD1",
+    "ice": "#F3F6F9",
+    "graphite": "#1C1F24",
+    "iconGradient": [
+      "#F0407A",
+      "#F28A0C"
+    ]
   }
 }

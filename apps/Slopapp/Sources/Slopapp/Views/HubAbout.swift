@@ -26,7 +26,7 @@ struct HubAboutView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
-            Divider().padding(.vertical, Spacing.xs)
+            Hairline().padding(.vertical, Spacing.xs)
             Text("Free and open source (\(Brand.license) license). No account, no tracking: Slopapp only downloads the catalog and the apps you choose.")
                 .font(.callout)
                 .multilineTextAlignment(.center)
@@ -46,8 +46,13 @@ enum HubAboutWindow {
     static func show(info: AppInfo) {
         if window == nil {
             let newWindow = NSWindow(contentViewController: NSHostingController(rootView: HubAboutView(info: info)))
+            // Titled (for the Window menu and VoiceOver) but drawn like the system's About
+            // panels: no visible title, no separator, the content up to the window buttons.
             newWindow.title = "About \(info.name)"
-            newWindow.styleMask = [.titled, .closable]
+            newWindow.styleMask = [.titled, .closable, .fullSizeContentView]
+            newWindow.titleVisibility = .hidden
+            newWindow.titlebarAppearsTransparent = true
+            newWindow.titlebarSeparatorStyle = .none
             newWindow.isReleasedWhenClosed = false
             newWindow.center()
             window = newWindow

@@ -3,8 +3,9 @@ import SlopappCore
 import SlopKit
 import SwiftUI
 
-// Archetype: library window (sidebar Discover / Installed / Updates / Also Great) plus a
-// menu bar extra. See docs/design-system.md, section 2c and 2a.
+// Archetype: library window plus a menu bar extra (docs/design-system.md 2c and 2a), laid
+// out like the original's store window: sidebar (Discover, Installed, Updates, Favorites,
+// All Apps + categories), Back/Forward, card grids, app pages. See docs/research/slopapp.md.
 
 @main
 struct SlopappApp: App {
@@ -17,11 +18,12 @@ struct SlopappApp: App {
     var body: some Scene {
         Window("Slopapp", id: WindowID.main) {
             MainWindow(store: store, navigation: navigation)
-                .frame(minWidth: 760, minHeight: 480)
+                .frame(minWidth: 820, minHeight: 520)
         }
-        .defaultSize(width: 980, height: 640)
+        .defaultSize(width: 1120, height: 720)
+        // The content runs to the top of the window (see storeWindowChrome()).
+        .windowStyle(.hiddenTitleBar)
         .commands {
-            SidebarCommands()
             SlopappCommands(store: store, navigation: navigation, info: info)
         }
 
@@ -42,83 +44,69 @@ enum WindowID {
     static let main = "main"
 }
 
-/// The sidebar section, the open detail page and the search text, shared by the window,
-/// the menus and the menu bar extra.
+/// The sidebar section, the open app pages and the search text, shared by the window, the
+/// menus and the menu bar extra.
 @MainActor
 @Observable
 final class Navigation {
     static let shared = Navigation()
 
-    enum Section: String, CaseIterable, Identifiable {
-        case discover, installed, updates, alsoGreat
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .discover: "Discover"
-            case .installed: "Installed"
-            case .updates: "Updates"
-            case .alsoGreat: "Also Great"
-            }
-        }
-
-        var symbol: String {
-            switch self {
-            case .discover: "square.grid.2x2"
-            case .installed: "checkmark.circle"
-            case .updates: "arrow.down.circle"
-            case .alsoGreat: "heart"
-            }
-        }
-
-        var shortcut: KeyEquivalent {
-            switch self {
-            case .discover: "1"
-            case .installed: "2"
-            case .updates: "3"
-            case .alsoGreat: "4"
-            }
-        }
-    }
+    /// Sidebar rows (`SlopappCore.SidebarItem`): the main pages, All Apps with its
+    /// categories, Updates last.
+    typealias Section = SidebarItem
 
     var section: Section? = .discover {
-        didSet { if oldValue != section { path = []; selection = nil } }
+        didSet { if oldValue != section { history.reset(); selection = nil } }
     }
-    /// Slugs of pushed detail pages.
-    var path: [String] = []
+    /// Pushed app pages, with Back/Forward.
+    private(set) var history = PageHistory()
+    /// Slugs of pushed detail pages (bound to the navigation stack).
+    var path: [String] {
+        get { history.path }
+        set { history.sync(newValue) }
+    }
     var search = "" {
-        didSet { if oldValue != search { selection = nil } }
+        // Typing shows the results, even from an app page.
+        didSet { if oldValue != search { selection = nil; history.reset() } }
     }
-    /// The highlighted app in a list or grid (keyboard selection). Menu commands act on the
-    /// open detail page first, then on this.
+    /// The highlighted app in a grid (keyboard selection). Menu commands act on the open
+    /// app page first, then on this.
     var selection: String?
+    /// Chips and sort on All Apps and category pages (kept while you move between them).
+    var filter: CatalogFilter = .all
+    var sort: CatalogSort = .featured
 
     /// The app that Apps-menu commands act on.
     var current: String? { path.last ?? selection }
 
     func show(_ section: Section) {
         self.section = section
-        path = []
+        history.reset()
         search = ""
         selection = nil
     }
 
-    func goBack() {
-        if !path.isEmpty { path.removeLast() }
-    }
+    func goBack() { history.back() }
+    func goForward() { history.forward() }
 
     func showDetail(_ slug: String) {
-        if path.last != slug { path.append(slug) }
+        history.open(slug)
     }
 
-    /// ⌘F: put the cursor in the toolbar search field.
+    /// Bumped by ⌘F; the content header's search field takes focus when it changes.
+    private(set) var searchFocusRequest = 0
+
+    /// ⌘F: put the cursor in the search field at the top of the content.
     func focusSearch() {
         bringWindowForward()
-        DispatchQueue.main.async {
-            let window = NSApp.windows.first { $0.identifier?.rawValue.hasPrefix(WindowID.main) == true }
-            let search = window?.toolbar?.items.lazy.compactMap { $0 as? NSSearchToolbarItem }.first
-            search?.beginSearchInteraction()
-        }
+        DispatchQueue.main.async { self.searchFocusRequest += 1 }
+    }
+
+    /// The window title (Window menu, VoiceOver): the open app page, else the page.
+    func windowTitle(appName: (String) -> String?) -> String {
+        if let slug = path.last, let name = appName(slug) { return name }
+        if !search.trimmingCharacters(in: .whitespaces).isEmpty { return "Search" }
+        return (section ?? .discover).title
     }
 
     /// Opens the library window (it may be closed while the menu bar item lives on).
@@ -130,6 +118,23 @@ final class Navigation {
         NSApp.activate()
         DispatchQueue.main.async {
             NSApp.windows.first { $0.identifier?.rawValue.hasPrefix(WindowID.main) == true }?.makeKeyAndOrderFront(nil)
+        }
+    }
+}
+
+extension SidebarItem {
+    /// View menu order: by shortcut (⌘1–⌘5), which keeps Updates on ⌘3 even though its
+    /// sidebar row is last.
+    static let menuOrder: [SidebarItem] = [.discover, .installed, .updates, .favorites, .allApps]
+
+    var shortcut: KeyEquivalent? {
+        switch self {
+        case .discover: "1"
+        case .installed: "2"
+        case .updates: "3"
+        case .favorites: "4"
+        case .allApps: "5"
+        case .category: nil
         }
     }
 }
@@ -154,14 +159,23 @@ struct SlopappCommands: Commands {
                 .keyboardShortcut("f")
         }
         CommandGroup(before: .sidebar) {
-            ForEach(Navigation.Section.allCases) { section in
+            ForEach(Navigation.Section.menuOrder) { section in
                 Button(section.title) { navigation.show(section) }
-                    .keyboardShortcut(section.shortcut)
+                    .keyboardShortcut(section.shortcut.map { KeyboardShortcut($0) })
             }
+            Menu("Categories") {
+                ForEach(store.categories, id: \.self) { name in
+                    Button(name) { navigation.show(.category(name)) }
+                }
+            }
+            .disabled(store.categories.isEmpty)
             Divider()
             Button("Back") { navigation.goBack() }
                 .keyboardShortcut("[")
-                .disabled(navigation.path.isEmpty)
+                .disabled(!navigation.history.canGoBack)
+            Button("Forward") { navigation.goForward() }
+                .keyboardShortcut("]")
+                .disabled(!navigation.history.canGoForward)
             Divider()
         }
         CommandMenu("Apps") {
@@ -182,6 +196,12 @@ struct SlopappCommands: Commands {
             Button("Move to Trash…") { if let current { store.requestUninstall(current) } }
                 .keyboardShortcut(.delete)
                 .disabled(current?.primary?.location.canModify != true)
+            Divider()
+            Button(current.map { store.isFavorite($0) } == true ? "Remove from Favorites" : "Add to Favorites") {
+                if let current { store.toggleFavorite(current) }
+            }
+            .keyboardShortcut("d")
+            .disabled(current == nil)
             Divider()
             Button(store.updates.isEmpty ? "Update All" : "Update All (\(store.updates.count))") { store.updateAll() }
                 .keyboardShortcut("u", modifiers: [.command, .shift])

@@ -8,55 +8,40 @@ struct MainWindow: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        NavigationSplitView {
+        // Laid out like the original's store window: a full-height sidebar with Back/Forward
+        // beside the window buttons, and the pages in an inset rounded panel with search and
+        // the update status along its top. No toolbar band.
+        HStack(spacing: 0) {
             Sidebar(store: store, navigation: navigation)
-                .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
-        } detail: {
-            VStack(spacing: 0) {
-                NavigationStack(path: $navigation.path) {
-                    Group {
-                        if !navigation.search.trimmingCharacters(in: .whitespaces).isEmpty {
-                            SearchResultsView(store: store, navigation: navigation)
-                        } else {
-                            switch navigation.section ?? .discover {
-                            case .discover: DiscoverView(store: store, navigation: navigation)
-                            case .installed: InstalledView(store: store, navigation: navigation)
-                            case .updates: UpdatesView(store: store, navigation: navigation)
-                            case .alsoGreat: AlsoGreatView()
-                            }
-                        }
-                    }
-                    .navigationDestination(for: String.self) { slug in
-                        AppDetailView(slug: slug, store: store, navigation: navigation)
-                    }
+                .frame(width: WindowChrome.sidebarWidth)
+            ContentPanel {
+                VStack(spacing: 0) {
+                    ContentHeader(store: store, navigation: navigation)
+                    PageStack(store: store, navigation: navigation)
+                    // Below the pages, so it shows on app pages too.
+                    StatusBanner(store: store)
                 }
-                // Below the stack (not an inset) so it shows on pushed detail pages too.
-                StatusBanner(store: store)
             }
+            .padding([.top, .trailing, .bottom], WindowChrome.panelInset)
         }
-        .searchable(text: $navigation.search, prompt: "Search apps")
-        .onSubmit(of: .search) {
-            // Return in the search field opens the highlighted (or first) result.
-            let results = store.items.filter { $0.matches(navigation.search) }
-            if let slug = navigation.selection ?? results.first?.id { navigation.showDetail(slug) }
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { await store.refresh() }
-                } label: {
-                    if store.isChecking {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("Check for Updates", systemImage: "arrow.clockwise")
-                    }
-                }
-                .help("Check for Updates (⌘R)")
-                .disabled(store.isChecking)
-            }
-        }
-        .sheet(item: $store.uninstallRequest) { item in
-            UninstallSheet(item: item, store: store)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background { CandyShell() }
+        .ignoresSafeArea()
+        .storeWindowChrome()
+        .navigationTitle(navigation.windowTitle { store.item($0)?.app.name })
+        .alert(
+            store.uninstallRequest.map { "Move \($0.app.name) to the Trash?" } ?? "",
+            isPresented: Binding(get: { store.uninstallRequest != nil }, set: { if !$0 { store.uninstallRequest = nil } }),
+            presenting: store.uninstallRequest
+        ) { item in
+            Button("Move to Trash") { Task { await store.uninstall(item, removeData: false) } }
+                .keyboardShortcut(.defaultAction)
+            Button("Move to Trash with Its Data") { Task { await store.uninstall(item, removeData: true) } }
+            Button("Cancel", role: .cancel) { store.uninstallRequest = nil }
+        } message: { item in
+            let running = item.primary.map { RunningApps.isRunning(at: $0.url) } ?? false
+            Text((running ? "\(item.app.name) is open. It will quit first. " : "")
+                 + "Move only the app and keep its settings, or move its settings and data too. You can put everything back from the Trash.")
         }
         .confirmationDialog(
             store.quitRequest?.title ?? "",
@@ -64,9 +49,10 @@ struct MainWindow: View {
             presenting: store.quitRequest
         ) { request in
             Button(request.items.count == 1 ? "Quit and Update" : "Quit and Update All") { store.confirmQuitAndUpdate() }
+                .keyboardShortcut(.defaultAction)
             Button("Cancel", role: .cancel) { store.cancelQuitRequest() }
-        } message: { _ in
-            Text("Slopapp reopens it when the update is done. Save any open work first.")
+        } message: { request in
+            Text(request.message)
         }
         .onAppear {
             navigation.openWindow = { [openWindow] in openWindow(id: WindowID.main) }
@@ -75,25 +61,31 @@ struct MainWindow: View {
     }
 }
 
-struct Sidebar: View {
+/// The page for the sidebar selection, or search results while there's a query.
+struct SectionContent: View {
     let store: Store
-    @Bindable var navigation: Navigation
+    let navigation: Navigation
 
     var body: some View {
-        List(selection: $navigation.section) {
-            ForEach(Navigation.Section.allCases) { section in
-                Label(section.title, systemImage: section.symbol)
-                    .badge(section == .updates ? store.updates.count : 0)
-                    .tag(section)
+        if !navigation.search.trimmingCharacters(in: .whitespaces).isEmpty {
+            SearchResultsView(store: store, navigation: navigation)
+        } else {
+            switch navigation.section ?? .discover {
+            case .discover: DiscoverView(store: store, navigation: navigation)
+            case .installed: InstalledView(store: store, navigation: navigation)
+            case .updates: UpdatesView(store: store, navigation: navigation)
+            case .favorites: FavoritesView(store: store, navigation: navigation)
+            case .allApps: CatalogPage(category: nil, store: store, navigation: navigation)
+            case .category(let name): CatalogPage(category: name, store: store, navigation: navigation)
             }
         }
-        .listStyle(.sidebar)
     }
 }
 
 /// Offline / cached catalog notices and the Undo for the last uninstall, along the bottom.
 struct StatusBanner: View {
     let store: Store
+    private static let dismissSlack: CGFloat = 5
 
     var body: some View {
         VStack(spacing: 0) {
@@ -111,6 +103,8 @@ struct StatusBanner: View {
                     }
                     .buttonStyle(.borderless)
                     .controlSize(.regular)
+                    // The cross (not its 22 pt hit area) ends on the page's trailing edge.
+                    .padding(.trailing, -Self.dismissSlack)
                     .help("Dismiss")
                     .accessibilityLabel("Dismiss")
                 }
@@ -126,14 +120,15 @@ struct StatusBanner: View {
 
     private func bar<Buttons: View>(systemImage: String, text: String, @ViewBuilder buttons: () -> Buttons) -> some View {
         VStack(spacing: 0) {
-            Divider()
+            Hairline()
             HStack(spacing: Spacing.m) {
                 Image(systemName: systemImage).foregroundStyle(.secondary).accessibilityHidden(true)
                 Text(text).font(.callout).lineLimit(2)
                 Spacer()
                 buttons().controlSize(.small)
             }
-            .padding(.horizontal, Spacing.l)
+            // On the page's content edges, like everything else in the panel.
+            .padding(.horizontal, PageLayout.margin)
             .padding(.vertical, Spacing.s)
         }
         .background(.bar)
@@ -160,24 +155,3 @@ struct CatalogUnavailable: View {
     }
 }
 
-struct SearchResultsView: View {
-    let store: Store
-    @Bindable var navigation: Navigation
-
-    var body: some View {
-        let results = store.items.filter { $0.matches(navigation.search) }
-        Group {
-            if results.isEmpty {
-                ContentUnavailableView.search(text: navigation.search)
-            } else {
-                KeyboardGrid(sections: [results], navigation: navigation, autofocus: false) {
-                    VStack(alignment: .leading, spacing: Spacing.l) {
-                        PageHeader(title: "Results", subtitle: results.count == 1 ? "1 app" : "\(results.count) apps")
-                        AppGrid(items: results, store: store, navigation: navigation)
-                    }
-                }
-            }
-        }
-        .navigationTitle("Search")
-    }
-}

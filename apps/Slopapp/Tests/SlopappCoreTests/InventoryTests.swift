@@ -103,9 +103,4 @@ import Testing
         #expect(CatalogBuilder.updates(in: items).count == 1)
         #expect(CatalogBuilder.installed(in: items).count == 1)
     }
-
-    @Test func recommendedAppsAreTheAgreedSix() {
-        #expect(RecommendedApp.all.map(\.name) == ["Rectangle", "Maccy", "IINA", "Keka", "AlDente", "Stats"])
-        #expect(RecommendedApp.all.allSatisfy { $0.website.scheme == "https" })
-    }
 }

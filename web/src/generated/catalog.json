@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-03",
+  "generatedAt": "2026-11-07",
   "brand": {
     "name": "Slopapp",
     "tagline": "The name is a joke. The apps aren't.",
@@ -16,6 +16,21 @@
       "cream": "#FAF6EC",
       "ember": "#E5603D",
       "ink": "#13201A"
+    },
+    "candy": {
+      "_note": "Launcher + website palette: translucent sugar-candy plastic over frosted ice, after the 1998–2000 iMac era. Apps keep the system look.",
+      "strawberry": "#F0407A",
+      "tangerine": "#F28A0C",
+      "lime": "#6CCB2F",
+      "lagoon": "#0A9DBF",
+      "blueberry": "#2F6FE4",
+      "grape": "#8A4BD1",
+      "ice": "#F3F6F9",
+      "graphite": "#1C1F24",
+      "iconGradient": [
+        "#F0407A",
+        "#F28A0C"
+      ]
     }
   },
   "apps": [
@@ -190,6 +205,14 @@
             "LSHandlerRank": "Alternate",
             "LSItemContentTypes": [
               "public.image"
+            ]
+          }
+        ],
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "app.slopapp.snapper",
+            "CFBundleURLSchemes": [
+              "snapper"
             ]
           }
         ]
@@ -455,6 +478,54 @@
           },
           {
             "NSMenuItem": {
+              "default": "Extract with Crate To…"
+            },
+            "NSMessage": "extractFilesTo",
+            "NSPortName": "Crate",
+            "NSRequiredContext": {},
+            "NSSendFileTypes": [
+              "public.zip-archive",
+              "org.7-zip.7-zip-archive",
+              "public.rar-archive",
+              "public.tar-archive",
+              "org.gnu.gnu-zip-archive",
+              "org.gnu.gnu-zip-tar-archive",
+              "public.bzip2-archive",
+              "public.tar-bzip2-archive",
+              "org.tukaani.xz-archive",
+              "org.tukaani.tar-xz-archive",
+              "public.z-archive",
+              "public.cpio-archive",
+              "com.apple.xar-archive",
+              "com.microsoft.cab"
+            ]
+          },
+          {
+            "NSMenuItem": {
+              "default": "Open in Crate"
+            },
+            "NSMessage": "openFiles",
+            "NSPortName": "Crate",
+            "NSRequiredContext": {},
+            "NSSendFileTypes": [
+              "public.zip-archive",
+              "org.7-zip.7-zip-archive",
+              "public.rar-archive",
+              "public.tar-archive",
+              "org.gnu.gnu-zip-archive",
+              "org.gnu.gnu-zip-tar-archive",
+              "public.bzip2-archive",
+              "public.tar-bzip2-archive",
+              "org.tukaani.xz-archive",
+              "org.tukaani.tar-xz-archive",
+              "public.z-archive",
+              "public.cpio-archive",
+              "com.apple.xar-archive",
+              "com.microsoft.cab"
+            ]
+          },
+          {
+            "NSMenuItem": {
               "default": "Compress with Crate"
             },
             "NSMessage": "compressFiles",
@@ -566,6 +637,16 @@
       "build": 1,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.awake",
+      "infoPlist": {
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "app.slopapp.awake",
+            "CFBundleURLSchemes": [
+              "slopawake"
+            ]
+          }
+        ]
+      },
       "dir": "apps/Awake",
       "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/awake-v0.1.0/Awake.zip"
     },

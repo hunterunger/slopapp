@@ -41,6 +41,10 @@ struct QuitRequest: Identifiable, Equatable {
     var title: String {
         items.count == 1 ? "\(names) is open. Quit it to update?" : "\(names) are open. Quit them to update?"
     }
+    var message: String {
+        items.count == 1 ? "Slopapp reopens it when the update is done. Save any open work first."
+            : "Slopapp reopens them when the updates are done. Save any open work first."
+    }
 }
 
 /// A failure shown under an app's button. Only failed installs/updates turn the button into Retry.
@@ -96,6 +100,8 @@ final class Store {
     var quitRequest: QuitRequest?
     var uninstallRequest: CatalogItem?
     private(set) var lastTrashed: TrashedApp?
+    /// Starred apps (Favorites page, heart on app pages). Kept per feed, like Recently Updated.
+    private(set) var favorites = FavoriteList()
     let icons: Icons
 
     @ObservationIgnored private var tasks: [String: Task<RecentUpdate?, Never>] = [:]
@@ -105,6 +111,8 @@ final class Store {
     @ObservationIgnored private var scheduler: NSBackgroundActivityScheduler?
     @ObservationIgnored private let logger = Logger(subsystem: "app.slopapp.slopapp", category: "store")
     @ObservationIgnored private var scanGeneration = 0
+
+    @ObservationIgnored private var appliedScanGeneration = 0
     @ObservationIgnored private lazy var watcher = FolderWatcher { [weak self] in self?.rescan() }
 
     var updates: [CatalogItem] { CatalogBuilder.updates(in: items) }
@@ -113,6 +121,9 @@ final class Store {
     /// can't offer right now.
     var available: [CatalogItem] { items.filter { $0.app.isInstallable || $0.isInstalled } }
     var comingSoon: [CatalogItem] { items.filter { !$0.app.isInstallable && !$0.isInstalled } }
+    /// Sidebar categories with at least one app, in order.
+    var categories: [String] { Categories.ordered(in: items) }
+    var favoriteItems: [CatalogItem] { favorites.items(in: items) }
     var isBusy: Bool { !operations.isEmpty }
 
     func item(_ slug: String) -> CatalogItem? { items.first { $0.id == slug } }
@@ -127,9 +138,23 @@ final class Store {
            let saved = try? JSONDecoder().decode([RecentUpdate].self, from: data) {
             recentUpdates = saved.filter { $0.date > Date().addingTimeInterval(-7 * 86400) }
         }
+        favorites = FavoriteList(slugs: UserDefaults.standard.stringArray(forKey: favoritesKey) ?? [])
     }
 
     private var recentKey: String { config.isDeveloperFeed ? "recentUpdates:dev" : "recentUpdates" }
+    private var favoritesKey: String { config.isDeveloperFeed ? "favorites:dev" : "favorites" }
+
+    func isFavorite(_ item: CatalogItem) -> Bool { favorites.contains(item.id) }
+
+    func toggleFavorite(_ item: CatalogItem) {
+        favorites.toggle(item.id)
+        UserDefaults.standard.set(favorites.slugs, forKey: favoritesKey)
+    }
+
+    /// Favorites page "Install All": every starred app that isn't on this Mac yet, in a row.
+    func installFavorites() {
+        update(favorites.installable(in: items))
+    }
 
     private func recordUpdate(_ update: RecentUpdate) {
         recentUpdates.removeAll { $0.slug == update.slug }
@@ -245,37 +270,44 @@ final class Store {
 
     /// Looks for every catalog app on disk, off the main thread (signature checks take a few ms each).
     func rescan() {
+        Task { await scanInventory() }
+    }
+
+    /// `rescan`, finishing once the result is on screen. Install and Move to Trash wait for it
+    /// before they drop their progress, so the button goes straight from progress to its new
+    /// state (no flash of the old one in between).
+    func scanInventory() async {
         let feed = feed ?? Feed(apps: [])
         let roots = config.roots
         let locator = locator
         scanGeneration += 1
         let generation = scanGeneration
-        Task.detached(priority: .userInitiated) {
-            let items = CatalogBuilder.items(feed: feed) { app in
+        let items = await Task.detached(priority: .userInitiated) {
+            CatalogBuilder.items(feed: feed) { app in
                 Inventory.copies(of: app.bundleId ?? "", appName: app.name, roots: roots, locator: locator)
             }
-            await MainActor.run {
-                guard generation == self.scanGeneration else { return }
-                // Assign only real changes, so a folder event doesn't redraw every view.
-                if self.items != items { self.items = items }
-                if !self.hasScanned { self.hasScanned = true }
-                self.logger.debug("rescan \(generation)")
-                // An app put back in place by a reinstall: the Trash banner's Undo has nothing to do.
-                if let trashed = self.lastTrashed, let url = trashed.appURL,
-                   FileManager.default.fileExists(atPath: url.path) {
-                    self.lastTrashed = nil
-                    self.mainWindowUndoManager?.removeAllActions(withTarget: self)
-                }
-                // "It's no longer at …" and similar notes go away once the app is back.
-                for item in items where item.isInstalled && self.errors[item.id]?.isInstallFailure == false {
-                    self.errors[item.id] = nil
-                }
-                self.icons.load(items)
-                // Folders that exist now (the install folder appears with the first install).
-                let roots = self.config.roots
-                self.watcher.watch([roots.installDirectory] + roots.managedDirectories + roots.applicationsDirectories)
-            }
+        }.value
+        // A newer scan's result wins; an older one still counts until the newer one lands
+        // (both started after whatever changed, so the caller waiting here sees it).
+        guard generation > appliedScanGeneration else { return }
+        appliedScanGeneration = generation
+        // Assign only real changes, so a folder event doesn't redraw every view.
+        if self.items != items { self.items = items }
+        if !self.hasScanned { self.hasScanned = true }
+        self.logger.debug("rescan \(generation)")
+        // An app put back in place by a reinstall: the Trash banner's Undo has nothing to do.
+        if let trashed = self.lastTrashed, let url = trashed.appURL,
+           FileManager.default.fileExists(atPath: url.path) {
+            self.lastTrashed = nil
+            self.mainWindowUndoManager?.removeAllActions(withTarget: self)
         }
+        // "It's no longer at …" and similar notes go away once the app is back.
+        for item in items where item.isInstalled && self.errors[item.id]?.isInstallFailure == false {
+            self.errors[item.id] = nil
+        }
+        self.icons.load(items)
+        // Folders that exist now (the install folder appears with the first install).
+        self.watcher.watch([roots.installDirectory] + roots.managedDirectories + roots.applicationsDirectories)
     }
 
     // MARK: - Actions
@@ -397,6 +429,8 @@ final class Store {
             }, progress: { @Sendable phase in
                 Task { @MainActor in Store.shared.progress(slug, phase) }
             })
+            // The new copy is in place: show it before the progress goes away.
+            await scanInventory()
             operations[slug] = nil
             tasks[slug] = nil
             logger.info("installed \(slug, privacy: .public) \(result.info.version, privacy: .public) verdict \(String(describing: result.verdict), privacy: .public)")
@@ -487,10 +521,10 @@ final class Store {
         let slug = item.id
         operations[slug] = .removing
         errors[slug] = nil
-        defer { operations[slug] = nil }
         if RunningApps.isRunning(at: copy.url) {
             guard await RunningApps.quit(at: copy.url) else {
                 errors[slug] = AppError(message: InstallError.appWouldNotQuit.message(appName: item.app.name), isInstallFailure: false)
+                operations[slug] = nil
                 return
             }
         }
@@ -512,7 +546,9 @@ final class Store {
             errors[slug] = AppError(message: "Couldn't move \(item.app.name) to the Trash. Check the folder's permissions, then try again.",
                                     isInstallFailure: false)
         }
-        rescan()
+        // Straight from "Moving to Trash…" to Install, without the old Open in between.
+        await scanInventory()
+        operations[slug] = nil
     }
 
     /// Puts the last uninstalled app (and its data) back.

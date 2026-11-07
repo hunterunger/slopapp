@@ -8,6 +8,13 @@ struct AppIconView: View {
     let item: CatalogItem
     let icons: Icons
     var size: CGFloat = 64
+    /// Lay out by the tile's art instead of the full icon canvas, so the art (not the
+    /// transparent margin around it) sits on the alignment line. The margin still draws.
+    var alignsArt = false
+
+    /// macOS icons draw their tile in the middle 824 of a 1024 canvas.
+    static func artInset(_ size: CGFloat) -> CGFloat { size * 100 / 1024 }
+    static func artSide(_ size: CGFloat) -> CGFloat { size - 2 * artInset(size) }
 
     var body: some View {
         Group {
@@ -16,40 +23,64 @@ struct AppIconView: View {
                     .resizable()
                     .interpolation(.high)
             } else {
-                RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
+                // The same tile as a real icon: its size and corner on the icon grid.
+                let side = Self.artSide(size)
+                RoundedRectangle(cornerRadius: Radius.iconTile(side: side), style: .continuous)
                     .fill(.quaternary)
                     .overlay {
                         Text(item.app.name.prefix(1))
                             .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                     }
-                    .padding(size * 0.09)
+                    .padding(Self.artInset(size))
             }
         }
         .frame(width: size, height: size)
+        .padding(alignsArt ? -Self.artInset(size) : 0)
         .accessibilityHidden(true)
+    }
+}
+
+/// Holds a slot exactly as tall as a bordered button of this control size, so whatever
+/// takes the button's place (progress, "Coming Soon") doesn't change the row's height.
+struct ButtonHeightSlot<Content: View>: View {
+    let controlSize: ControlSize
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Button(" ") {}
+                .buttonStyle(.bordered)
+                .controlSize(controlSize)
+                .frame(width: 0)
+                .hidden()
+                .accessibilityHidden(true)
+            content.frame(maxHeight: .infinity)
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
 /// The one button that is the state: Install → progress → Open, or Update.
 struct ActionButton: View {
+    enum Size { case card, large }
+
     let item: CatalogItem
     @Bindable var store: Store
-    var large = false
+    var size: Size = .card
+
+    private var large: Bool { size == .large }
 
     var body: some View {
         Group {
             if let operation = store.operations[item.id] {
-                progress(operation)
+                ButtonHeightSlot(controlSize: large ? .large : .small) {
+                    OperationProgress(item: item, operation: operation, store: store)
+                }
             } else {
                 switch item.state {
                 case .comingSoon:
-                    Text("Coming Soon")
-                        .font(large ? .callout : .caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, Spacing.s)
-                        .padding(.vertical, Spacing.xs)
-                        .background(.quaternary, in: Capsule())
+                    ComingSoonPill(large: large)
                 case .notInstalled:
                     let retry = store.errors[item.id]?.isInstallFailure == true
                     button(retry ? "Retry" : "Install", prominent: true) { store.installOrUpdate(item) }
@@ -64,19 +95,26 @@ struct ActionButton: View {
                 }
             }
         }
-        .frame(minWidth: large ? 96 : 76, alignment: large ? .leading : .trailing)
+        .fixedSize()
     }
 
     private func button(_ title: String, prominent: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).frame(minWidth: large ? 64 : 44)
+            Text(title).frame(minWidth: large ? 72 : 48)
         }
         .buttonBorderShape(.capsule)
         .controlSize(large ? .large : .small)
         .modifier(ProminentIf(prominent))
     }
+}
 
-    private func progress(_ operation: Operation) -> some View {
+/// "Downloading 42%" with a ring and a Cancel button, in place of the state button.
+struct OperationProgress: View {
+    let item: CatalogItem
+    let operation: Operation
+    let store: Store
+
+    var body: some View {
         HStack(spacing: Spacing.s) {
             if case .downloading(let p) = operation, p > 0 {
                 ProgressView(value: p)
@@ -103,6 +141,24 @@ struct ActionButton: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(item.app.name): \(operation.label)")
+    }
+}
+
+/// Where a planned app's button would be: a quiet capsule exactly the button's height.
+struct ComingSoonPill: View {
+    var large = false
+
+    var body: some View {
+        ButtonHeightSlot(controlSize: large ? .large : .small) {
+            Text("Coming Soon")
+                .font(large ? .body : .subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, large ? Spacing.l : Spacing.m)
+                .frame(maxHeight: .infinity)
+                // Lighter than a button's fill: it isn't one, and secondary text keeps its
+                // contrast on it (3.8:1 on the button grey in light mode).
+                .background(.quinary, in: Capsule())
+        }
     }
 }
 
@@ -152,9 +208,17 @@ struct NoticeLine: View {
 }
 
 /// Status colors stay readable on a selected (accent-filled) row: there they turn primary.
+/// Elsewhere they're SlopKit's readable variants (darkened in light mode so they pass contrast).
 enum StatusColor {
-    static func style(_ color: Color, on prominence: BackgroundProminence) -> AnyShapeStyle {
-        prominence == .increased ? AnyShapeStyle(.primary) : AnyShapeStyle(color)
+    enum Tone { case red, orange, green }
+
+    static func style(_ tone: Tone, on prominence: BackgroundProminence) -> AnyShapeStyle {
+        guard prominence != .increased else { return AnyShapeStyle(.primary) }
+        switch tone {
+        case .red: return AnyShapeStyle(Color.textRed)
+        case .orange: return AnyShapeStyle(Color.textOrange)
+        case .green: return AnyShapeStyle(Color.textGreen)
+        }
     }
 }
 
@@ -173,72 +237,6 @@ struct SignatureBadge: View {
                       ? "This copy's code signature doesn't match its contents. Reinstall it."
                       : "This build isn't signed with an Apple Developer ID. Slopapp checked its download against the catalog's checksum.")
         }
-    }
-}
-
-/// The "Move to Trash" sheet, with the option to remove settings and data too.
-struct UninstallSheet: View {
-    let item: CatalogItem
-    let store: Store
-    @State private var removeData = false
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        let running = item.primary.map { RunningApps.isRunning(at: $0.url) } ?? false
-        VStack(alignment: .leading, spacing: Spacing.m) {
-            HStack(alignment: .top, spacing: Spacing.l) {
-                AppIconView(item: item, icons: store.icons, size: 56)
-                VStack(alignment: .leading, spacing: Spacing.s) {
-                    Text("Move \(item.app.name) to the Trash?")
-                        .font(.headline)
-                    Text(running
-                         ? "\(item.app.name) is open. It will quit first. You can put it back from the Trash."
-                         : "You can put it back from the Trash.")
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Toggle("Also remove its settings and data", isOn: $removeData)
-                        .padding(.top, Spacing.xs)
-                }
-            }
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { store.uninstallRequest = nil; dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Move to Trash", role: .destructive) {
-                    Task { await store.uninstall(item, removeData: removeData) }
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(Spacing.xl)
-        .frame(width: 420)
-    }
-}
-
-/// Header row for a page: big title, optional trailing controls.
-struct PageHeader<Trailing: View>: View {
-    let title: String
-    var subtitle: String?
-    @ViewBuilder var trailing: Trailing
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(title).font(.largeTitle.bold())
-                if let subtitle {
-                    Text(subtitle).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            trailing
-        }
-    }
-}
-
-extension PageHeader where Trailing == EmptyView {
-    init(title: String, subtitle: String? = nil) {
-        self.init(title: title, subtitle: subtitle) { EmptyView() }
     }
 }
 

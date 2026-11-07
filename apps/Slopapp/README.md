@@ -10,26 +10,45 @@ cleanly. An open alternative to Setapp's own app, minus the account and the subs
 
 ## What it does
 
-- **Discover**: every app in the catalog. Released apps have an Install button; planned
-  ones say Coming Soon. Search (⌘F) matches names, taglines, categories and the paid app
-  each one replaces ("Paste" finds Clips).
-- **App page**: tagline, what it's an alternative to, version, download and installed
-  size, category, minimum macOS, release notes, and every copy found on this Mac.
+- **Candy glass around a calm page**: the window's shell is the sidebar material washed with
+  the icon's strawberry → tangerine (berry → plum in dark mode), with candy selection, a
+  colour per category and glossy featured banners. The pages themselves (cards, app pages,
+  text) stay in system colours and your accent colour.
+- **A store-style window**: a full-height sidebar with Back and Forward beside the window
+  buttons, then Discover, Installed, Favorites, All Apps with the categories (Utilities,
+  Productivity, Media, Design, Developer) underneath, and Updates (with a count) last. The
+  pages sit in a rounded panel with search and the update status along its top.
+- **Discover**: featured banners you swipe through, the next one peeking in at the edge
+  (apps you can install now), then a
+  row of cards per category with "See All". Each card shows what the app does, its name,
+  and the button that is its state (Install, progress, Open, Update, Coming Soon).
+- **All Apps and categories**: every app as cards, with All / Available / Coming Soon chips
+  and a Featured / Name sort. Search (⌘F) matches names, taglines, categories and the paid
+  app each one replaces ("Paste" finds Clips).
+- **App page**: big icon, name and pitch, the state button with an arrow for everything else
+  (Reveal in Finder, Reinstall, Favorites, Move to Trash…), a heart and Share; a strip with
+  version, size, minimum macOS, menu bar or window app, category and a link to the source;
+  short highlights (what it replaces, where it lives, free and open source); What's New;
+  every copy found on this Mac; and more apps from the same category.
+- **Favorites**: the heart on an app page (or ⌘D) keeps an app here. "Install All" installs
+  every favorite that isn't on this Mac yet, one after another: handy on a new Mac.
 - **Install**: downloads the zip, checks it (see Trust model), puts it in
   `/Applications/Slopapp` (or `~/Applications/Slopapp` when `/Applications` isn't
   writable), and opens it (Settings: "Open apps after installing", on). Menu bar apps have
   no window, so Slopapp says where they went ("Opened Clips. It's in your menu bar.").
   A note under the button confirms what changed ("Installed version 1.0.0.").
-- **Installed**: the apps on this Mac, with version, location and a label for unsigned
-  development builds. Open, Update, Reveal in Finder, Move to Trash.
-- **Updates**: installed → available version, size and release notes. Update one, or
+- **Installed**: the apps on this Mac as cards, with version, a mark for copies Slopapp
+  doesn't manage and for unsigned development builds. Open, Update, Reveal in Finder, Move
+  to Trash (⌘⌫ on the selected card).
+- **Updates**: installed → available version, size and What's New. Update one, or
   Update All (⇧⌘U). An app that's running is quit after you confirm, then reopened. A
   short confirmation says what changed, and "Recently Updated" lists the last week's updates.
-- **Reinstall** (⋯ menu, right-click, Apps menu) downloads and verifies the catalog's
+- **Reinstall** (the button's arrow, right-click, Apps menu) downloads and verifies the catalog's
   version again over the installed copy, to repair it.
-- **Move to Trash…**: the app goes to the Trash; optionally its settings and data too
-  (`~/Library/Application Support/<bundle id>`, `Preferences/<bundle id>.plist`,
-  `Caches/<bundle id>`, `HTTPStorages/<bundle id>`, `Saved Application State`). Undo (⌘Z,
+- **Move to Trash…**: asks once, with two ways to go: "Move to Trash" (the app only) or
+  "Move to Trash with Its Data" (also `~/Library/Application Support/<bundle id>`,
+  `Preferences/<bundle id>.plist`, `Caches/<bundle id>`, `HTTPStorages/<bundle id>`,
+  `Saved Application State`). Everything goes to the Trash. Undo (⌘Z,
   or the Undo button) puts everything back. The banner says whether settings went too, and
   goes away if the app is installed again.
 - **Changes made outside Slopapp** show up right away: the install folders are watched (kernel
@@ -39,11 +58,9 @@ cleanly. An open alternative to Setapp's own app, minus the account and the subs
   or `~/Applications` (for example, downloaded from the website) are updated and removed
   in place. Copies anywhere else (a development build in `build/`, Downloads) are shown
   and can be opened, but Slopapp never changes them; "Install a Copy in Applications" is
-  in the app page's ⋯ menu.
-- **Also Great**: free, open-source apps we don't rebuild (Rectangle, Maccy, IINA, Keka,
-  AlDente, Stats). Links to their websites; "Installed" and Open when they're already here.
-- **Menu bar**: the number of pending updates next to the icon, Update All, the installed
-  apps (pick one to open it), Open Slopapp, Check for Updates. Hide it in Settings.
+  under the app page button's arrow.
+- **Menu bar**: the number of pending updates next to the icon, Update All, Open Slopapp,
+  the installed apps (pick one to open it), Check for Updates. Hide it in Settings.
 
 The Dock icon shows only while the window is open; with the window closed Slopapp lives in
 the menu bar. If you hide the menu bar icon, closing the window quits.
@@ -52,16 +69,17 @@ the menu bar. If you hide the menu bar icon, closing the window quits.
 
 | Shortcut | Action |
 |---|---|
-| ⌘1 – ⌘4 | Discover, Installed, Updates, Also Great |
-| Arrows, Return | Move through apps (Discover, results, Installed); show details |
-| ⌘[ | Back |
-| ⌃⌘S | Show/Hide Sidebar |
+| ⌘1 – ⌘5 | Discover, Installed, Updates, Favorites, All Apps (categories: View ▸ Categories) |
+| Arrows, Return | Move through the cards on any page; show details |
+| ⌘[ / ⌘] | Back / Forward |
+| ↑ / ↓ | Move through the sidebar (Tab to it from search) |
 | ⌘F | Search (Return opens the first or selected result) |
 | ⌘↓ | Show Details of the selected app |
 | ⌘R | Check for Updates |
 | ⌘O | Install / Update / Open the app whose page is showing, or the selected one |
 | ⇧⌘R | Reveal in Finder |
 | ⌘⌫ | Move to Trash… |
+| ⌘D | Add to / Remove from Favorites |
 | ⇧⌘U | Update All |
 | ⌘Z | Undo Move to Trash |
 
@@ -142,7 +160,7 @@ The overrides (testing only; they also allow `file://` and `http://localhost` UR
 | `SLOPAPP_FEED_URL` | Feed to use instead of the compiled-in one |
 | `SLOPAPP_INSTALL_DIR` | Install here; nothing outside it is ever changed |
 | `SLOPAPP_TRASH_DIR` | "Move to Trash" moves here instead |
-| `SLOPAPP_LIBRARY_DIR` | Library folder for "Also remove its settings and data" |
+| `SLOPAPP_LIBRARY_DIR` | Library folder for "Move to Trash with Its Data" |
 | `SLOPAPP_APPEARANCE` | `light` or `dark`, for screenshots |
 
 "Testbed" is a copy of Awake with its own bundle id, so there are two installable apps.
@@ -154,7 +172,8 @@ default browser).
 
 - `Sources/SlopappCore`: the feed model and parser, version compare, trust policy
   (`URLPolicy`, `SignaturePolicy`), inventory (where copies live and what may be changed),
-  the catalog join, `Installer` and `Uninstaller`, the 6-hour schedule, the Also Great list.
+  the catalog join, browsing (categories, filters, featured, related apps, favorites,
+  Back/Forward history), `Installer` and `Uninstaller`, the 6-hour schedule.
   `System/` has the real implementations behind protocols: `Network` (URLSession, no
   cookies), `DittoUnarchiver`, `LocalFiles` (Trash, scratch folders, quarantine),
   `LocalAppLocator` and `CodeSignature` (LaunchServices + Security framework), `Checksum`.
@@ -169,4 +188,4 @@ default browser).
   download it from the website (self-replace and relaunch is next).
 - No automatic installs, no update notifications (the menu bar count is the signal).
 - No screenshots or long descriptions on app pages (the feed has no fields for them yet).
-- Category filters, "Install all" for a new Mac, beta channel.
+- Screenshots on app pages, ratings, beta channel.

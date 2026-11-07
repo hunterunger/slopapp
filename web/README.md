@@ -11,8 +11,10 @@ pnpm lint
 
 ## Where the content comes from
 
-- **Brand** (name, tagline, colors): `../brand/brand.json`. Colors are also Tailwind
-  tokens in `src/app/globals.css` (`bg-forest`, `text-leaf`, ...). Keep the two in sync.
+- **Brand** (name, tagline, colors): `../brand/brand.json`. The site uses its `candy` palette
+  as Tailwind tokens in `src/app/globals.css` (`bg-strawberry`, `text-grape-ink`, ...), plus
+  forest/cream for the app icon tiles. Keep the two in sync. The candy glass (header, hero,
+  section accents) is for the frame only; the app collection stays quiet ice and white.
 - **Apps**: `src/generated/catalog.json`, built by `node ../scripts/catalog.mjs` from
   `../catalog/roadmap.json` and every `../apps/*/app.json`. `pnpm dev` and `pnpm build`
   regenerate it first. It's checked in so the site still builds on its own.

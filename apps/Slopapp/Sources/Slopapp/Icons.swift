@@ -8,6 +8,7 @@ import SlopappCore
 @Observable
 final class Icons {
     private(set) var images: [String: NSImage] = [:]
+    @ObservationIgnored private var menuImages: [String: NSImage] = [:]
     @ObservationIgnored private var loading: Set<String> = []
     @ObservationIgnored private let fetcher: any FeedFetching
     @ObservationIgnored private let urlPolicy: URLPolicy
@@ -59,13 +60,27 @@ final class Icons {
         }
     }
 
-    /// A small copy for menus (menu items draw images at their own pixel size).
+    /// A 16 pt copy for menus, rasterized once (menus drop drawing-handler images and draw
+    /// others at their own pixel size).
     func menuImage(for item: CatalogItem) -> NSImage? {
-        guard let image = image(for: item) else { return nil }
-        let small = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
-            image.draw(in: rect)
-            return true
-        }
+        let key = key(item)
+        if let cached = menuImages[key] { return cached }
+        guard let image = images[key] else { return nil }
+        let side: CGFloat = 16, scale: CGFloat = 2
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(side * scale), pixelsHigh: Int(side * scale),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return nil }
+        rep.size = NSSize(width: side, height: side)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+        NSGraphicsContext.restoreGraphicsState()
+        let small = NSImage(size: rep.size)
+        small.addRepresentation(rep)
+        menuImages[key] = small
         return small
     }
 }

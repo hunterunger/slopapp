@@ -1,28 +1,36 @@
 import { useId } from "react";
 
-/** Full-color Slopapp tile (brand/logo.svg): a tidy grid of apps with slop poured over the top. */
+const lower =
+  "M1601.142,1489.151C1563.427,1571.294 1480.418,1628.397 1384.177,1628.397L906.968,1628.397C775.279,1628.397 668.364,1521.482 668.364,1389.792L668.364,912.583C668.364,816.343 725.466,733.334 807.61,695.618C793.718,725.874 785.971,759.528 785.971,794.976C702.29,994.769 730.068,1143.188 785.971,1272.185C785.971,1403.875 892.886,1510.79 1024.575,1510.79C1149.397,1588.848 1315.126,1596.706 1501.784,1510.79C1537.233,1510.79 1570.886,1503.043 1601.142,1489.151Z";
+const upper =
+  "M1867.775,667.589L1867.775,1144.798C1867.775,1276.488 1760.86,1383.403 1629.171,1383.403L1151.962,1383.403C1020.273,1383.403 913.358,1276.488 913.358,1144.798L913.358,667.589C913.358,535.9 1020.273,428.985 1151.962,428.985L1629.171,428.985C1760.86,428.985 1867.775,535.9 1867.775,667.589Z";
+/** The glyph's own skew (from apps/Slopapp/AppIcon.icon/Assets/Untitled.svg). */
+export const glyphTransform = "matrix(.958822 -.606118 .958822 .606118 -1202.183393 1145.091684)";
+export const glyphPaths = { lower, upper };
+
+/** Full-color Slopapp tile (brand/logo.svg): two stacked layers on the candy gradient. */
 export function Logo({ className = "size-8" }: { className?: string }) {
-  const clip = useId();
+  const id = useId();
+  const place = "translate(256 256) scale(.2458) translate(-1000 -1000)";
   return (
     <svg viewBox="0 0 512 512" aria-hidden className={className}>
       <defs>
-        <clipPath id={clip}>
-          <rect width="512" height="512" rx="115" />
-        </clipPath>
+        <linearGradient id={`${id}f`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#F0407A" />
+          <stop offset="1" stopColor="#F28A0C" />
+        </linearGradient>
+        <linearGradient id={`${id}s`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#FFFFFF" stopOpacity=".16" />
+          <stop offset=".5" stopColor="#FFFFFF" stopOpacity="0" />
+        </linearGradient>
       </defs>
-      <g clipPath={`url(#${clip})`}>
-        <rect width="512" height="512" fill="#0F3D2E" />
-        <g fill="#FAF6EC">
-          <rect x="128" y="186" width="112" height="112" rx="30" />
-          <rect x="272" y="186" width="112" height="112" rx="30" />
-          <rect x="128" y="330" width="112" height="112" rx="30" />
-          <rect x="272" y="330" width="112" height="112" rx="30" />
+      <rect width="512" height="512" rx="115" fill={`url(#${id}f)`} />
+      <rect width="512" height="512" rx="115" fill={`url(#${id}s)`} />
+      <g transform={place}>
+        <g transform={glyphTransform}>
+          <path fill="#FFFFFF" fillOpacity=".8" d={lower} />
+          <path fill="#FFFFFF" d={upper} />
         </g>
-        <path
-          fill="#3DBE74"
-          transform="translate(0 -22)"
-          d="M0 0H512V128C512 150 496 160 478 152C458 143 446 156 444 176V214A18 18 0 0 1 408 214V184C408 166 392 160 376 168C354 179 340 172 326 160C310 146 290 150 288 172V262A20 20 0 0 1 248 262V190C248 170 232 162 214 170C196 178 186 176 176 166C166 156 152 158 150 176V196A14 14 0 0 1 122 196V170C120 152 104 146 88 154C64 166 40 166 24 154C12 145 0 146 0 160Z"
-        />
       </g>
     </svg>
   );

@@ -66,7 +66,9 @@ enum StatusIcon {
     }
 }
 
-/// Status line → main actions → installed apps → options → footer (design system 2a).
+/// Status line → main actions (Update All, Open Slopapp) → installed apps to launch →
+/// Check for Updates → footer (design system 2a; the original's menu is a launcher for
+/// installed apps plus settings).
 struct MenuBarMenu: View {
     let store: Store
     let navigation: Navigation
@@ -90,6 +92,8 @@ struct MenuBarMenu: View {
                 NSWorkspace.shared.open(Brand.repoURL.appendingPathComponent("releases"))
             }
         }
+        // No shortcut: ⌘O means Install/Open the selected app in the main menu.
+        Button("Open Slopapp") { navigation.bringWindowForward() }
 
         let installed = store.installed
         if !installed.isEmpty {
@@ -101,6 +105,7 @@ struct MenuBarMenu: View {
                     } label: {
                         if let image = store.icons.menuImage(for: item) {
                             Label { Text(title(item)) } icon: { Image(nsImage: image) }
+                                .labelStyle(.titleAndIcon)
                         } else {
                             Text(title(item))
                         }
@@ -111,8 +116,6 @@ struct MenuBarMenu: View {
             Divider()
         }
 
-        // No shortcut: ⌘O means Install/Open the selected app in the main menu.
-        Button("Open Slopapp") { navigation.bringWindowForward() }
         Button("Check for Updates") { Task { await store.refresh() } }
             .keyboardShortcut("r")
             .disabled(store.isChecking)

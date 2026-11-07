@@ -32,7 +32,26 @@ export type Brand = {
   repoUrl: string;
   license: string;
   colors: Record<"forest" | "leaf" | "mint" | "cream" | "ember" | "ink", string>;
+  /** Launcher and website palette. */
+  candy: Record<Flavour | "ice" | "graphite", string> & { iconGradient: string[] };
 };
+
+export type Flavour = "strawberry" | "tangerine" | "lime" | "lagoon" | "blueberry" | "grape";
+
+/** Each app category gets a candy flavour, used as a small accent only. */
+const categoryFlavours: Record<string, Flavour> = {
+  Hub: "strawberry",
+  Utilities: "blueberry",
+  Productivity: "tangerine",
+  Design: "grape",
+  Developer: "lime",
+  Media: "lagoon",
+};
+const flavourOrder: Flavour[] = ["strawberry", "tangerine", "lime", "lagoon", "blueberry", "grape"];
+
+export const flavourFor = (category: string): Flavour =>
+  categoryFlavours[category] ??
+  flavourOrder[[...category].reduce((sum, c) => sum + c.charCodeAt(0), 0) % flavourOrder.length];
 
 export type Catalog = {
   generatedAt: string;

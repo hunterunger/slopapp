@@ -29,8 +29,8 @@ struct UpdatesView: View {
                         .disabled(store.isChecking)
                 }
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Spacing.l) {
+                KeyboardGrid(sections: { _ in [updates] }, navigation: navigation, store: store) { columns in
+                    VStack(alignment: .leading, spacing: Spacing.xxl) {
                         if updates.isEmpty {
                             PageHeader(title: "Updates", subtitle: store.feedError != nil
                                        ? "Couldn't check for updates. \(lastChecked)"
@@ -38,19 +38,25 @@ struct UpdatesView: View {
                                 Button("Check for Updates") { Task { await store.refresh() } }
                                     .disabled(store.isChecking)
                             }
+                            Hairline()
                         } else {
                             PageHeader(
                                 title: "Updates",
-                                subtitle: updates.count == 1 ? "1 update available" : "\(updates.count) updates available"
+                                subtitle: "\(updates.count == 1 ? "A new version" : "New versions") of your apps, ready to install. \(lastChecked)"
                             ) {
-                                Button("Update All") { store.updateAll() }
-                                    .buttonStyle(.borderedProminent)
-                                    .controlSize(.large)
-                                    .disabled(updates.allSatisfy { store.operations[$0.id] != nil })
+                                Button {
+                                    store.updateAll()
+                                } label: {
+                                    Label(updates.count > 1 ? "Update All (\(updates.count))" : "Update All", systemImage: "arrow.down")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.large)
+                                .disabled(updates.allSatisfy { store.operations[$0.id] != nil })
                             }
-                            VStack(spacing: 0) {
-                                ForEach(updates) { item in
-                                    UpdateRow(item: item, store: store, navigation: navigation)
+                            Hairline()
+                            AppGrid(items: updates, columns: columns) { item in
+                                AppCard(item: item, store: store, navigation: navigation, caption: versionLine(item)) {
+                                    ReleaseNotesButton(item: item)
                                 }
                             }
                         }
@@ -59,97 +65,96 @@ struct UpdatesView: View {
                                 .padding(.top, updates.isEmpty ? 0 : Spacing.l)
                         }
                     }
-                    .padding(Spacing.xxl)
                 }
             }
         }
-        .navigationTitle("Updates")
+    }
+
+    private func versionLine(_ item: CatalogItem) -> String {
+        let from = item.primary?.info.version ?? "?"
+        let to = item.app.version ?? "?"
+        let size = item.app.size.map { " · \(SizeFormat.string($0))" } ?? ""
+        return "\(from) → \(to)\(size)"
     }
 }
 
-/// Updates done in the last week: what changed, and when.
+/// "What's New" next to an update: the release notes in a popover.
+struct ReleaseNotesButton: View {
+    let item: CatalogItem
+    @State private var showing = false
+
+    var body: some View {
+        if let notes = item.app.releaseNotes, !notes.isEmpty {
+            Button("What's New") { showing.toggle() }
+                .buttonStyle(.link)
+                .font(.caption)
+                .accessibilityLabel("What's New in \(item.app.name) \(item.app.version ?? "")")
+                .popover(isPresented: $showing, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: Spacing.s) {
+                        Text("\(item.app.name) \(item.app.version ?? "")").font(.headline)
+                        Text(notes)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(Spacing.l)
+                    .frame(width: 320, alignment: .leading)
+                }
+        }
+    }
+}
+
+/// Updates done in the last week: what changed, and when. Click one for its page.
 struct RecentlyUpdated: View {
     let store: Store
     let navigation: Navigation
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
-            Text("Recently Updated").font(.title2.bold()).accessibilityAddTraits(.isHeader)
-            ForEach(store.recentUpdates) { update in
-                HStack(spacing: Spacing.m) {
-                    if let item = store.item(update.slug) {
-                        AppIconView(item: item, icons: store.icons, size: 32)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(update.name).font(.headline)
-                        Text(update.from == update.to ? "Reinstalled \(update.to)" : "\(update.from) → \(update.to)")
-                            .font(.callout).foregroundStyle(.secondary).monospacedDigit()
-                    }
-                    Spacer()
-                    Text(relativeDate(update.date))
-                        .font(.callout).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            Text("Recently Updated").font(.title2).accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: Spacing.s) {
+                ForEach(Array(store.recentUpdates.enumerated()), id: \.element.id) { index, update in
+                    // Hairlines between rows, none after the last.
+                    if index > 0 { Hairline() }
+                    RecentUpdateRow(update: update, store: store, navigation: navigation)
                 }
-                .padding(.vertical, Spacing.xs)
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) { navigation.showDetail(update.slug) }
-                .accessibilityElement(children: .combine)
-                Divider()
             }
         }
     }
 }
 
-struct UpdateRow: View {
-    let item: CatalogItem
+private struct RecentUpdateRow: View {
+    let update: RecentUpdate
     let store: Store
     let navigation: Navigation
-    @State private var showNotes = false
+    @State private var hovering = false
+
+    private static let iconSize: CGFloat = 32
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
+        Button {
+            navigation.showDetail(update.slug)
+        } label: {
             HStack(spacing: Spacing.m) {
-                Button {
-                    navigation.showDetail(item.id)
-                } label: {
-                    HStack(spacing: Spacing.m) {
-                        AppIconView(item: item, icons: store.icons, size: 48)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.app.name).font(.headline)
-                            Text(versionLine).font(.callout).foregroundStyle(.secondary).monospacedDigit()
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
+                if let item = store.item(update.slug) {
+                    AppIconView(item: item, icons: store.icons, size: Self.iconSize, alignsArt: true)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(item.app.name), \(versionLine)")
-                .accessibilityHint("Shows details")
-                ActionButton(item: item, store: store)
-            }
-            ErrorLine(message: store.errors[item.id]?.message).padding(.leading, 48 + Spacing.m)
-            NoticeLine(message: store.notices[item.id]).padding(.leading, 48 + Spacing.m)
-            if let notes = item.app.releaseNotes, !notes.isEmpty {
-                DisclosureGroup("What's New", isExpanded: $showNotes) {
-                    Text(notes)
-                        .font(.callout)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                        .padding(.top, Spacing.xs)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(update.name).font(.headline)
+                    Text(update.from == update.to ? "Reinstalled \(update.to)" : "\(update.from) → \(update.to)")
+                        .font(.callout).foregroundStyle(.secondary).monospacedDigit()
                 }
-                .font(.callout)
-                .padding(.leading, 48 + Spacing.m)
+                Spacer()
+                Text(relativeDate(update.date))
+                    .font(.callout).foregroundStyle(.secondary).monospacedDigit()
             }
-            Divider().padding(.leading, 48 + Spacing.m).padding(.top, Spacing.s)
+            .modifier(CardHighlight(isSelected: false, isHovered: hovering,
+                                    artSide: AppIconView.artSide(Self.iconSize), padding: Spacing.s))
         }
-        .padding(.top, Spacing.s)
-        .contextMenu { AppContextMenu(item: item, store: store, navigation: navigation) }
-    }
-
-    private var versionLine: String {
-        let from = item.primary?.info.version ?? "?"
-        let to = item.app.version ?? "?"
-        let size = item.app.size.map { " · \(SizeFormat.string($0))" } ?? ""
-        return "\(from) → \(to)\(size)"
+        .buttonStyle(.plain)
+        .padding(.vertical, Spacing.xs)
+        .onHover { hovering = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Shows details")
     }
 }
 
