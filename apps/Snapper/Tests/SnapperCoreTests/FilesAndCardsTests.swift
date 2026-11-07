@@ -187,3 +187,39 @@ enum TestImages {
         return (data[0], data[1], data[2], data[3])
     }
 }
+
+@Suite struct CardLayoutTests {
+    @Test func followsTheCaptureWithinLimits() {
+        // 16:9 at 220 wide: the real ratio.
+        #expect(CardLayout.thumbnailSize(for: CGSize(width: 1600, height: 900), width: 220, minHeight: 92) == CGSize(width: 220, height: 124))
+        // Very tall: capped at 1.1 × the width.
+        #expect(CardLayout.thumbnailSize(for: CGSize(width: 300, height: 3000), width: 220, minHeight: 92).height == 242)
+    }
+
+    @Test func wideCapturesNeverGetShorterThanTheButtonsNeed() {
+        for width in stride(from: CGFloat(160), through: 320, by: 20) {
+            let size = CardLayout.thumbnailSize(for: CGSize(width: 4000, height: 100), width: width, minHeight: 92)
+            #expect(size.height >= 92)
+        }
+        #expect(CardLayout.thumbnailSize(for: .zero, width: 160, minHeight: 92).height >= 92)
+    }
+}
+
+@Suite struct ImageEdgesTests {
+    private func image(width: Int, height: Int, margin: Int) -> CGImage {
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 1))
+        context.fill(CGRect(x: margin, y: margin, width: width - 2 * margin, height: height - 2 * margin))
+        return context.makeImage()!
+    }
+
+    @Test func aFullImageIsOpaque() {
+        #expect(ImageEdges.areOpaque(image(width: 40, height: 30, margin: 0)))
+    }
+
+    @Test func aWindowWithAShadowMarginIsNot() {
+        #expect(!ImageEdges.areOpaque(image(width: 40, height: 30, margin: 6)))
+    }
+}

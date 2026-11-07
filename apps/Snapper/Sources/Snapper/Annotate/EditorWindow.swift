@@ -19,6 +19,8 @@ final class EditorModel {
     var isEditingText = false
     /// The canvas zoom, for the window subtitle.
     var zoomPercent = 100
+    /// The image the last commit gave the capture (nothing to commit while it's unchanged).
+    @ObservationIgnored private var lastCommitted: CGImage?
 
     var tool: Tool {
         didSet {
@@ -36,10 +38,25 @@ final class EditorModel {
         didSet { UserDefaults.standard.set(width.rawValue, forKey: "editorWidth") }
     }
 
+    var redaction: RedactionStyle {
+        didSet { UserDefaults.standard.set(redaction.rawValue, forKey: "editorRedaction") }
+    }
+
+    /// The Background tool's sidebar is open.
+    var showsBackground = false
+
+    /// Objects copied with ⌘C inside an editor (pasted with ⌘V into any editor).
+    @ObservationIgnored static var objectClipboard: Annotation?
+
+    /// What the current tool draws.
+    var drawingKind: AnnotationKind? { tool.kind(redaction: redaction) }
+
     init(item: CaptureItem, app: AppModel) {
         self.item = item
         self.app = app
+        lastCommitted = item.image
         renderer = AnnotationRenderer(base: item.original, scale: item.scale)
+        renderer.drawsShadows = app.annotateShadows
         // Reopening picks up where you left off, undo history included.
         var state = item.editorState ?? AnnotationEditor(document: item.document ?? AnnotationDocument(imageSize: renderer.imageSize))
         state.selection = nil
@@ -49,6 +66,8 @@ final class EditorModel {
         tool = savedTool == .crop ? .arrow : savedTool
         color = defaults.string(forKey: "editorColor").flatMap(PaletteColor.named) ?? .default
         width = (defaults.object(forKey: "editorWidth") as? Int).flatMap(StrokeWidth.init) ?? .medium
+        redaction = defaults.string(forKey: "editorRedaction").flatMap(RedactionStyle.init) ?? .pixelate
+        showsBackground = state.document.background != nil
     }
 
     /// Called after every document change (the window updates its size subtitle).
@@ -58,12 +77,13 @@ final class EditorModel {
     func changed() {
         exported = false
         canvas?.needsDisplay = true
+        canvas?.needsLayout = true
         onChange?()
     }
 
     /// "Annotate · 900 × 800 px": the size the result will have (after any crop).
     var subtitle: String {
-        let visible = editor.document.visibleRect
+        let visible = editor.document.outputRect
         return "Annotate · \(Int((visible.width * item.scale).rounded())) × \(Int((visible.height * item.scale).rounded())) px"
     }
 
@@ -100,6 +120,102 @@ final class EditorModel {
         changed()
     }
 
+    func pickRedaction(_ style: RedactionStyle) {
+        redaction = style
+        if var selected = editor.selected, selected.kind.isRedaction, selected.kind != style.kind {
+            selected.kind = style.kind
+            editor.update(selected)
+        }
+        tool = .redact
+        changed()
+    }
+
+    /// ⌘D.
+    func duplicate() {
+        editor.duplicateSelection()
+        changed()
+    }
+
+    /// ⌘C: the selected object if there is one (for ⌘V), else the whole image.
+    func copyObjectOrImage() {
+        if let selected = editor.selected {
+            Self.objectClipboard = selected
+            HUD.show("Copied \(selected.kind.rawValue == "text" ? "text box" : "object")", systemImage: "doc.on.doc")
+        } else {
+            copy()
+        }
+    }
+
+    /// ⌘V: pastes an object copied in an editor.
+    func pasteObject() {
+        guard let object = Self.objectClipboard else { return }
+        editor.paste(object)
+        changed()
+    }
+
+    // MARK: Background
+
+    func toggleBackground() {
+        canvas?.endTextEditing()
+        if tool == .crop { tool = .select }
+        showsBackground.toggle()
+        if showsBackground, editor.document.background == nil {
+            editor.setBackground(CaptureBackground())
+            changed()
+        }
+    }
+
+    func setBackground(_ background: CaptureBackground?) {
+        editor.setBackground(background)
+        changed()
+    }
+
+    func adjustBackground(editing: Bool, _ change: (inout CaptureBackground) -> Void) {
+        if editing { editor.beginChange() }
+        editor.adjustBackground(change)
+        if !editing { editor.commitChange() }
+        changed()
+    }
+
+    // MARK: Print
+
+    func print() {
+        let image = rendered()
+        let view = NSImageView(frame: CGRect(origin: .zero, size: CGSize(width: CGFloat(image.width) / item.scale, height: CGFloat(image.height) / item.scale)))
+        view.image = NSImage(cgImage: image, size: view.frame.size)
+        view.imageScaling = .scaleProportionallyDown
+        let info = NSPrintInfo.shared.copy() as! NSPrintInfo
+        info.horizontalPagination = .fit
+        info.verticalPagination = .fit
+        info.isHorizontallyCentered = true
+        info.isVerticallyCentered = true
+        info.orientation = view.frame.width > view.frame.height ? .landscape : .portrait
+        let operation = NSPrintOperation(view: view, printInfo: info)
+        operation.jobTitle = item.fileBaseName
+        if let window = canvas?.window {
+            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        } else {
+            operation.run()
+        }
+    }
+
+    /// The Done button: close, keeping the edits.
+    func done() {
+        EditorWindowController.close(model: self)
+    }
+
+    /// A file of the current result, for dragging out of the editor.
+    func fileForDrag() -> URL? {
+        commitToItem()
+        exported = true
+        return item.temporaryFile(format: app.format)
+    }
+
+    func copyText() {
+        commitToItem()
+        app.copyText(item)
+    }
+
     // MARK: Output
 
     /// The capture with the edits burned in, at full resolution.
@@ -110,9 +226,15 @@ final class EditorModel {
 
     /// Writes the edits back to the capture so cards, pins and Reopen Last Capture use them.
     func commitToItem() {
+        canvas?.endTextEditing()
+        item.editorState = editor
+        // Nothing new since the last commit: keep the capture (and its history file) as is.
+        let edits = editor.document.isEdited ? editor.document : nil
+        if edits == item.document, item.image === lastCommitted { return }
         let image = rendered()
         item.apply(editor.document, rendered: image)
-        item.editorState = editor
+        lastCommitted = item.image
+        app.history.edited(item)
     }
 
     func copy() {
@@ -196,7 +318,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         let model = EditorModel(item: item, app: app)
-        let controller = EditorWindowController(model: model)
+        let controller = EditorWindowController(model: model, app: app)
         open.append(controller)
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
@@ -204,25 +326,37 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         Diagnostics.record("editor opened pixels=\(item.pixelSizeDescription)")
     }
 
+    static func owns(_ window: NSWindow) -> Bool { open.contains { $0.window === window } }
+
+    /// Captures open in editors (history never prunes them).
+    static var openItems: [CaptureItem] { open.map(\.model.item) }
+
+    /// Settings → Annotate → Always on top.
+    static func applyLevel() {
+        for controller in open { controller.window?.level = AppModel.shared.annotateAlwaysOnTop ? .floating : .normal }
+    }
+
     static func close(model: EditorModel) {
         open.first { $0.model === model }?.window?.performClose(nil)
     }
 
-    init(model: EditorModel) {
+    init(model: EditorModel, app: AppModel) {
         self.model = model
         let hosting = NSHostingController(rootView: EditorView(model: model))
         hosting.sceneBridgingOptions = [.toolbars, .title]
         let window = NSWindow(contentViewController: hosting)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         window.toolbarStyle = .unified
+        window.titleVisibility = .hidden
         window.title = model.item.sourceName
         window.subtitle = model.subtitle
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.setContentSize(Self.initialContentSize(for: model.item.size))
-        window.contentMinSize = CGSize(width: 640, height: 360)
+        window.contentMinSize = CGSize(width: 900, height: 420)
         window.center()
         super.init(window: window)
+        if app.annotateAlwaysOnTop { window.level = .floating }
         window.delegate = self
         model.onChange = { [weak window, weak model] in
             guard let window, let model else { return }
@@ -238,13 +372,21 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         let visible = (NSScreen.underPointer ?? NSScreen.main)?.visibleFrame.size ?? CGSize(width: 1440, height: 900)
         let padding = CanvasView.padding * 2
         let wanted = CGSize(width: imageSize.width + padding, height: imageSize.height + padding + 90)
-        return CGSize(width: min(max(wanted.width, 720), visible.width * 0.85),
+        return CGSize(width: min(max(wanted.width, 960), visible.width * 0.9),
                       height: min(max(wanted.height, 420), visible.height * 0.85)).applying(.identity)
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
         ToolsMenuMarks.install()
-        if let canvas = model.canvas { window?.makeFirstResponder(canvas.editingField ?? canvas) }
+        if let canvas = model.canvas {
+            window?.makeFirstResponder(canvas.editingField ?? canvas)
+            canvas.needsDisplay = true
+        }
+    }
+
+    /// The selection goes grey in a background window.
+    func windowDidResignKey(_ notification: Notification) {
+        model.canvas?.needsDisplay = true
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -253,68 +395,319 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
-/// The editor's SwiftUI shell: a tool strip (tools, color, width) above the canvas, and the
-/// output actions in the window toolbar.
+/// The editor's SwiftUI shell, laid out like the screenshot editors people know: every tool
+/// in the title bar (crop and background first, then the drawing tools, then color and
+/// style), Save As… and Done on the right; a bottom bar with zoom, a drag handle and the
+/// quick outputs; the Background tool's options in a sidebar.
 struct EditorView: View {
     @Bindable var model: EditorModel
 
     var body: some View {
         VStack(spacing: 0) {
-            ToolStrip(model: model)
-            Divider()
-            CanvasRepresentable(model: model)
-                .frame(minWidth: 520, minHeight: 300)
+            HStack(spacing: 0) {
+                if model.showsBackground {
+                    BackgroundPanel(model: model)
+                        .frame(width: BackgroundPanel.width)
+                    Hairline(axis: .vertical)
+                }
+                CanvasRepresentable(model: model)
+                    .frame(minWidth: 480, minHeight: 280)
+            }
+            Hairline()
+            BottomBar(model: model)
         }
         .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Toggle(isOn: Binding(get: { model.tool == .crop }, set: { model.tool = $0 ? .crop : .select })) {
+                    Label("Crop", systemImage: Tool.crop.systemImage)
+                }
+                .help("Crop (K)")
+                Toggle(isOn: Binding(get: { model.showsBackground }, set: { _ in model.toggleBackground() })) {
+                    Label("Background", systemImage: "rectangle.inset.filled")
+                }
+                .help("Background (B)")
+            }
+            ToolbarItem(placement: .principal) {
+                ToolPicker(model: model)
+            }
+            ToolbarItemGroup(placement: .principal) {
+                ColorMenu(model: model)
+                if model.tool == .redact || model.editor.selected?.kind.isRedaction == true {
+                    RedactionMenu(model: model)
+                } else {
+                    WidthMenu(model: model)
+                }
+            }
             ToolbarItemGroup(placement: .primaryAction) {
-                Button { model.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
-                    .help("Undo (⌘Z)")
-                    .disabled(!model.canUndo)
-                Button { model.redo() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
-                    .help("Redo (⇧⌘Z)")
-                    .disabled(!model.canRedo)
-                Button { model.copy() } label: { Label("Copy", systemImage: "doc.on.doc") }
-                    .help("Copy Image (⌘C)")
-                Button { model.save() } label: { Label("Save", systemImage: "square.and.arrow.down") }
-                    .help("Save to the save folder (⌘S)")
-                Button {
-                    if let canvas = model.canvas { model.share(from: canvas.shareAnchor) }
-                } label: { Label("Share", systemImage: "square.and.arrow.up") }
-                    .help("Share")
-                Button { model.pin() } label: { Label("Pin to Screen", systemImage: "pin") }
-                    .help("Pin to Screen (⇧⌘P)")
+                Button("Save As…") { model.saveAs() }
+                    .help("Save As… (⇧⌘S)")
+                Button("Done") { model.done() }
+                    .buttonStyle(.borderedProminent)
+                    .help("Close the editor, keeping your edits")
             }
         }
     }
 }
 
-/// Tools on the left, style on the right, like a markup bar.
-struct ToolStrip: View {
+/// The drawing tools as one segmented control (a native radio group for VoiceOver).
+struct ToolPicker: View {
     @Bindable var model: EditorModel
+    static let tools: [Tool] = [.select, .rectangle, .filledRectangle, .ellipse, .line, .arrow, .text,
+                                .pencil, .highlighter, .redact, .spotlight, .counter]
 
     var body: some View {
-        HStack(spacing: Spacing.xs) {
-            ForEach(Tool.allCases) { tool in
-                Toggle(isOn: Binding(get: { model.tool == tool }, set: { if $0 { model.tool = tool } })) {
-                    Label(tool.title, systemImage: tool.systemImage)
-                        .labelStyle(.iconOnly)
-                        .frame(width: 22)
-                }
-                .help("\(tool.title) (\(String(tool.key).uppercased()))")
-                .accessibilityLabel(tool.title)
-                if tool == .select || tool == .highlighter || tool == .counter {
-                    Divider().frame(height: 16).padding(.horizontal, Spacing.xs)
-                }
+        Picker("Tool", selection: Binding(get: { model.tool }, set: { model.tool = $0 })) {
+            ForEach(Self.tools) { tool in
+                Label(tool.title, systemImage: tool.systemImage)
+                    .labelStyle(.iconOnly)
+                    .help("\(tool.title) (\(String(tool.key).uppercased()))")
+                    .tag(tool)
             }
-            Spacer(minLength: Spacing.m)
-            ColorMenu(model: model)
-            WidthMenu(model: model)
         }
-        .toggleStyle(.button)
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .help("Tools: V, R, F, E, L, A, T, D, M, P, H, C")
+    }
+}
+
+/// Zoom on the left, a drag handle in the middle, quick outputs on the right.
+struct BottomBar: View {
+    @Bindable var model: EditorModel
+    static let height: CGFloat = 40
+
+    var body: some View {
+        HStack(spacing: Spacing.s) {
+            Menu {
+                Button("Zoom In") { model.canvas?.zoomIn() }
+                Button("Zoom Out") { model.canvas?.zoomOut() }
+                Button("Actual Size") { model.canvas?.zoomToActualSize() }
+                Button("Zoom to Fit") { model.canvas?.zoomToFit() }
+            } label: {
+                Text("\(model.zoomPercent)%").monospacedDigit()
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Zoom")
+            .accessibilityLabel("Zoom, \(model.zoomPercent) percent")
+            Text(model.subtitle.replacingOccurrences(of: "Annotate · ", with: ""))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Spacer()
+            DragHandle(model: model)
+                .frame(width: 120, height: 24)
+            Spacer()
+            Group {
+                Button { if let canvas = model.canvas { model.share(from: canvas.shareAnchor) } } label: {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                .help("Share")
+                Button { model.pin() } label: { Label("Pin to Screen", systemImage: "pin") }
+                    .help("Pin to Screen (⇧⌘P)")
+                Button { model.copy() } label: { Label("Copy", systemImage: "doc.on.doc") }
+                    .help("Copy Image (⇧⌘C)")
+                Button { model.save() } label: { Label("Save", systemImage: "square.and.arrow.down") }
+                    .help("Save to the save folder (⌘S)")
+            }
+            .labelStyle(.iconOnly)
+        }
         .buttonStyle(.accessoryBar)
         .padding(.horizontal, Spacing.m)
-        .padding(.vertical, Spacing.s - 2)
-        .background(.bar)
+        .padding(.vertical, Spacing.xs)
+        .frame(height: BottomBar.height)
+        // Opaque, like a window's status bar: inside a behind-window material the drag
+        // handle's fill couldn't blend with what's under it (it measured 1:1 in dark mode).
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+/// Drag this into another app to drop the edited image there.
+struct DragHandle: NSViewRepresentable {
+    let model: EditorModel
+
+    func makeNSView(context: Context) -> DragHandleView {
+        let view = DragHandleView()
+        view.model = model
+        return view
+    }
+
+    func updateNSView(_ view: DragHandleView, context: Context) { view.model = model }
+}
+
+@MainActor
+final class DragHandleView: NSView, NSDraggingSource {
+    weak var model: EditorModel?
+    private var downAt: CGPoint?
+    private let label = NSTextField(labelWithString: "Drag Out")
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerCurve = .continuous
+        label.font = .preferredFont(forTextStyle: .caption1)
+        label.textColor = .secondaryLabelColor
+        label.alignment = .center
+        let icon = NSImageView(image: NSImage(systemSymbolName: "hand.draw", accessibilityDescription: nil)!)
+        icon.contentTintColor = .secondaryLabelColor
+        let stack = NSStackView(views: [icon, label])
+        stack.spacing = Spacing.xs
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo: centerXAnchor), stack.centerYAnchor.constraint(equalTo: centerYAnchor)])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Drag out the image")
+        toolTip = "Drag the edited image into another app"
+        updateColors()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func viewDidChangeEffectiveAppearance() { updateColors() }
+    override var wantsUpdateLayer: Bool { true }
+    /// AppKit calls this with the view's appearance current, after any appearance change.
+    override func updateLayer() { updateColors() }
+    /// A capsule whatever height it's given.
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = bounds.height / 2
+    }
+    /// Layer colours don't follow the appearance by themselves: resolve them in this view's.
+    private func updateColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+        }
+    }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+    override func mouseDown(with event: NSEvent) { downAt = event.locationInWindow }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = downAt, let model else { return }
+        let p = event.locationInWindow
+        guard hypot(p.x - start.x, p.y - start.y) > 3 else { return }
+        downAt = nil
+        guard let url = model.fileForDrag() else { return }
+        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        let image = NSImage(contentsOf: url) ?? NSImage()
+        let size = CGSize(width: 120, height: 120 * max(image.size.height, 1) / max(image.size.width, 1))
+        item.setDraggingFrame(CGRect(origin: CGPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2), size: size), contents: image)
+        beginDraggingSession(with: [item], event: event, source: self)
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .outsideApplication ? [.copy] : []
+    }
+}
+
+/// The Background tool: none, gradients, plain colors, padding, corners and shadow.
+struct BackgroundPanel: View {
+    @Bindable var model: EditorModel
+    @Environment(\.controlActiveState) private var activeState
+    private var background: CaptureBackground? { model.editor.document.background }
+
+    /// Four swatches across, `Spacing.l` margins: 4 × 40 + 3 × 8 + 2 × 16.
+    static let swatchSide: CGFloat = 40
+    static let columnsCount = 4
+    static let width = CGFloat(columnsCount) * swatchSide + CGFloat(columnsCount - 1) * Spacing.s + 2 * Spacing.l
+    private let columns = Array(repeating: GridItem(.fixed(BackgroundPanel.swatchSide), spacing: Spacing.s), count: BackgroundPanel.columnsCount)
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.l) {
+                Button { model.setBackground(nil) } label: {
+                    Text("None").frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .disabled(background == nil)
+                section("Gradients") {
+                    ForEach(GradientPreset.allCases) { preset in
+                        swatch(selected: background?.fill == .gradient(preset), label: "Gradient, \(preset.title)") {
+                            LinearGradient(colors: [Color(cgColor: preset.colors.0.cgColor), Color(cgColor: preset.colors.1.cgColor)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                        } action: { pick(.gradient(preset)) }
+                    }
+                }
+                section("Plain Colors") {
+                    ForEach(Array(CaptureBackground.solidColors.enumerated()), id: \.offset) { index, color in
+                        swatch(selected: background?.fill == .solid(RGBAValue(color)), label: "Color, \(CaptureBackground.solidColorNames[index])") {
+                            Color(cgColor: color.cgColor)
+                        } action: { pick(.solid(RGBAValue(color))) }
+                    }
+                }
+                VStack(alignment: .leading, spacing: Spacing.m) {
+                    slider("Padding", value: \.padding, range: CaptureBackground.paddingRange, unit: "pt")
+                    slider("Corners", value: \.cornerRadius, range: CaptureBackground.cornerRange, unit: "pt")
+                    slider("Shadow", value: \.shadow, range: 0...1, unit: "%")
+                }
+            }
+            .padding(Spacing.l)
+        }
+        .background(.background.secondary)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Background")
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            Text(title).font(.headline)
+            LazyVGrid(columns: columns, alignment: .leading, spacing: Spacing.s) { content() }
+        }
+    }
+
+    private func pick(_ fill: CaptureBackground.Fill) {
+        var style = background ?? CaptureBackground()
+        style.fill = fill
+        model.setBackground(style)
+    }
+
+    /// A rounded swatch with a one-pixel edge; the selected one gets an accent ring just
+    /// outside it, concentric with its corners.
+    private func swatch<Fill: View>(selected: Bool, label: String, @ViewBuilder fill: () -> Fill, action: @escaping () -> Void) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Radius.m, style: .continuous)
+        let ring = Spacing.xs // 2 pt ring, 2 pt clear of the swatch
+        return Button(action: action) {
+            fill()
+                .frame(width: Self.swatchSide, height: Self.swatchSide)
+                .clipShape(shape)
+                .hairlineBorder(shape)
+                .overlay {
+                    if selected {
+                        RoundedRectangle(cornerRadius: Radius.m + ring, style: .continuous)
+                            .strokeBorder(Color.selectionRing(activeState), lineWidth: 2)
+                            .padding(-ring)
+                    }
+                }
+                .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func slider(_ title: String, value: WritableKeyPath<CaptureBackground, CGFloat>, range: ClosedRange<CGFloat>, unit: String) -> some View {
+        let current = background?[keyPath: value] ?? range.lowerBound
+        let shown = unit == "%" ? "\(Int((current * 100).rounded())) %" : "\(Int(current.rounded())) pt"
+        return VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                Spacer()
+                Text(background == nil ? "–" : shown)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .font(.subheadline)
+            Slider(value: Binding(get: { current },
+                                  set: { newValue in model.adjustBackground(editing: true) { $0[keyPath: value] = newValue } }),
+                   in: range) { editing in
+                if !editing { model.adjustBackground(editing: false) { _ in } }
+            }
+            .controlSize(.small)
+            .accessibilityLabel(title)
+            .accessibilityValue(background == nil ? "Off" : shown)
+        }
+        .disabled(background == nil)
     }
 }
 
@@ -323,17 +716,27 @@ struct ToolStrip: View {
 struct ColorMenu: View {
     @Bindable var model: EditorModel
 
+    // A menu showing just the current swatch (a pop-up button in the toolbar reserved room
+    // for a title it never drew), with the colors as a checkmarked list inside.
     var body: some View {
-        Picker("Color", selection: Binding(get: { model.color }, set: { model.pickColor($0) })) {
-            ForEach(PaletteColor.all) { color in
-                Label { Text(color.name) } icon: { Image(nsImage: Swatch.image(color.color, selected: false)) }
-                    .tag(color)
+        Menu {
+            Picker("Color", selection: Binding(get: { model.color }, set: { model.pickColor($0) })) {
+                ForEach(PaletteColor.all) { color in
+                    Label { Text(color.name) } icon: { Image(nsImage: Swatch.image(color.color, selected: false)) }
+                        .tag(color)
+                }
             }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Label { Text("Color") } icon: { Image(nsImage: Swatch.image(model.color.color, selected: false)) }
+                .labelStyle(.iconOnly)
         }
-        .pickerStyle(.menu)
-        .labelsHidden()
+        .menuIndicator(.visible)
         .fixedSize()
         .help("Color")
+        .accessibilityLabel("Color")
+        .accessibilityValue(model.color.name)
     }
 }
 
@@ -353,6 +756,22 @@ struct WidthMenu: View {
     }
 }
 
+struct RedactionMenu: View {
+    @Bindable var model: EditorModel
+
+    var body: some View {
+        Picker("Redaction", selection: Binding(get: { model.redaction }, set: { model.pickRedaction($0) })) {
+            ForEach(RedactionStyle.allCases) { style in
+                Text(style.title).tag(style)
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .fixedSize()
+        .help("Pixelate or blur")
+    }
+}
+
 /// Round color swatches for menus and the toolbar (annotation colors are content, so they're drawn as-is).
 enum Swatch {
     @MainActor private static var cache: [String: NSImage] = [:]
@@ -368,11 +787,6 @@ enum Swatch {
             NSColor.separatorColor.setStroke()
             circle.lineWidth = 1
             circle.stroke()
-            if selected {
-                let dot = NSBezierPath(ovalIn: rect.insetBy(dx: 6, dy: 6))
-                (color.isLight ? NSColor.black : NSColor.white).setFill()
-                dot.fill()
-            }
             return true
         }
         image.isTemplate = false
@@ -386,26 +800,46 @@ enum Swatch {
 /// shortcuts and Delete are handled by the canvas (as menu key equivalents they would also
 /// fire while typing in text fields).
 struct EditorCommands: Commands {
-    private var editor: EditorModel? { EditorWindowController.front }
+    private var editor: EditorModel? { card == nil && pin == nil && history == nil ? EditorWindowController.front : nil }
+    /// The Capture History window, when it's in front: file commands act on its selection.
+    @MainActor private var history: HistoryViewState? { HistoryWindowController.keyState }
     private var pin: PinPanel? { NSApp.keyWindow as? PinPanel }
+    /// A thumbnail that was clicked (key): file commands act on it.
+    @MainActor private var card: CaptureItem? { AppModel.shared.cards.item(for: NSApp.keyWindow) }
+    @MainActor private var app: AppModel { AppModel.shared }
 
     var body: some Commands {
         CommandGroup(replacing: .undoRedo) {
-            Button("Undo") { editor?.undo() }
+            Button("Undo") { if history != nil { NSApp.keyWindow?.undoManager?.undo() } else { editor?.undo() } }
                 .keyboardShortcut("z")
-            Button("Redo") { editor?.redo() }
+            Button("Redo") { if history != nil { NSApp.keyWindow?.undoManager?.redo() } else { editor?.redo() } }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
         }
         CommandGroup(replacing: .saveItem) {
             Button("Close") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w")
             Divider()
-            Button("Save") { editor?.save() }
+            Button("Save") {
+                if let card { app.save(card) } else if let pin { app.pins.save(pin) } else if let history { history.save() } else { editor?.save() }
+            }
                 .keyboardShortcut("s")
-            Button("Save As…") { editor?.saveAs() }
+            Button("Save As…") { if let card { app.saveAs(card) } else if let history { history.saveAs() } else { editor?.saveAs() } }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
-            Button("Pin to Screen") { editor?.pin() }
+            Button("Copy Image") {
+                if let card { app.copy(card) } else if let pin { app.pins.copy(pin) } else if let history { history.copy() } else { editor?.copy() }
+            }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+            Button("Copy Text in Image") { if let card { app.copyText(card) } else { editor?.copyText() } }
+            Button("Pin to Screen") { if let card { app.pin(card) } else if let history { history.pin() } else { editor?.pin() } }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
+        }
+        CommandGroup(replacing: .printItem) {
+            Button("Print…") { editor?.print() }
+                .keyboardShortcut("p")
+        }
+        CommandGroup(after: .pasteboard) {
+            Button("Duplicate") { editor?.duplicate() }
+                .keyboardShortcut("d")
         }
         CommandGroup(after: .toolbar) {
             // A pinned capture in front zooms itself; otherwise the editor does.
@@ -428,10 +862,16 @@ struct EditorCommands: Commands {
                     Text("Press \(String(tool.key).uppercased())")
                 }
             }
+            Button { editor?.toggleBackground() } label: { Text("Background"); Text("Press B") }
             Divider()
             Menu("Color") {
                 ForEach(PaletteColor.all) { color in
                     Button(color.name) { editor?.pickColor(color) }
+                }
+            }
+            Menu("Blur and Pixelate Style") {
+                ForEach(RedactionStyle.allCases) { style in
+                    Button(style.title) { editor?.pickRedaction(style) }
                 }
             }
             Menu("Line Width") {
@@ -465,7 +905,7 @@ final class ToolsMenuMarks: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard let editor = EditorWindowController.front else { return }
-        let marked = [editor.tool.title, editor.color.name, editor.width.title]
+        let marked = [editor.tool.title, editor.color.name, editor.width.title, editor.redaction.title]
         for item in menu.items where item.submenu == nil {
             item.state = marked.contains(item.title) ? .on : .off
         }

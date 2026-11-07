@@ -49,6 +49,74 @@ final class AppModel {
     var playSound: Bool {
         didSet { defaults.set(playSound, forKey: Keys.playSound) }
     }
+    var selfTimerInterval: Int {
+        didSet { defaults.set(selfTimerInterval, forKey: Keys.selfTimerInterval) }
+    }
+    var ocrKeepLineBreaks: Bool {
+        didSet { defaults.set(ocrKeepLineBreaks, forKey: Keys.ocrKeepLineBreaks) }
+    }
+    var fileNameTemplate: String {
+        didSet { defaults.set(fileNameTemplate, forKey: Keys.fileNameTemplate) }
+    }
+    /// Backdrop for window captures; nil = transparent with a shadow.
+    var windowBackground: GradientPreset? {
+        didSet { defaults.set(windowBackground?.rawValue ?? "none", forKey: Keys.windowBackground) }
+    }
+    var windowPadding: Double {
+        didSet { defaults.set(windowPadding, forKey: Keys.windowPadding) }
+    }
+    /// Thumbnail width in points (Settings → Quick Access → size).
+    var cardWidth: Double {
+        didSet { defaults.set(cardWidth, forKey: Keys.cardWidth); cards.relayout() }
+    }
+    /// Thumbnails appear on the screen under the pointer rather than the capture's screen.
+    var cardFollowsPointer: Bool {
+        didSet { defaults.set(cardFollowsPointer, forKey: Keys.cardFollowsPointer) }
+    }
+    var annotateShadows: Bool {
+        didSet { defaults.set(annotateShadows, forKey: Keys.annotateShadows) }
+    }
+    var annotateAlwaysOnTop: Bool {
+        didSet { defaults.set(annotateAlwaysOnTop, forKey: Keys.annotateAlwaysOnTop); EditorWindowController.applyLevel() }
+    }
+    var pinRoundedCorners: Bool {
+        didSet { defaults.set(pinRoundedCorners, forKey: Keys.pinRoundedCorners); pins.restyle() }
+    }
+    var pinShadow: Bool {
+        didSet { defaults.set(pinShadow, forKey: Keys.pinShadow); pins.restyle() }
+    }
+    var pinBorder: Bool {
+        didSet { defaults.set(pinBorder, forKey: Keys.pinBorder); pins.restyle() }
+    }
+    var recordFrameRate: Int {
+        didSet { defaults.set(recordFrameRate, forKey: Keys.recordFrameRate) }
+    }
+    var recordShowsCursor: Bool {
+        didSet { defaults.set(recordShowsCursor, forKey: Keys.recordShowsCursor) }
+    }
+    var recordScaleToOneX: Bool {
+        didSet { defaults.set(recordScaleToOneX, forKey: Keys.recordScaleToOneX) }
+    }
+    var recordDimScreen: Bool {
+        didSet { defaults.set(recordDimScreen, forKey: Keys.recordDimScreen) }
+    }
+    var recordCountdown: Bool {
+        didSet { defaults.set(recordCountdown, forKey: Keys.recordCountdown) }
+    }
+    var gifFrameRate: Int {
+        didSet { defaults.set(gifFrameRate, forKey: Keys.gifFrameRate) }
+    }
+    var gifWidth: Int {
+        didSet { defaults.set(gifWidth, forKey: Keys.gifWidth) }
+    }
+
+    var recordingOptions: RecordingOptions {
+        RecordingOptions(frameRate: recordFrameRate, showsCursor: recordShowsCursor, scaleToOneX: recordScaleToOneX)
+    }
+
+    var gifOptions: GIFEncoder.Options {
+        GIFEncoder.Options(frameRate: gifFrameRate, maxWidth: gifWidth)
+    }
 
     // MARK: State
 
@@ -67,6 +135,9 @@ final class AppModel {
     var openCards = 0
     var openPins = 0
     private(set) var isCapturing = false
+    /// The screen recording's state (menu bar icon and menu follow it).
+    var recordingPhase: RecordingPhase = .idle
+    var isRecording: Bool { recordingPhase != .idle }
 
     // MARK: Wiring
 
@@ -74,6 +145,11 @@ final class AppModel {
     @ObservationIgnored let pasteboard: PasteboardWriting
     @ObservationIgnored private(set) var cards: CardController!
     @ObservationIgnored private(set) var pins: PinController!
+    @ObservationIgnored private(set) var recording: RecordingController!
+    @ObservationIgnored private(set) var history: HistoryController!
+    /// The app a capture in progress comes from (set when it starts; window picks refine it).
+    @ObservationIgnored var pendingSource: SourceApp?
+    @ObservationIgnored let textRecognizer: TextRecognizing = VisionTextRecognizer()
     @ObservationIgnored private let defaults = UserDefaults.standard
 
     private enum Keys {
@@ -90,6 +166,25 @@ final class AppModel {
         static let showMagnifier = "showMagnifier"
         static let playSound = "playSound"
         static let lastArea = "lastArea"
+        static let selfTimerInterval = "selfTimerInterval"
+        static let ocrKeepLineBreaks = "ocrKeepLineBreaks"
+        static let fileNameTemplate = "fileNameTemplate"
+        static let windowBackground = "windowBackground"
+        static let windowPadding = "windowPadding"
+        static let cardWidth = "cardWidth"
+        static let cardFollowsPointer = "cardFollowsPointer"
+        static let annotateShadows = "annotateShadows"
+        static let annotateAlwaysOnTop = "annotateAlwaysOnTop"
+        static let pinRoundedCorners = "pinRoundedCorners"
+        static let pinShadow = "pinShadow"
+        static let pinBorder = "pinBorder"
+        static let recordFrameRate = "recordFrameRate"
+        static let recordShowsCursor = "recordShowsCursor"
+        static let recordScaleToOneX = "recordScaleToOneX"
+        static let recordDimScreen = "recordDimScreen"
+        static let recordCountdown = "recordCountdown"
+        static let gifFrameRate = "gifFrameRate"
+        static let gifWidth = "gifWidth"
     }
 
     private init(capturer: ScreenCapturing = ScreenCaptureKitCapturer(), pasteboard: PasteboardWriting = SystemPasteboardWriter()) {
@@ -109,8 +204,29 @@ final class AppModel {
         showMagnifier = d.object(forKey: Keys.showMagnifier) as? Bool ?? true
         playSound = d.object(forKey: Keys.playSound) as? Bool ?? true
         lastArea = d.data(forKey: Keys.lastArea).flatMap { try? JSONDecoder().decode(RememberedArea.self, from: $0) }
+        selfTimerInterval = (d.object(forKey: Keys.selfTimerInterval) as? Int) ?? SelfTimer.defaultInterval
+        ocrKeepLineBreaks = d.object(forKey: Keys.ocrKeepLineBreaks) as? Bool ?? true
+        fileNameTemplate = d.string(forKey: Keys.fileNameTemplate) ?? FileNaming.defaultTemplate
+        windowBackground = d.string(forKey: Keys.windowBackground).flatMap(GradientPreset.init)
+        windowPadding = d.object(forKey: Keys.windowPadding) as? Double ?? 56
+        cardWidth = d.object(forKey: Keys.cardWidth) as? Double ?? 220
+        cardFollowsPointer = d.object(forKey: Keys.cardFollowsPointer) as? Bool ?? true
+        annotateShadows = d.object(forKey: Keys.annotateShadows) as? Bool ?? true
+        annotateAlwaysOnTop = d.object(forKey: Keys.annotateAlwaysOnTop) as? Bool ?? false
+        pinRoundedCorners = d.object(forKey: Keys.pinRoundedCorners) as? Bool ?? true
+        pinShadow = d.object(forKey: Keys.pinShadow) as? Bool ?? true
+        pinBorder = d.object(forKey: Keys.pinBorder) as? Bool ?? true
+        recordFrameRate = (d.object(forKey: Keys.recordFrameRate) as? Int) ?? 30
+        recordShowsCursor = d.object(forKey: Keys.recordShowsCursor) as? Bool ?? true
+        recordScaleToOneX = d.object(forKey: Keys.recordScaleToOneX) as? Bool ?? false
+        recordDimScreen = d.object(forKey: Keys.recordDimScreen) as? Bool ?? true
+        recordCountdown = d.object(forKey: Keys.recordCountdown) as? Bool ?? false
+        gifFrameRate = (d.object(forKey: Keys.gifFrameRate) as? Int) ?? 15
+        gifWidth = (d.object(forKey: Keys.gifWidth) as? Int) ?? 800
         cards = CardController(model: self)
         pins = PinController(model: self)
+        recording = RecordingController(model: self, recorder: StreamRecorder())
+        history = HistoryController(model: self)
         refreshPermission()
     }
 
@@ -143,6 +259,20 @@ final class AppModel {
             PermissionWindow.show()
             return
         }
+        if mode == .recording, isRecording {
+            // The record shortcut (or menu item) again stops the recording.
+            recording.stop()
+            return
+        }
+        if mode == .allInOne {
+            AllInOneBar.toggle(model: self)
+            return
+        }
+        AllInOneBar.close()
+        if ScrollingCapture.current != nil {
+            if mode == .scrolling { ScrollingCapture.current?.finish() }
+            return
+        }
         if let overlay = RegionOverlay.current {
             // The same shortcut again while selecting switches mode, like pressing Space.
             if mode == .window { overlay.setMode(.window) } else if mode == .area { overlay.setMode(.area) }
@@ -158,6 +288,7 @@ final class AppModel {
             return
         }
         isCapturing = true
+        pendingSource = CaptureSource.current()
         Task {
             defer { isCapturing = false }
             switch mode {
@@ -167,11 +298,25 @@ final class AppModel {
                 await captureFullScreen(started: started)
             case .previousArea:
                 await capturePreviousArea(started: started)
+            case .text:
+                await captureText(started: started)
+            case .selfTimer:
+                await captureWithTimer(started: started)
+            case .scrolling:
+                await captureScrolling(started: started)
+            case .recording:
+                await recording.begin(started: started)
+            case .allInOne:
+                break
             }
         }
     }
 
-    private var exclusions: CaptureExclusions {
+    var overlayOptions: RegionOverlay.Options {
+        .init(showsMagnifier: showMagnifier, exclusions: exclusions, log: Diagnostics.record)
+    }
+
+    var exclusions: CaptureExclusions {
         CaptureExclusions(keepOwnWindows: pins.windowNumbers.union(TestScene.windowNumbers), hideDesktopIcons: hideDesktopIcons,
                           onlyWindows: TestScene.isActive ? pins.windowNumbers.union(TestScene.windowNumbers) : nil)
     }
@@ -186,23 +331,37 @@ final class AppModel {
             lastArea = RememberedArea(displayID: displayID, rect: rect)
             deliver(image, scale: scaleOf(displayID), displayID: displayID, started: finished, kind: "area")
         case .window(let window):
-            if let only = exclusions.onlyWindows, !only.contains(window.id) {
-                Diagnostics.record("window capture refused: test mode allows only the test scene")
-                return
-            }
-            do {
-                let screen = screenContaining(quartzRect: window.frame)
-                let bare = try await capturer.captureWindow(window.id, includeShadow: false)
-                let scale = CGFloat(bare.width) / max(window.frame.width, 1)
-                let image = includeWindowShadow ? (WindowShadow.apply(to: bare, scale: scale) ?? bare) : bare
-                deliver(image, scale: scale > 0.5 ? scale.rounded() : (screen?.backingScaleFactor ?? 2), displayID: screen?.displayID, started: finished, kind: "window")
-            } catch {
-                report(error)
-            }
+            await captureWindow(window, started: finished)
         case .cancelled:
             Diagnostics.record("capture cancelled")
             Memory.relieveSoon()
         case .failed(let error):
+            report(error)
+        }
+    }
+
+    /// One window on its own: shadow on transparency, or the window background preset.
+    func captureWindow(_ window: WindowInfo, started finished: TimeInterval) async {
+        pendingSource = CaptureSource.window(window)
+        if let only = exclusions.onlyWindows, !only.contains(window.id) {
+            Diagnostics.record("window capture refused: test mode allows only the test scene")
+            return
+        }
+        do {
+            let screen = screenContaining(quartzRect: window.frame)
+            let bare = try await capturer.captureWindow(window.id, includeShadow: false)
+            let scale = CGFloat(bare.width) / max(window.frame.width, 1)
+            let itemScale = scale > 0.5 ? scale.rounded() : (screen?.backingScaleFactor ?? 2)
+            if let preset = windowBackground {
+                // A backdrop instead of transparency: editable later with the Background tool.
+                let background = CaptureBackground(fill: .gradient(preset), padding: windowPadding, cornerRadius: 0,
+                                                   shadow: includeWindowShadow ? 0.6 : 0)
+                deliver(bare, scale: itemScale, displayID: screen?.displayID, started: finished, kind: "window", background: background)
+            } else {
+                let image = includeWindowShadow ? (WindowShadow.apply(to: bare, scale: scale) ?? bare) : bare
+                deliver(image, scale: itemScale, displayID: screen?.displayID, started: finished, kind: "window")
+            }
+        } catch {
             report(error)
         }
     }
@@ -247,7 +406,7 @@ final class AppModel {
         return NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) } ?? NSScreen.main
     }
 
-    private func report(_ error: Error) {
+    func report(_ error: Error) {
         Diagnostics.record("capture failed error=\(error)")
         if case CaptureError.noPermission = error {
             PermissionWindow.show()
@@ -262,9 +421,16 @@ final class AppModel {
     }
 
     /// Hands a fresh capture to the after-capture actions.
-    private func deliver(_ image: CGImage, scale: CGFloat, displayID: CGDirectDisplayID?, started: TimeInterval, kind: String) {
-        if playSound { Output.playShutter() }
+    func deliver(_ image: CGImage, scale: CGFloat, displayID: CGDirectDisplayID?, started: TimeInterval, kind: String,
+                 background: CaptureBackground? = nil, media: MediaFile? = nil) {
+        if playSound, media == nil { Output.playShutter() }
         let item = CaptureItem(image: image, scale: scale, displayID: displayID)
+        item.media = media
+        if let background {
+            let renderer = AnnotationRenderer(base: image, scale: scale)
+            let document = AnnotationDocument(imageSize: renderer.imageSize, background: background)
+            if let rendered = renderer.render(document) { item.apply(document, rendered: rendered) }
+        }
         item.sourceName = item.fileBaseName
         if afterCapture.contains(.showCard) {
             cards.add(item)
@@ -272,7 +438,13 @@ final class AppModel {
         } else {
             Diagnostics.record("captured kind=\(kind) ms=\(Diagnostics.milliseconds(since: started)) pixels=\(item.pixelSizeDescription)")
         }
-        item.prepareTemporaryFile(format: format)
+        // History keeps a persistent file for drags; without it, a temporary one.
+        if history.isOn {
+            history.record(item, kind: HistoryKind(captureKind: kind), source: pendingSource ?? CaptureSource.current())
+        } else {
+            item.prepareTemporaryFile(format: format)
+        }
+        pendingSource = nil
         Memory.relieveSoon()
         if afterCapture.contains(.copy) {
             copy(item, closeCard: false)
@@ -288,7 +460,11 @@ final class AppModel {
     // MARK: Actions on a capture
 
     func copy(_ item: CaptureItem, closeCard: Bool = true) {
-        pasteboard.write(item.image, size: item.size)
+        if let media = item.media {
+            pasteboard.write(file: media.url)
+        } else {
+            pasteboard.write(item.image, size: item.size)
+        }
         HUD.show("Copied", systemImage: "doc.on.doc")
         Diagnostics.record("copied pixels=\(item.pixelSizeDescription)")
         if closeCard, closeAfterCopyOrSave { cards.close(item) }
@@ -299,10 +475,21 @@ final class AppModel {
         Task {
             do {
                 let previous = item.savedURL ?? item.lastSavedURL
-                let url = try await Output.save(item.image, format: format, to: folder, date: item.createdAt, replacing: previous)
+                let url: URL
+                if let media = item.media {
+                    if let previous, FileManager.default.fileExists(atPath: previous.path) {
+                        url = previous
+                    } else {
+                        url = try await Output.saveFile(media.url, to: folder, baseName: item.fileBaseName)
+                    }
+                } else {
+                    url = try await Output.save(item.image, format: format, to: folder, date: item.createdAt,
+                                                baseName: item.fileBaseName, replacing: previous)
+                }
                 let again = url == previous
                 item.savedURL = url
                 item.lastSavedURL = url
+                history.saved(item, to: url)
                 HUD.show(again ? "Updated “\(url.lastPathComponent)” in \(folder.lastPathComponent)"
                                  : "Saved “\(url.lastPathComponent)” to \(folder.lastPathComponent)",
                          systemImage: "square.and.arrow.down", duration: .seconds(2.5))
@@ -316,8 +503,15 @@ final class AppModel {
 
     func saveAs(_ item: CaptureItem) {
         Task {
-            if let url = await Output.saveAs(item.image, suggestedName: item.fileBaseName, format: format, folder: saveFolder) {
+            let url: URL?
+            if let media = item.media {
+                url = await Output.saveFileAs(media.url, suggestedName: item.fileBaseName, folder: saveFolder)
+            } else {
+                url = await Output.saveAs(item.image, suggestedName: item.fileBaseName, format: format, folder: saveFolder)
+            }
+            if let url {
                 item.savedURL = url
+                history.saved(item, to: url)
                 HUD.show("Saved \(url.lastPathComponent)", systemImage: "square.and.arrow.down")
                 cards.close(item)
             }
@@ -325,13 +519,40 @@ final class AppModel {
     }
 
     func annotate(_ item: CaptureItem) {
+        guard !item.isMedia else { return }
         cards.close(item, remember: false)
         EditorWindowController.open(item, model: self)
     }
 
     func pin(_ item: CaptureItem) {
+        guard !item.isMedia else { return }
         cards.close(item, remember: false)
         pins.pin(item)
+    }
+
+    /// Opens a recording in the default player.
+    func openMedia(_ item: CaptureItem) {
+        guard let media = item.media else { return }
+        NSWorkspace.shared.open(media.url)
+    }
+
+    /// Makes an animated GIF from a video recording; it gets its own thumbnail.
+    func exportGIF(_ item: CaptureItem) {
+        guard let media = item.media, !media.isGIF else { return }
+        HUD.show("Making GIF…", systemImage: "hourglass")
+        Task {
+            do {
+                let gif = try await VideoFrames.makeGIF(from: media.url, options: gifOptions)
+                let copy = CaptureItem(image: item.image, scale: item.scale, displayID: item.displayID, createdAt: item.createdAt)
+                copy.media = MediaFile(url: gif, duration: media.duration)
+                copy.sourceName = copy.fileBaseName
+                cards.add(copy)
+                history.record(copy, kind: .gif, source: history.entry(item.historyID)?.source)
+                Diagnostics.record("exported gif")
+            } catch {
+                HUD.show("Couldn't make a GIF", systemImage: "exclamationmark.triangle")
+            }
+        }
     }
 
     func showInFinder(_ item: CaptureItem) {
@@ -342,6 +563,18 @@ final class AppModel {
     /// Keeps a closed capture so "Reopen Last Capture" can bring it back. The pixels go to a
     /// temporary file in the background so idle memory drops back to baseline.
     func remember(_ item: CaptureItem) {
+        if item.historyID != nil {
+            // History has it on disk already: nothing to park.
+            history.closed(item)
+            return
+        }
+        if let media = item.media {
+            rememberTask?.cancel()
+            if let old = lastClosed, old.url != item.temporaryFile(format: format) { try? FileManager.default.removeItem(at: old.url) }
+            // A recording's poster is parked in memory-light form: just the file.
+            lastClosed = ClosedCapture(url: media.url, scale: item.scale, displayID: item.displayID, createdAt: item.createdAt, media: media)
+            return
+        }
         let image = item.image, scale = item.scale, displayID = item.displayID, date = item.createdAt
         if !cards.contains(item), !pins.contains(item), !EditorWindowController.isEditing(item) {
             item.discardTemporaryFile()
@@ -356,11 +589,164 @@ final class AppModel {
         }
     }
 
+    /// Whether "Reopen Last Capture" has something to bring back. (Reads the open card and
+    /// pin counts so menus showing it update when those change.)
+    var canReopen: Bool {
+        _ = (openCards, openPins)
+        return history.isOn ? history.reopenCandidate != nil : lastClosed != nil
+    }
+
+    /// History ids of every capture on screen (cards, editors, pins): never pruned or deleted.
+    var openHistoryIDs: Set<UUID> {
+        Set((cards.items + pins.items + EditorWindowController.openItems).compactMap(\.historyID))
+    }
+
+    func openItem(historyID: UUID) -> CaptureItem? {
+        (cards.items + pins.items + EditorWindowController.openItems).first { $0.historyID == historyID }
+    }
+
     func reopenLastCapture() {
-        guard let closed = lastClosed, let image = closed.load() else { return }
+        if history.isOn {
+            guard let entry = history.reopenCandidate else { return }
+            restore(entry)
+            return
+        }
+        guard let closed = lastClosed else { return }
+        if let media = closed.media {
+            lastClosed = nil
+            Task {
+                guard let poster = await VideoFrames.poster(of: media.url) else { return }
+                let item = CaptureItem(image: poster, scale: closed.scale, displayID: closed.displayID, createdAt: closed.createdAt)
+                item.media = media
+                cards.add(item)
+            }
+            return
+        }
+        guard let image = closed.load() else { return }
         lastClosed = nil
         try? FileManager.default.removeItem(at: closed.url)
         cards.add(CaptureItem(image: image, scale: closed.scale, displayID: closed.displayID, createdAt: closed.createdAt))
+    }
+
+    // MARK: History
+
+    /// Brings a history entry back as a thumbnail card (or to the front, if it's open).
+    func restore(_ entry: HistoryEntry) {
+        Task {
+            if let open = openItem(historyID: entry.id) {
+                if !cards.contains(open), !pins.contains(open), !EditorWindowController.isEditing(open) { cards.add(open) }
+                return
+            }
+            guard let item = await history.capture(for: entry) else {
+                HUD.show("Couldn't open that capture", systemImage: "exclamationmark.triangle")
+                return
+            }
+            cards.add(item)
+            Diagnostics.record("history restored kind=\(entry.kind.rawValue) edited=\(item.document != nil)")
+        }
+    }
+
+    /// Runs `action` on a history entry as a capture (Annotate, Pin, Copy…).
+    func withCapture(_ entry: HistoryEntry, _ action: @escaping (CaptureItem) -> Void) {
+        Task {
+            guard let item = await history.capture(for: entry) else {
+                HUD.show("Couldn't open that capture", systemImage: "exclamationmark.triangle")
+                return
+            }
+            action(item)
+        }
+    }
+
+    // MARK: Text (OCR)
+
+    /// Picks an area (or window) and copies the text in it.
+    private func captureText(started: TimeInterval) async {
+        guard let region = await PickedRegion.pick(.area, capturer: capturer, options: overlayOptions, started: started, report: report) else { return }
+        let image: CGImage
+        if let frozen = region.frozen {
+            image = frozen
+        } else if let window = region.window {
+            if let only = exclusions.onlyWindows, !only.contains(window.id) {
+                Diagnostics.record("window capture refused: test mode allows only the test scene")
+                return
+            }
+            guard let captured = try? await capturer.captureWindow(window.id, includeShadow: false) else { return }
+            image = captured
+        } else {
+            return
+        }
+        await recognizeAndCopy(image)
+    }
+
+    /// Reads the text in `image` and copies it.
+    func recognizeAndCopy(_ image: CGImage) async {
+        let started = Diagnostics.now()
+        do {
+            let text = try await textRecognizer.recognize(image, keepLineBreaks: ocrKeepLineBreaks)
+            Diagnostics.record("text recognized characters=\(text.count) ms=\(Diagnostics.milliseconds(since: started))")
+            guard !text.isEmpty else {
+                HUD.show("No text found", systemImage: "text.viewfinder")
+                return
+            }
+            pasteboard.write(text: text)
+            HUD.show("Copied text: \(TextLayout.preview(text))", systemImage: "text.viewfinder", duration: .seconds(2.5))
+        } catch {
+            HUD.show("Couldn't read text from the capture", systemImage: "exclamationmark.triangle")
+        }
+    }
+
+    func copyText(_ item: CaptureItem) {
+        let image = item.image
+        Task { await recognizeAndCopy(image) }
+    }
+
+    // MARK: Self-timer
+
+    /// Picks an area (Return: whole screen), counts down, then captures it fresh.
+    private func captureWithTimer(started: TimeInterval) async {
+        guard let region = await PickedRegion.pick(.area, capturer: capturer, options: overlayOptions, started: started, report: report) else { return }
+        let frame = RegionFrame(rect: region.global, dimOutside: false)
+        let go = await Countdown.run(selfTimerInterval, centeredIn: region.global, label: "Capturing")
+        frame.close()
+        guard go else { Diagnostics.record("self-timer cancelled"); return }
+        let fired = Diagnostics.now()
+        if let window = region.window {
+            if let only = exclusions.onlyWindows, !only.contains(window.id) { return }
+            do {
+                let bare = try await capturer.captureWindow(window.id, includeShadow: false)
+                let scale = CGFloat(bare.width) / max(window.frame.width, 1)
+                let image = includeWindowShadow ? (WindowShadow.apply(to: bare, scale: scale) ?? bare) : bare
+                deliver(image, scale: scale.rounded(), displayID: region.displayID, started: fired, kind: "selfTimerWindow")
+            } catch {
+                report(error)
+            }
+            return
+        }
+        do {
+            let images = try await capturer.snapshot(displays: [region.displayID], excluding: exclusions)
+            guard let full = images[region.displayID] else { throw CaptureError.displayNotFound }
+            let scale = CGFloat(full.width) / region.screen.frame.width
+            let pixels = ScreenCoordinates.pixelRect(local: region.local, screenSize: region.screen.frame.size, scale: scale)
+            guard let image = full.cropping(to: pixels) else { throw CaptureError.displayNotFound }
+            lastArea = RememberedArea(displayID: region.displayID, rect: region.local)
+            deliver(image, scale: scale, displayID: region.displayID, started: fired, kind: "selfTimer")
+        } catch {
+            report(error)
+        }
+    }
+
+    // MARK: Scrolling capture
+
+    private func captureScrolling(started: TimeInterval) async {
+        guard let region = await PickedRegion.pick(.area, capturer: capturer, options: overlayOptions, started: started, report: report) else { return }
+        await captureScrolling(region)
+    }
+
+    func captureScrolling(_ region: PickedRegion) async {
+        let session = ScrollingCapture(model: self, region: region)
+        guard let image = await session.run() else { return }
+        deliver(image, scale: CGFloat(image.width) / max(region.local.width, 1), displayID: region.displayID,
+                started: Diagnostics.now(), kind: "scrolling")
     }
 
     // MARK: Images from elsewhere

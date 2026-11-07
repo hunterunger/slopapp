@@ -8,8 +8,19 @@ struct AnnotationTests {
     @Test func toolKeysAreUniqueAndCaseInsensitive() {
         #expect(Set(Tool.allCases.map(\.key)).count == Tool.allCases.count)
         #expect(Tool.forKey("A") == .arrow)
-        #expect(Tool.forKey("c") == .crop)
+        // The letters people know from other screenshot editors.
+        #expect(Tool.forKey("k") == .crop)
+        #expect(Tool.forKey("c") == .counter)
+        #expect(Tool.forKey("d") == .pencil)
+        #expect(Tool.forKey("m") == .highlighter)
+        #expect(Tool.forKey("h") == .spotlight)
+        #expect(Tool.forKey("f") == .filledRectangle)
+        #expect(Tool.forKey("e") == .ellipse)
+        #expect(Tool.forKey("p") == .redact)
         #expect(Tool.forKey("z") == nil)
+        #expect(Tool.redact.kind(redaction: .blur) == .blur)
+        #expect(Tool.redact.kind(redaction: .pixelate) == .pixelate)
+        #expect(!Tool.spotlight.usesColor && Tool.pencil.usesColor)
     }
 
     @Test func lineHitTestingFollowsTheStroke() {

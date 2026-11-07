@@ -80,6 +80,8 @@ struct PermissionView: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    // Three even lines instead of two long ones and an orphaned "Mac."
+                    .frame(maxWidth: 340)
                 HStack(spacing: Spacing.s) {
                     Button("Open System Settings") {
                         Permission.screenRecording.request()
@@ -94,7 +96,7 @@ struct PermissionView: View {
                 .padding(.top, Spacing.xs)
                 Text(didRequest ? "After you turn it on, restart Snapper." : "Turn it on in System Settings, then restart Snapper.")
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(Spacing.xxl)

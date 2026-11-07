@@ -57,6 +57,36 @@ public enum FileNaming {
         return "Screenshot \(c.year ?? 0)-\(two(c.month))-\(two(c.day)) at \(two(c.hour)).\(two(c.minute)).\(two(c.second))"
     }
 
+    /// The default template: "Screenshot 2026-11-02 at 14.03.22".
+    public static let defaultTemplate = "{type} {date} at {time}"
+
+    /// Tokens a template can use, for the Settings help line.
+    public static let tokens = ["{type}", "{date}", "{time}", "{year}", "{month}", "{day}", "{hour}", "{minute}", "{second}"]
+
+    /// A file name from a template such as "{type} {date} at {time}". `type` is "Screenshot"
+    /// or "Recording". Characters Finder can't take ("/" and ":") become "-"; an empty
+    /// result falls back to the default template.
+    public static func baseName(template: String, type: String = "Screenshot", date: Date, timeZone: TimeZone = .current) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let c = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        func two(_ v: Int?) -> String { String(format: "%02d", v ?? 0) }
+        let values: [String: String] = [
+            "{type}": type,
+            "{date}": "\(c.year ?? 0)-\(two(c.month))-\(two(c.day))",
+            "{time}": "\(two(c.hour)).\(two(c.minute)).\(two(c.second))",
+            "{year}": "\(c.year ?? 0)", "{month}": two(c.month), "{day}": two(c.day),
+            "{hour}": two(c.hour), "{minute}": two(c.minute), "{second}": two(c.second),
+        ]
+        var name = template
+        for (token, value) in values { name = name.replacingOccurrences(of: token, with: value) }
+        name = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        while name.hasPrefix(".") { name.removeFirst() }
+        if name.isEmpty { return baseName(template: defaultTemplate, type: type, date: date, timeZone: timeZone) }
+        return name
+    }
+
     /// The first free file name in a folder. `exists` reports whether a name is taken.
     public static func uniqueName(base: String, fileExtension: String, exists: (String) -> Bool) -> String {
         let first = "\(base).\(fileExtension)"
@@ -88,6 +118,7 @@ public enum ImageEncoder {
     }
 
     public static func data(for image: CGImage, format: ImageFormat, jpegQuality: Double = 0.9) throws -> Data {
+
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, format.utType.identifier as CFString, 1, nil) else {
             throw Failure.encodingFailed
@@ -111,7 +142,7 @@ public enum ImageEncoder {
     /// `replacing`: where this same capture was saved before. If that file is still there,
     /// in this folder and format, it's overwritten instead of making "… 2", so saving again
     /// after more edits updates the one file.
-    public static func save(_ image: CGImage, format: ImageFormat, to folder: URL, date: Date = Date(),
+    public static func save(_ image: CGImage, format: ImageFormat, to folder: URL, date: Date = Date(), baseName: String? = nil,
                             replacing previous: URL? = nil, fileManager: FileManager = .default) throws -> URL {
         if let previous, previous.deletingLastPathComponent().standardizedFileURL == folder.standardizedFileURL,
            ImageFormat(fileExtension: previous.pathExtension) == format, fileManager.fileExists(atPath: previous.path) {
@@ -119,7 +150,7 @@ public enum ImageEncoder {
             return previous
         }
         try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-        let name = FileNaming.uniqueName(base: FileNaming.baseName(for: date), fileExtension: format.fileExtension) {
+        let name = FileNaming.uniqueName(base: baseName ?? FileNaming.baseName(for: date), fileExtension: format.fileExtension) {
             fileManager.fileExists(atPath: folder.appendingPathComponent($0).path)
         }
         let url = folder.appendingPathComponent(name)

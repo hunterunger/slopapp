@@ -12,9 +12,18 @@ final class CardController {
     private unowned let model: AppModel
     private var queue = CardQueue<UUID>()
     private var cards: [UUID: (item: CaptureItem, panel: FloatingPanel)] = [:]
+    /// The screen each card shows on (the pointer's screen when it appeared, or the capture's).
+    private var screens: [UUID: CGDirectDisplayID] = [:]
+    private var builtWidth: [UUID: CGFloat] = [:]
     private var timer: Timer?
-    static let width: CGFloat = 220
-    static let gap: CGFloat = 10
+    static let gap: CGFloat = Spacing.m
+    /// The card's corners. The round corner buttons sit `controlInset` in, and their radius
+    /// (`controlSide / 2`) equals `cornerRadius − controlInset`, so they're concentric with
+    /// the card's corners.
+    static let cornerRadius: CGFloat = Radius.xl
+    static let controlInset: CGFloat = Spacing.xs
+    static let controlSide: CGFloat = 2 * Radius.nested(in: cornerRadius, padding: controlInset)
+    var width: CGFloat { CGFloat(model.cardWidth) }
 
     init(model: AppModel) {
         self.model = model
@@ -26,6 +35,12 @@ final class CardController {
 
     func contains(_ item: CaptureItem) -> Bool { cards[item.id] != nil }
 
+    /// The capture whose card is `window`.
+    func item(for window: NSWindow?) -> CaptureItem? {
+        guard let window else { return nil }
+        return cards.values.first { $0.panel === window }?.item
+    }
+
     /// Window numbers of the card panels (tests read them; captures leave them out).
     var windowNumbers: [Int] { cards.values.map { $0.panel.windowNumber } }
 
@@ -34,8 +49,8 @@ final class CardController {
         for id in evicted {
             if let card = cards[id] { close(card.item) }
         }
-        let size = Self.thumbnailSize(for: item.size)
-        let panel = FloatingPanel(cornerRadius: 14) {
+        let size = Self.thumbnailSize(for: item.size, width: width)
+        let panel = FloatingPanel(cornerRadius: Self.cornerRadius) {
             CardView(item: item, thumbnailSize: size, model: self.model, controller: self)
         }
         panel.dismissesOnResignKey = false
@@ -51,6 +66,12 @@ final class CardController {
             return self.handleKey(event, item: item)
         }
         cards[item.id] = (item, panel)
+        builtWidth[item.id] = width
+        if model.cardFollowsPointer, let screen = NSScreen.underPointer {
+            screens[item.id] = screen.displayID
+        } else if let displayID = item.displayID {
+            screens[item.id] = displayID
+        }
         model.openCards = cards.count
         relayout(appearing: item.id)
         scheduleTimer()
@@ -59,6 +80,8 @@ final class CardController {
     /// Closes a card. `remember` keeps it for "Reopen Last Capture".
     func close(_ item: CaptureItem, remember: Bool = true) {
         guard let card = cards.removeValue(forKey: item.id) else { return }
+        screens[item.id] = nil
+        builtWidth[item.id] = nil
         queue.remove(item.id)
         model.openCards = cards.count
         card.panel.onDismiss = nil
@@ -85,22 +108,37 @@ final class CardController {
 
     // MARK: Layout
 
-    static func thumbnailSize(for size: CGSize) -> CGSize {
-        guard size.width > 0, size.height > 0 else { return CGSize(width: width, height: 140) }
-        let height = min(max(width * size.height / size.width, 90), 240)
-        return CGSize(width: width, height: height.rounded())
+    /// Room for the corner buttons above and below and a row of pills between them.
+    static let minimumHeight: CGFloat = 2 * (controlInset + controlSide + Spacing.xs) + 28
+
+    static func thumbnailSize(for size: CGSize, width: CGFloat) -> CGSize {
+        CardLayout.thumbnailSize(for: size, width: width, minHeight: minimumHeight)
     }
 
-    /// Stacks the cards on each screen, newest at the corner.
+    /// Shows the share menu for a card.
+    func share(_ item: CaptureItem) {
+        guard let card = cards[item.id], let view = card.panel.contentView,
+              let url = item.temporaryFile(format: model.format) else { return }
+        Output.share(url, from: view, edge: model.cardCorner == .left ? .maxX : .minX)
+    }
+
+    /// Stacks the cards on each screen: the oldest stays in the corner and newer ones stack
+    /// above it, so a card never jumps while you're reaching for it.
     func relayout(appearing: UUID? = nil) {
         let corner = model.cardCorner
         var nextY: [CGDirectDisplayID: CGFloat] = [:]
-        for id in queue.ids.reversed() {
+        for id in queue.ids {
             guard let card = cards[id] else { continue }
-            let screen = NSScreen.screens.first { $0.displayID == card.item.displayID } ?? NSScreen.underPointer ?? NSScreen.main
+            if builtWidth[id] != width {
+                // Size changes (Settings) apply to every card.
+                let size = Self.thumbnailSize(for: card.item.size, width: width)
+                card.panel.setContent { CardView(item: card.item, thumbnailSize: size, model: self.model, controller: self) }
+                builtWidth[id] = width
+            }
+            let screen = NSScreen.screens.first { $0.displayID == (screens[id] ?? card.item.displayID) } ?? NSScreen.underPointer ?? NSScreen.main
             guard let screen else { continue }
-            let visible = screen.visibleFrame.insetBy(dx: 16, dy: 16)
-            let size = card.panel.contentView?.fittingSize ?? CGSize(width: Self.width, height: 160)
+            let visible = screen.visibleFrame.insetBy(dx: Spacing.l, dy: Spacing.l)
+            let size = card.panel.contentView?.fittingSize ?? CGSize(width: width, height: 160)
             let y = nextY[screen.displayID] ?? visible.minY
             let x = corner == .left ? visible.minX : visible.maxX - size.width
             let frame = CGRect(x: x, y: y, width: size.width, height: size.height)

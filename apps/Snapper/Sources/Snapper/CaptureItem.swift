@@ -25,6 +25,14 @@ final class CaptureItem: Identifiable {
     var lastSavedURL: URL?
     /// What it is, for window titles: "Screenshot … at …", "Clipboard Image", a file name.
     var sourceName = "Image"
+    /// A screen recording (MP4 or GIF). `image` is then its first frame (the poster).
+    var media: MediaFile?
+    var isMedia: Bool { media != nil }
+    /// Its Capture History entry, once recorded.
+    var historyID: UUID?
+    /// The entry's current file in history: what drags hand over when history is on (a
+    /// persistent file, so a receiver that copies it after the drag ends always finds it).
+    var historyFile: URL?
     /// A temporary file for drag-out, written in the background.
     private(set) var temporaryURL: URL?
     private var writeTask: Task<URL?, Never>?
@@ -45,7 +53,8 @@ final class CaptureItem: Identifiable {
     var pixelSizeDescription: String { "\(image.width) × \(image.height)" }
 
     var fileBaseName: String {
-        sourceName == "Image" || sourceName == "Clipboard Image" ? FileNaming.baseName(for: createdAt) : sourceName
+        guard sourceName == "Image" || sourceName == "Clipboard Image" else { return sourceName }
+        return FileNaming.baseName(template: AppModel.shared.fileNameTemplate, type: isMedia ? "Recording" : "Screenshot", date: createdAt)
     }
 
     var nsImage: NSImage { NSImage(cgImage: image, size: size) }
@@ -62,7 +71,7 @@ final class CaptureItem: Identifiable {
 
     /// Starts writing the temporary file (for drag-out) in the background.
     func prepareTemporaryFile(format: ImageFormat) {
-        guard writeTask == nil else { return }
+        guard writeTask == nil, media == nil else { return }
         let image = self.image
         let name = fileBaseName
         writeTask = Task.detached(priority: .utility) {
@@ -74,23 +83,54 @@ final class CaptureItem: Identifiable {
         }
     }
 
-    /// The temporary file, written now if the background write hasn't finished.
+    /// The file a drag hands over: the history file when history keeps this capture, else a
+    /// temporary file (written now if the background write hasn't finished).
     func temporaryFile(format: ImageFormat) -> URL? {
+        if let media { return media.url }
+        if let historyFile, FileManager.default.fileExists(atPath: historyFile.path) { return historyFile }
+        if let url = writeHistoryFileNow(format: format) { return url }
         if let temporaryURL, FileManager.default.fileExists(atPath: temporaryURL.path) { return temporaryURL }
         let url = Self.writeTemporary(image, name: fileBaseName, format: format)
         temporaryURL = url
         return url
     }
 
+    /// How long a superseded drag file stays on disk. A drop hands Finder (or any app) only
+    /// the file's URL, and the receiver copies it after the drag has ended, so deleting it
+    /// right away fails the copy ("one or more required items can't be found"). Every file
+    /// has its own folder, so a late delete never touches a newer one; whatever is left goes
+    /// when Snapper quits or next launches (`TemporaryFiles.clear()`).
+    nonisolated static let temporaryFileGrace: TimeInterval = 300
+
     private func invalidateTemporaryFile() {
         writeTask?.cancel()
         writeTask = nil
-        if let temporaryURL { try? FileManager.default.removeItem(at: temporaryURL.deletingLastPathComponent()) }
+        if let folder = temporaryURL?.deletingLastPathComponent() {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.temporaryFileGrace) {
+                try? FileManager.default.removeItem(at: folder)
+            }
+        }
         temporaryURL = nil
     }
 
     func discardTemporaryFile() {
         invalidateTemporaryFile()
+    }
+
+    /// A drag right after an edit, before the history update has landed: write the current
+    /// version straight into the entry's folder, under the name the update will give it too.
+    private func writeHistoryFileNow(format: ImageFormat) -> URL? {
+        guard let historyID else { return nil }
+        let folder = AppModel.shared.history.store.folder(for: historyID)
+        guard FileManager.default.fileExists(atPath: folder.path) else { return nil }
+        let url = folder.appendingPathComponent(HistoryStore.safeName(fileBaseName) + "." + format.fileExtension)
+        do {
+            try ImageEncoder.data(for: image, format: format).write(to: url, options: .atomic)
+        } catch {
+            return nil
+        }
+        historyFile = url
+        return url
     }
 
     nonisolated private static func writeTemporary(_ image: CGImage, name: String, format: ImageFormat) -> URL? {
@@ -117,12 +157,20 @@ enum TemporaryFiles {
     }
 }
 
+/// A recording's file. It lives in Snapper's temporary folder until it's saved or copied.
+struct MediaFile {
+    let url: URL
+    let duration: TimeInterval
+    var isGIF: Bool { url.pathExtension.lowercased() == "gif" }
+}
+
 /// A closed capture parked on disk for "Reopen Last Capture".
 struct ClosedCapture {
     let url: URL
     let scale: CGFloat
     let displayID: CGDirectDisplayID?
     let createdAt: Date
+    var media: MediaFile?
 
     nonisolated static func write(_ image: CGImage) -> URL? {
         let folder = TemporaryFiles.root.appendingPathComponent("closed", isDirectory: true)

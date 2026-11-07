@@ -66,7 +66,7 @@ public final class AnnotationRenderer {
 
     /// The finished image at full resolution: annotations burned in, cropped.
     public func render(_ document: AnnotationDocument) -> CGImage? {
-        let visible = document.visibleRect
+        let visible = document.outputRect
         let width = Int((visible.width * scale).rounded()), height = Int((visible.height * scale).rounded())
         guard width > 0, height > 0 else { return nil }
         let space = base.colorSpace.flatMap { $0.supportsOutput ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
@@ -76,8 +76,32 @@ public final class AnnotationRenderer {
         context.scaleBy(x: scale, y: -scale)
         context.translateBy(x: -visible.minX, y: -visible.minY)
         context.interpolationQuality = .high
-        draw(document, in: context)
+        drawComposed(document, in: context)
         return context.makeImage()
+    }
+
+    /// The document as exported: the background (if any) around the visible part, then the
+    /// capture with its marks. On-screen and export drawing both go through here.
+    public func drawComposed(_ document: AnnotationDocument, in context: CGContext, skipping: UUID? = nil) {
+        guard let background = document.background else {
+            draw(document, in: context, skipping: skipping)
+            return
+        }
+        let visible = document.visibleRect
+        background.drawFill(in: document.outputRect, context: context)
+        context.saveGState()
+        if background.shadow > 0 {
+            // y runs down here, so a positive height drops the shadow below the capture.
+            context.setShadow(offset: CGSize(width: 0, height: 10 * background.shadow), blur: 18 + 30 * background.shadow,
+                              color: CGColor(gray: 0, alpha: 0.25 + 0.35 * background.shadow))
+        }
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
+        let radius = min(background.cornerRadius, visible.width / 2, visible.height / 2)
+        context.addPath(CGPath(roundedRect: visible, cornerWidth: radius, cornerHeight: radius, transform: nil))
+        context.clip()
+        draw(document, in: context, skipping: skipping)
+        context.endTransparencyLayer()
+        context.restoreGState()
     }
 
     // MARK: Drawing
@@ -91,7 +115,29 @@ public final class AnnotationRenderer {
         drawImage(base, in: CGRect(origin: .zero, size: imageSize), context: context)
         let visible = document.annotations.filter { $0.id != skipping }
         for annotation in visible where annotation.kind.isRedaction { draw(annotation, in: context) }
-        for annotation in visible where !annotation.kind.isRedaction { draw(annotation, in: context) }
+        drawSpotlights(visible.filter { $0.kind == .spotlight }, in: document.imageBounds, context: context)
+        for annotation in visible where !annotation.kind.isRedaction && annotation.kind != .spotlight { draw(annotation, in: context) }
+    }
+
+    /// Dims the capture everywhere except inside the spotlight boxes (all of them at once,
+    /// so overlapping spotlights don't dim each other).
+    public static let spotlightDim: CGFloat = 0.55
+
+    private func drawSpotlights(_ spots: [Annotation], in bounds: CGRect, context: CGContext) {
+        guard !spots.isEmpty else { return }
+        context.saveGState()
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
+        context.setFillColor(CGColor(gray: 0, alpha: Self.spotlightDim))
+        context.fill(bounds)
+        context.setBlendMode(.clear)
+        for spot in spots {
+            let r = spot.rect
+            let radius = min(8, r.width / 2, r.height / 2)
+            context.addPath(CGPath(roundedRect: r, cornerWidth: radius, cornerHeight: radius, transform: nil))
+            context.fillPath()
+        }
+        context.endTransparencyLayer()
+        context.restoreGState()
     }
 
     public func draw(_ annotation: Annotation, in context: CGContext) {
@@ -103,13 +149,28 @@ public final class AnnotationRenderer {
         switch annotation.kind {
         case .pixelate, .blur:
             drawRedaction(annotation, in: context)
+        case .spotlight:
+            drawSpotlights([annotation], in: CGRect(origin: .zero, size: imageSize), context: context)
         case .highlighter:
             guard annotation.points.count > 1 else { return }
             context.setBlendMode(.multiply)
             context.setStrokeColor(annotation.color.withAlpha(0.45).cgColor)
             context.setLineWidth(annotation.highlighterWidth)
-            context.addLines(between: annotation.points)
+            context.addPath(Freehand.path(annotation.points))
             context.strokePath()
+        case .pencil:
+            guard annotation.points.count > 1 else { return }
+            applyShadow(context)
+            context.setStrokeColor(color)
+            context.setLineWidth(annotation.width)
+            context.addPath(Freehand.path(annotation.points))
+            context.strokePath()
+        case .filledRectangle:
+            applyShadow(context)
+            context.setFillColor(color)
+            let radius = min(4, annotation.rect.width / 2, annotation.rect.height / 2)
+            context.addPath(CGPath(roundedRect: annotation.rect, cornerWidth: radius, cornerHeight: radius, transform: nil))
+            context.fillPath()
         case .line:
             applyShadow(context)
             context.setStrokeColor(color)
@@ -150,7 +211,11 @@ public final class AnnotationRenderer {
         }
     }
 
+    /// Settings → Annotate → "Draw shadow on objects".
+    public var drawsShadows = true
+
     private func applyShadow(_ context: CGContext) {
+        guard drawsShadows else { return }
         context.setShadow(offset: CGSize(width: 0, height: -1), blur: 3, color: CGColor(gray: 0, alpha: 0.35))
     }
 

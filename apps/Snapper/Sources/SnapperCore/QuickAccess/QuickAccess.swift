@@ -106,3 +106,15 @@ public struct CardQueue<ID: Hashable & Sendable>: Sendable {
         entries.compactMap(\.deadline).min()
     }
 }
+
+/// The size of a capture card: the card's width, and the capture's aspect ratio within
+/// limits. Wide captures are cropped (aspect fill) rather than making the card so short that
+/// its buttons collide; tall ones stop at 1.1 × the width.
+public enum CardLayout {
+    public static func thumbnailSize(for size: CGSize, width: CGFloat, minHeight: CGFloat) -> CGSize {
+        let floor = max(minHeight, width * 0.42)
+        guard size.width > 0, size.height > 0 else { return CGSize(width: width, height: max(floor, width * 0.62).rounded()) }
+        let height = min(max(width * size.height / size.width, floor), max(width * 1.1, floor))
+        return CGSize(width: width, height: height.rounded())
+    }
+}

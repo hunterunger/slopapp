@@ -1,6 +1,7 @@
 import AppKit
 import SlopKit
 import SnapperCore
+import SwiftUI
 
 /// Pinned captures: floating, always-on-top image windows you can move, resize, fade and
 /// close with Esc.
@@ -22,6 +23,7 @@ final class PinController {
     }
 
     func contains(_ item: CaptureItem) -> Bool { panels.contains { $0.item === item } }
+    var items: [CaptureItem] { panels.map(\.item) }
 
     func pin(_ item: CaptureItem) {
         let screen = NSScreen.screens.first { $0.displayID == item.displayID } ?? NSScreen.underPointer ?? NSScreen.main
@@ -33,9 +35,17 @@ final class PinController {
         let panel = PinPanel(item: item, frame: PinGeometry.frame(size: size, centeredAt: center), controller: self)
         panels.append(panel)
         model.openPins = panels.count
+        panel.applyStyle(rounded: model.pinRoundedCorners, shadow: model.pinShadow, border: model.pinBorder)
         panel.orderFrontRegardless()
         panel.makeKey()
         Diagnostics.record("pinned pixels=\(item.pixelSizeDescription) pins=\(panels.count)")
+    }
+
+    /// Applies the pin settings (corners, shadow, border) to every pin.
+    func restyle() {
+        for panel in panels {
+            panel.applyStyle(rounded: model.pinRoundedCorners, shadow: model.pinShadow, border: model.pinBorder)
+        }
     }
 
     func close(_ panel: PinPanel) {
@@ -126,6 +136,16 @@ final class PinPanel: NSPanel {
         controller.close(self)
     }
 
+    func applyStyle(rounded: Bool, shadow: Bool, border: Bool) {
+        // A window capture with a transparent shadow margin is already shaped: a border or
+        // rounding would draw a frame around its invisible margin.
+        let framed = imageView.edgesAreOpaque
+        imageView.layer?.cornerRadius = rounded && framed ? PinImageView.cornerRadius : 0
+        imageView.showsBorder = border && framed
+        hasShadow = shadow
+        invalidateShadow()
+    }
+
     // MARK: Actions
 
     func setOpacity(_ value: Double) {
@@ -171,35 +191,28 @@ final class PinPanel: NSPanel {
 @MainActor
 final class PinImageView: NSView {
     weak var panel: PinPanel?
-    private let closeButton: NSButton
+    private var closeButton: NSView!
     private var tracking: NSTrackingArea?
 
+    /// The capture fills its rectangle (not a window capture with a transparent margin).
+    let edgesAreOpaque: Bool
+
     init(image: CGImage) {
-        closeButton = NSButton(image: NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close")!,
-                               target: nil, action: nil)
+        edgesAreOpaque = ImageEdges.areOpaque(image)
         super.init(frame: .zero)
         wantsLayer = true
         layer?.contents = image
         layer?.contentsGravity = .resize
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = Self.cornerRadius
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
-        layer?.borderWidth = 1
         layer?.borderColor = NSColor.separatorColor.cgColor
-        closeButton.isBordered = false
-        closeButton.symbolConfiguration = .init(pointSize: 18, weight: .regular).applying(.init(hierarchicalColor: .white))
-        closeButton.contentTintColor = .white
-        closeButton.target = self
-        closeButton.action = #selector(closePin)
-        closeButton.setAccessibilityLabel("Close")
-        closeButton.toolTip = "Close (Esc)"
-        closeButton.alphaValue = 0
-        closeButton.shadow = {
-            let s = NSShadow()
-            s.shadowColor = .black.withAlphaComponent(0.6)
-            s.shadowBlurRadius = 3
-            return s
-        }()
+        // The same round material button as on the thumbnails.
+        let button = NSHostingView(rootView: CornerButton("Close", systemImage: "xmark") { [weak self] in self?.closePin() }
+            .help("Close (Esc)"))
+        // SNAPPER_CARD_HOVER also shows the pin's hover button, for screenshots.
+        button.alphaValue = Diagnostics.forceCardHover ? 1 : 0
+        closeButton = button
         addSubview(closeButton)
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
@@ -209,14 +222,39 @@ final class PinImageView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func layout() {
-        super.layout()
-        closeButton.frame = CGRect(x: 6, y: bounds.height - 30, width: 24, height: 24)
+    static let cornerRadius = Radius.m
+    /// The close button's square, `Spacing.s` in from the top and leading edges.
+    private static let buttonSide: CGFloat = 24
+
+    /// A one-device-pixel border in the separator colour (Settings → Pinned Screenshots).
+    var showsBorder = true {
+        didSet { updateBorder() }
     }
 
-    override func viewDidChangeEffectiveAppearance() {
-        layer?.borderColor = NSColor.separatorColor.cgColor
+    private func updateBorder() {
+        layer?.borderWidth = showsBorder ? pixelWidth : 0
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = NSColor.separatorColor.cgColor
+        }
     }
+
+    override func layout() {
+        super.layout()
+        closeButton.frame = CGRect(x: Spacing.s, y: bounds.height - Spacing.s - Self.buttonSide,
+                                   width: Self.buttonSide, height: Self.buttonSide)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateBorder()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        updateBorder()
+    }
+
+    override func viewDidChangeEffectiveAppearance() { updateBorder() }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -226,8 +264,15 @@ final class PinImageView: NSView {
         tracking = area
     }
 
-    override func mouseEntered(with event: NSEvent) { closeButton.animator().alphaValue = 1 }
-    override func mouseExited(with event: NSEvent) { closeButton.animator().alphaValue = 0 }
+    override func mouseEntered(with event: NSEvent) { fadeCloseButton(to: 1) }
+    override func mouseExited(with event: NSEvent) { if !Diagnostics.forceCardHover { fadeCloseButton(to: 0) } }
+
+    private func fadeCloseButton(to alpha: CGFloat) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            closeButton.animator().alphaValue = alpha
+        }
+    }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
@@ -244,7 +289,7 @@ final class PinImageView: NSView {
         panel?.zoom(by: event.scrollingDeltaY > 0 ? 1.05 : 1 / 1.05)
     }
 
-    @objc private func closePin() {
+    private func closePin() {
         guard let panel else { return }
         panel.cancelOperation(nil)
     }
@@ -264,4 +309,9 @@ final class MenuAction: NSMenuItem {
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     @objc private func run() { handler() }
+}
+
+extension NSView {
+    /// One device pixel in points, for layer borders.
+    var pixelWidth: CGFloat { 1 / max(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2, 1) }
 }

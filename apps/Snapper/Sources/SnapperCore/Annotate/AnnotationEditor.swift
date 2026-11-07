@@ -9,11 +9,14 @@ public struct AnnotationDocument: Equatable, Sendable {
     public var annotations: [Annotation] = []
     /// The kept part of the image (image points), or nil for all of it.
     public var crop: CGRect?
+    /// A backdrop around the image (padding, gradient, shadow), or nil.
+    public var background: CaptureBackground?
 
-    public init(imageSize: CGSize, annotations: [Annotation] = [], crop: CGRect? = nil) {
+    public init(imageSize: CGSize, annotations: [Annotation] = [], crop: CGRect? = nil, background: CaptureBackground? = nil) {
         self.imageSize = imageSize
         self.annotations = annotations
         self.crop = crop
+        self.background = background
     }
 
     public var imageBounds: CGRect { CGRect(origin: .zero, size: imageSize) }
@@ -21,7 +24,13 @@ public struct AnnotationDocument: Equatable, Sendable {
     /// The part of the image that will be exported.
     public var visibleRect: CGRect { crop ?? imageBounds }
 
-    public var isEdited: Bool { !annotations.isEmpty || crop != nil }
+    /// The whole exported area: the visible part plus the background's padding.
+    public var outputRect: CGRect {
+        guard let background else { return visibleRect }
+        return visibleRect.insetBy(dx: -background.padding, dy: -background.padding)
+    }
+
+    public var isEdited: Bool { !annotations.isEmpty || crop != nil || background != nil }
 }
 
 /// Editing state and operations, with undo and redo. Pure value logic: the canvas view
@@ -146,6 +155,34 @@ public struct AnnotationEditor: Sendable {
         guard var selected, selected.width != width else { return }
         selected.width = width
         update(selected)
+    }
+
+    /// Adds a copy of the selection, nudged so it's visible, and selects it (⌘D).
+    public mutating func duplicateSelection(offset: CGFloat = 12) {
+        guard let selected else { return }
+        paste(selected, offset: offset)
+    }
+
+    /// Adds a copy of `annotation` (e.g. from the editor's own clipboard) with a new id.
+    public mutating func paste(_ annotation: Annotation, offset: CGFloat = 12) {
+        var copy = annotation.moved(by: CGVector(dx: offset, dy: offset))
+        copy.id = UUID()
+        add(copy)
+    }
+
+    /// Sets or removes the background (one undo step).
+    public mutating func setBackground(_ background: CaptureBackground?) {
+        let value = background?.clamped
+        guard document.background != value else { return }
+        perform { $0.background = value }
+    }
+
+    /// Changes the background while a slider is dragged: call between `beginChange()` and
+    /// `commitChange()` so the whole drag is one undo step.
+    public mutating func adjustBackground(_ change: (inout CaptureBackground) -> Void) {
+        guard var background = document.background else { return }
+        change(&background)
+        setBackground(background)
     }
 
     /// The front-most annotation `point` grabs.

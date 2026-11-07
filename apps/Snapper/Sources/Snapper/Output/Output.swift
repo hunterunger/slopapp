@@ -9,13 +9,37 @@ import UniformTypeIdentifiers
 @MainActor
 protocol PasteboardWriting {
     func write(_ image: CGImage, size: CGSize)
+    func write(text: String)
+    /// A file (recordings): as a file URL, so Finder, Mail and chats paste the file itself.
+    func write(file: URL)
 }
 
 @MainActor
 struct SystemPasteboardWriter: PasteboardWriting {
+    /// The general pasteboard, or a private named one when `SNAPPER_PASTEBOARD` is set
+    /// (tests read it back without touching the real clipboard).
+    var board: NSPasteboard {
+        Diagnostics.pasteboardName.map { NSPasteboard(name: NSPasteboard.Name($0)) } ?? .general
+    }
+
+    func write(text: String) {
+        let board = self.board
+        board.clearContents()
+        board.setString(text, forType: .string)
+    }
+
+    func write(file: URL) {
+        let board = self.board
+        board.clearContents()
+        board.writeObjects([file as NSURL])
+        if file.pathExtension.lowercased() == "gif", let data = try? Data(contentsOf: file) {
+            board.setData(data, forType: NSPasteboard.PasteboardType(UTType.gif.identifier))
+        }
+    }
+
     /// PNG (lossless, keeps transparency) plus the TIFF NSImage writes, so every app can paste it.
     func write(_ image: CGImage, size: CGSize) {
-        let board = NSPasteboard.general
+        let board = self.board
         board.clearContents()
         let nsImage = NSImage(cgImage: image, size: size)
         board.writeObjects([nsImage])
@@ -38,10 +62,10 @@ enum SaveError: LocalizedError {
 
 enum Output {
     /// Saves off the main thread; returns the new file's URL.
-    static func save(_ image: CGImage, format: ImageFormat, to folder: URL, date: Date, replacing previous: URL? = nil) async throws -> URL {
+    static func save(_ image: CGImage, format: ImageFormat, to folder: URL, date: Date, baseName: String? = nil, replacing previous: URL? = nil) async throws -> URL {
         try await Task.detached(priority: .userInitiated) {
             do {
-                return try ImageEncoder.save(image, format: format, to: folder, date: date, replacing: previous)
+                return try ImageEncoder.save(image, format: format, to: folder, date: date, baseName: baseName, replacing: previous)
             } catch {
                 throw SaveError.failed(folder: folder)
             }
@@ -66,6 +90,44 @@ enum Output {
         do {
             let data = try await Task.detached { try ImageEncoder.data(for: image, format: chosen) }.value
             try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            HUD.show("Couldn't save \(url.lastPathComponent). Try another folder.", systemImage: "exclamationmark.triangle")
+            return nil
+        }
+    }
+
+    /// Copies a recording into `folder` under a unique name; returns the new file.
+    static func saveFile(_ source: URL, to folder: URL, baseName: String) async throws -> URL {
+        try await Task.detached(priority: .userInitiated) {
+            do {
+                let fm = FileManager.default
+                try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+                let name = FileNaming.uniqueName(base: baseName, fileExtension: source.pathExtension) {
+                    fm.fileExists(atPath: folder.appendingPathComponent($0).path)
+                }
+                let url = folder.appendingPathComponent(name)
+                try fm.copyItem(at: source, to: url)
+                return url
+            } catch {
+                throw SaveError.failed(folder: folder)
+            }
+        }.value
+    }
+
+    /// Asks where to save a recording. Returns the URL written, or nil if cancelled.
+    @MainActor
+    static func saveFileAs(_ source: URL, suggestedName: String, folder: URL) async -> URL? {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(suggestedName).\(source.pathExtension)"
+        panel.directoryURL = folder
+        panel.canCreateDirectories = true
+        if let type = UTType(filenameExtension: source.pathExtension) { panel.allowedContentTypes = [type] }
+        NSApp.activate()
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        do {
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+            try FileManager.default.copyItem(at: source, to: url)
             return url
         } catch {
             HUD.show("Couldn't save \(url.lastPathComponent). Try another folder.", systemImage: "exclamationmark.triangle")

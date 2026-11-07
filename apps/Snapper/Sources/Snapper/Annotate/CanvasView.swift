@@ -70,15 +70,18 @@ final class CanvasView: NSView, NSTextFieldDelegate {
         super.layout()
         shareAnchor.frame = CGRect(x: bounds.maxX - 40, y: 0, width: 1, height: 1)
         positionEditingField()
+        let percent = Int((zoom * 100).rounded())
+        if model.zoomPercent != percent { DispatchQueue.main.async { [weak self] in self?.model.zoomPercent = percent } }
     }
 
     // MARK: Geometry
 
     private var document: AnnotationDocument { model.editor.document }
 
-    /// The part of the image on show: everything while cropping, else the crop.
+    /// The part of the image on show: everything while cropping, else the crop plus any
+    /// background around it.
     private var shownRect: CGRect {
-        model.tool == .crop ? document.imageBounds : document.visibleRect
+        model.tool == .crop ? document.imageBounds : document.outputRect
     }
 
     /// The zoom that fits the image in the padded view, never above 1:1.
@@ -135,6 +138,7 @@ final class CanvasView: NSView, NSTextFieldDelegate {
     }
 
     private func zoomChanged() {
+        needsLayout = true
         positionEditingField()
         needsDisplay = true
         model.zoomPercent = Int((zoom * 100).rounded())
@@ -179,6 +183,13 @@ final class CanvasView: NSView, NSTextFieldDelegate {
 
     // MARK: Drawing
 
+    /// Handle fill: the overlay palette's light (paper) colour made opaque, so the handle
+    /// reads as solid over any capture without being a drawn pure white.
+    private static let handleFill: CGColor = {
+        let paper = OverlayPalette.paper
+        return (paper.withAlphaComponent(1).usingColorSpace(.sRGB) ?? paper).cgColor
+    }()
+
     override func draw(_ dirtyRect: NSRect) {
         NSColor.underPageBackgroundColor.setFill()
         bounds.fill()
@@ -191,7 +202,11 @@ final class CanvasView: NSView, NSTextFieldDelegate {
         context.scaleBy(x: z, y: z)
         context.clip(to: shown)
         context.interpolationQuality = z < 1 ? .high : .none
-        model.renderer.draw(document, in: context, skipping: editingID)
+        if model.tool == .crop {
+            model.renderer.draw(document, in: context, skipping: editingID)
+        } else {
+            model.renderer.drawComposed(document, in: context, skipping: editingID)
+        }
         context.restoreGState()
 
         if model.tool == .crop {
@@ -202,9 +217,10 @@ final class CanvasView: NSView, NSTextFieldDelegate {
     }
 
     private func drawSelection(_ annotation: Annotation, in context: CGContext) {
-        let box = toView(annotation.bounds()).insetBy(dx: -3, dy: -3)
+        // Whole points plus half a point: the 1 pt dashed line lands exactly on two device pixels.
+        let box = toView(annotation.bounds()).insetBy(dx: -Spacing.xs, dy: -Spacing.xs).integral.insetBy(dx: 0.5, dy: 0.5)
         context.saveGState()
-        context.setStrokeColor(NSColor.controlAccentColor.cgColor)
+        context.setStrokeColor(selectionColor.cgColor)
         context.setLineWidth(1)
         context.setLineDash(phase: 0, lengths: [4, 3])
         context.stroke(box)
@@ -214,13 +230,28 @@ final class CanvasView: NSView, NSTextFieldDelegate {
         }
     }
 
+    /// The selection's colour: the accent in the key window, grey in a background one
+    /// (Golden Gate greys selections in windows you aren't using).
+    private var selectionColor: NSColor {
+        window?.isKeyWindow == false ? .systemGray : .controlAccentColor
+    }
+
+    /// A round light handle with a ring and a soft shadow, snapped to the pixel grid so its
+    /// ring stays crisp at any zoom. It sits on the capture (any colours), so it uses the
+    /// overlay palette rather than the window's appearance.
     private func drawHandle(at point: CGPoint, in context: CGContext) {
-        let rect = CGRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8)
-        context.setFillColor(NSColor.white.cgColor)
-        context.fill(rect)
-        context.setStrokeColor(NSColor.controlAccentColor.cgColor)
+        let scale = window?.backingScaleFactor ?? 2
+        let snapped = CGPoint(x: (point.x * scale).rounded() / scale, y: (point.y * scale).rounded() / scale)
+        let side: CGFloat = 9
+        let rect = CGRect(x: snapped.x - side / 2, y: snapped.y - side / 2, width: side, height: side)
+        context.saveGState()
+        context.setShadow(offset: CGSize(width: 0, height: -0.5), blur: 2, color: OverlayPalette.ink.withAlphaComponent(0.4).cgColor)
+        context.setFillColor(Self.handleFill)
+        context.fillEllipse(in: rect)
+        context.restoreGState()
+        context.setStrokeColor(selectionColor.cgColor)
         context.setLineWidth(1.5)
-        context.stroke(rect)
+        context.strokeEllipse(in: rect.insetBy(dx: 0.75, dy: 0.75))
     }
 
     private var currentCrop: CGRect { cropDraft ?? document.crop ?? document.imageBounds }
@@ -233,13 +264,14 @@ final class CanvasView: NSView, NSTextFieldDelegate {
         path.addRect(image)
         path.addRect(crop)
         context.addPath(path)
-        context.setFillColor(NSColor.black.withAlphaComponent(0.5).cgColor)
+        // Over the capture's own colours: the overlay palette (the same in light and dark).
+        context.setFillColor(OverlayPalette.ink.withAlphaComponent(0.55).cgColor)
         context.fillPath(using: .evenOdd)
-        context.setStrokeColor(NSColor.white.cgColor)
+        context.setStrokeColor(OverlayPalette.ring)
         context.setLineWidth(1)
         context.stroke(crop.insetBy(dx: 0.5, dy: 0.5))
         // Thirds, to help framing.
-        context.setStrokeColor(NSColor.white.withAlphaComponent(0.35).cgColor)
+        context.setStrokeColor(OverlayPalette.paper.withAlphaComponent(0.3).cgColor)
         for i in 1...2 {
             let x = crop.minX + crop.width * CGFloat(i) / 3, y = crop.minY + crop.height * CGFloat(i) / 3
             context.strokeLineSegments(between: [CGPoint(x: x, y: crop.minY), CGPoint(x: x, y: crop.maxY),
@@ -253,13 +285,17 @@ final class CanvasView: NSView, NSTextFieldDelegate {
         let label = "\(Int((currentCrop.width * model.item.scale).rounded())) × \(Int((currentCrop.height * model.item.scale).rounded())) px — Return to apply"
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .medium),
-            .foregroundColor: NSColor.white,
+            .foregroundColor: NSColor(cgColor: OverlayPalette.badgeText) ?? OverlayPalette.paper,
         ]
+        // The same dark badge as the capture overlay's size readout: `Spacing.s` at the
+        // sides, `Spacing.xs` above and below, `Spacing.s` under the crop.
         let size = (label as NSString).size(withAttributes: attributes)
-        let badge = CGRect(x: crop.minX, y: max(crop.minY - size.height - 10, 4), width: size.width + 12, height: size.height + 6)
-        NSColor.black.withAlphaComponent(0.7).setFill()
-        NSBezierPath(roundedRect: badge, xRadius: 5, yRadius: 5).fill()
-        (label as NSString).draw(at: CGPoint(x: badge.minX + 6, y: badge.minY + 3), withAttributes: attributes)
+        let badgeSize = CGSize(width: ceil(size.width) + 2 * Spacing.s, height: ceil(size.height) + 2 * Spacing.xs)
+        let badge = CGRect(x: crop.minX, y: max(crop.minY - badgeSize.height - Spacing.s, Spacing.xs), width: badgeSize.width, height: badgeSize.height)
+        context.setFillColor(OverlayPalette.badgeFill)
+        context.addPath(CGPath(roundedRect: badge, cornerWidth: Radius.s, cornerHeight: Radius.s, transform: nil))
+        context.fillPath()
+        (label as NSString).draw(at: CGPoint(x: badge.minX + Spacing.s, y: badge.minY + Spacing.xs), withAttributes: attributes)
     }
 
     // MARK: Mouse
@@ -312,9 +348,9 @@ final class CanvasView: NSView, NSTextFieldDelegate {
             model.editor.add(Annotation(kind: .counter, start: p, color: model.color.color, width: model.width.points))
             model.changed()
         default:
-            guard let kind = model.tool.kind else { return }
+            guard let kind = model.drawingKind else { return }
             model.editor.beginChange()
-            let annotation = Annotation(kind: kind, start: p, end: p, points: kind == .highlighter ? [p] : [],
+            let annotation = Annotation(kind: kind, start: p, end: p, points: kind.isFreehand ? [p] : [],
                                         color: model.color.color, width: model.width.points)
             model.editor.add(annotation)
             drag = .drawing(annotation.id, start: p)
@@ -329,7 +365,7 @@ final class CanvasView: NSView, NSTextFieldDelegate {
         switch drag {
         case .drawing(let id, let start):
             guard var annotation = document.annotations.first(where: { $0.id == id }) else { return }
-            if annotation.kind == .highlighter {
+            if annotation.kind.isFreehand {
                 if shift {
                     annotation.points = [start, Annotation.constrained(start: start, end: p, kind: .line)]
                 } else {
@@ -370,6 +406,10 @@ final class CanvasView: NSView, NSTextFieldDelegate {
                 model.editor.cancelChange()
                 model.editor.selection = nil
             } else {
+                if var stroke = document.annotations.first(where: { $0.id == id }), stroke.kind.isFreehand {
+                    stroke.points = Freehand.thinned(stroke.points)
+                    model.editor.update(stroke)
+                }
                 model.editor.commitChange()
             }
         case .moving, .handle:
@@ -449,6 +489,7 @@ final class CanvasView: NSView, NSTextFieldDelegate {
             return
         }
         if flags.isEmpty, let char = event.charactersIgnoringModifiers?.first {
+            if char == "b" || char == "B" { model.toggleBackground(); return }
             if let tool = Tool.forKey(char) { model.tool = tool; return }
             if char == "]" || char == "=" || char == "+" { model.stepWidth(1); return }
             if char == "[" || char == "-" { model.stepWidth(-1); return }
@@ -456,9 +497,14 @@ final class CanvasView: NSView, NSTextFieldDelegate {
         super.keyDown(with: event)
     }
 
-    /// Edit ▸ Copy copies the whole annotated image.
+    /// Edit ▸ Copy: the selected object (for Paste), or the whole annotated image.
     @objc func copy(_ sender: Any?) {
-        model.copy()
+        model.copyObjectOrImage()
+    }
+
+    /// Edit ▸ Paste: an object copied in an editor.
+    @objc func paste(_ sender: Any?) {
+        model.pasteObject()
     }
 
     @objc func delete(_ sender: Any?) {
@@ -468,7 +514,10 @@ final class CanvasView: NSView, NSTextFieldDelegate {
     func toolChanged(from old: Tool) {
         endTextEditing()
         if old == .crop { cropDraft = nil }
-        if model.tool == .crop { model.editor.selection = nil }
+        if model.tool == .crop {
+            model.editor.selection = nil
+            model.showsBackground = false
+        }
         needsDisplay = true
         window?.invalidateCursorRects(for: self)
     }

@@ -22,8 +22,9 @@ enum AppPresence {
     /// Titled, normal-level windows other than the test scene count as "a window is open".
     static var hasRegularWindow: Bool {
         NSApp.windows.contains { window in
-            window.isVisible && window.styleMask.contains(.titled) && window.level == .normal
-                && !(window.contentView is TestPatternView)
+            window.isVisible && window.styleMask.contains(.titled)
+                && (window.level == .normal || EditorWindowController.owns(window))
+                && !TestScene.owns(window)
         }
     }
 

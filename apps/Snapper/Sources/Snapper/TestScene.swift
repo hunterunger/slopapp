@@ -1,11 +1,13 @@
 import SlopKit
 import AppKit
+import SnapperCore
 
 /// A generated test pattern for scripted and blind tests (`SNAPPER_TEST_SCENE`), so test
 /// captures only ever record this window, never the owner's screen.
 @MainActor
 enum TestScene {
     private static var window: NSWindow?
+    private static var scrollView: NSScrollView?
 
     /// Test mode: captures contain only the scene (and pins), never anything else on screen.
     static var isActive: Bool { window != nil }
@@ -14,6 +16,31 @@ enum TestScene {
     static var windowNumbers: Set<CGWindowID> {
         guard let window, window.isVisible else { return [] }
         return [CGWindowID(window.windowNumber)]
+    }
+
+    static func owns(_ window: NSWindow) -> Bool { window === self.window }
+
+    /// The scene window for recordings (id and Quartz frame), if it's on screen.
+    static var recordingTarget: (id: CGWindowID, frame: CGRect)? {
+        guard let window, window.isVisible else { return nil }
+        return (CGWindowID(window.windowNumber), ScreenCoordinates.flip(window.frame, primaryHeight: NSScreen.primaryHeight))
+    }
+
+    /// The scene's content area as a picked region, for scripted scrolling-capture and
+    /// recording tests (no real mouse needed). `inset` trims the edges.
+    static func region(inset: CGFloat = 0) -> PickedRegion? {
+        guard let window, let screen = window.screen, let content = window.contentView else { return nil }
+        let global = window.convertToScreen(content.convert(content.bounds, to: nil)).insetBy(dx: inset, dy: inset)
+        return PickedRegion(screen: screen, local: global.offsetBy(dx: -screen.frame.minX, dy: -screen.frame.minY), frozen: nil, window: nil)
+    }
+
+    /// Scrolls the scene's content (for scrolling-capture tests; no real input needed).
+    static func scroll(by points: CGFloat) {
+        guard let scrollView, let document = scrollView.documentView else { return }
+        let clip = scrollView.contentView
+        let maxY = max(0, document.frame.height - clip.bounds.height)
+        clip.scroll(to: CGPoint(x: 0, y: min(max(clip.bounds.origin.y + points, 0), maxY)))
+        scrollView.reflectScrolledClipView(clip)
     }
 
     static func showIfRequested() {
@@ -35,7 +62,19 @@ enum TestScene {
             window.title = "Snapper Test Scene"
         }
         window.isReleasedWhenClosed = false
-        window.contentView = TestPatternView()
+        // The pattern is four screens tall inside a scroll view, so scrolling capture has
+        // something to scroll. No scrollers: they'd flash into the frames.
+        let scroll = NSScrollView(frame: window.contentLayoutRect)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = false
+        scroll.hasHorizontalScroller = false
+        scroll.verticalScrollElasticity = .none
+        scroll.drawsBackground = false
+        let pattern = TestPatternView(frame: CGRect(x: 0, y: 0, width: window.contentLayoutRect.width, height: window.contentLayoutRect.height * 4))
+        pattern.autoresizingMask = [.width]
+        scroll.documentView = pattern
+        window.contentView = scroll
+        scrollView = scroll
         window.orderFrontRegardless()
         self.window = window
     }
@@ -99,5 +138,20 @@ final class TestPatternView: NSView {
         ("fake@example.com  ·  555-0100  ·  4111 1111 1111 1111" as NSString).draw(
             at: CGPoint(x: 42, y: 500),
             withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 20, weight: .regular), .foregroundColor: NSColor.black])
+        // Below the fold: numbered rows with their own colors and offsets, so scrolled
+        // frames line up in exactly one place.
+        let palette: [NSColor] = [.systemRed, .systemOrange, .systemYellow, .systemGreen, .systemTeal, .systemBlue, .systemPurple, .systemPink]
+        var row = 1
+        for y in stride(from: 560.0, to: bounds.height - 40, by: 44.0) {
+            let color = palette[row % palette.count]
+            color.withAlphaComponent(0.25).setFill()
+            CGRect(x: 40, y: y, width: bounds.width - 80, height: 36).fill()
+            color.setFill()
+            CGRect(x: 40 + CGFloat((row * 53) % 400), y: y + 6, width: 60, height: 24).fill()
+            ("Row \(row) · scrolling capture test line" as NSString).draw(
+                at: CGPoint(x: 520, y: y + 8),
+                withAttributes: [.font: NSFont.systemFont(ofSize: 17, weight: .medium), .foregroundColor: NSColor.black])
+            row += 1
+        }
     }
 }

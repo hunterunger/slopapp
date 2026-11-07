@@ -90,9 +90,10 @@ public enum StrokeWidth: Int, Sendable, CaseIterable, Identifiable {
     }
 }
 
-/// An editor tool. Letters are the single-key shortcuts.
+/// An editor tool. Letters are the single-key shortcuts (the same letters the popular
+/// screenshot editors use, so muscle memory carries over).
 public enum Tool: String, Sendable, CaseIterable, Identifiable {
-    case select, arrow, line, rectangle, ellipse, text, highlighter, pixelate, blur, counter, crop
+    case crop, select, rectangle, filledRectangle, ellipse, line, arrow, text, pencil, highlighter, redact, spotlight, counter
 
     public var id: String { rawValue }
 
@@ -102,11 +103,13 @@ public enum Tool: String, Sendable, CaseIterable, Identifiable {
         case .arrow: "Arrow"
         case .line: "Line"
         case .rectangle: "Rectangle"
+        case .filledRectangle: "Filled Rectangle"
         case .ellipse: "Ellipse"
         case .text: "Text"
+        case .pencil: "Pencil"
         case .highlighter: "Highlighter"
-        case .pixelate: "Pixelate"
-        case .blur: "Blur"
+        case .redact: "Blur and Pixelate"
+        case .spotlight: "Spotlight"
         case .counter: "Counter"
         case .crop: "Crop"
         }
@@ -118,13 +121,15 @@ public enum Tool: String, Sendable, CaseIterable, Identifiable {
         case .arrow: "a"
         case .line: "l"
         case .rectangle: "r"
-        case .ellipse: "o"
+        case .filledRectangle: "f"
+        case .ellipse: "e"
         case .text: "t"
-        case .highlighter: "h"
-        case .pixelate: "p"
-        case .blur: "b"
-        case .counter: "n"
-        case .crop: "c"
+        case .pencil: "d"
+        case .highlighter: "m"
+        case .redact: "p"
+        case .spotlight: "h"
+        case .counter: "c"
+        case .crop: "k"
         }
     }
 
@@ -135,11 +140,13 @@ public enum Tool: String, Sendable, CaseIterable, Identifiable {
         case .arrow: "arrow.up.right"
         case .line: "line.diagonal"
         case .rectangle: "rectangle"
+        case .filledRectangle: "rectangle.fill"
         case .ellipse: "circle"
         case .text: "textformat"
+        case .pencil: "pencil.tip"
         case .highlighter: "highlighter"
-        case .pixelate: "checkerboard.rectangle"
-        case .blur: "drop"
+        case .redact: "checkerboard.rectangle"
+        case .spotlight: "flashlight.on.fill"
         case .counter: "1.circle"
         case .crop: "crop"
         }
@@ -149,34 +156,52 @@ public enum Tool: String, Sendable, CaseIterable, Identifiable {
         allCases.first { $0.key == Character(character.lowercased()) }
     }
 
-    /// The annotation this tool draws (nil for select and crop).
-    public var kind: AnnotationKind? {
+    /// The annotation this tool draws (nil for select and crop). The redaction tool draws
+    /// pixelate or blur, whichever `redaction` style is chosen.
+    public func kind(redaction: RedactionStyle = .pixelate) -> AnnotationKind? {
         switch self {
         case .select, .crop: nil
         case .arrow: .arrow
         case .line: .line
         case .rectangle: .rectangle
+        case .filledRectangle: .filledRectangle
         case .ellipse: .ellipse
         case .text: .text
+        case .pencil: .pencil
         case .highlighter: .highlighter
-        case .pixelate: .pixelate
-        case .blur: .blur
+        case .redact: redaction.kind
+        case .spotlight: .spotlight
         case .counter: .counter
         }
     }
+
+    /// Whether the color menu applies.
+    public var usesColor: Bool { kind()?.usesColor ?? false }
+}
+
+/// How the redaction tool hides things.
+public enum RedactionStyle: String, Sendable, CaseIterable, Identifiable {
+    case pixelate, blur
+    public var id: String { rawValue }
+    public var title: String { self == .pixelate ? "Pixelate" : "Blur" }
+    public var kind: AnnotationKind { self == .pixelate ? .pixelate : .blur }
 }
 
 public enum AnnotationKind: String, Sendable, CaseIterable {
-    case arrow, line, rectangle, ellipse, text, highlighter, pixelate, blur, counter
+    case arrow, line, rectangle, filledRectangle, ellipse, text, pencil, highlighter, pixelate, blur, spotlight, counter
 
     /// Drawn from a drag between two points (start and end handles).
     public var isTwoPoint: Bool { self == .arrow || self == .line }
     /// Drawn as a box (four corner handles).
-    public var isBox: Bool { self == .rectangle || self == .ellipse || self == .pixelate || self == .blur }
+    public var isBox: Bool {
+        self == .rectangle || self == .filledRectangle || self == .ellipse || self == .pixelate || self == .blur || self == .spotlight
+    }
+    /// A freehand stroke through `points`.
+    public var isFreehand: Bool { self == .pencil || self == .highlighter }
     /// Acts on the capture's pixels (drawn under every other mark).
     public var isRedaction: Bool { self == .pixelate || self == .blur }
     /// Uses the color setting.
-    public var usesColor: Bool { self != .pixelate && self != .blur }
+    public var usesColor: Bool { !isRedaction && self != .spotlight }
 }
 
 /// One mark on the capture.
@@ -186,7 +211,7 @@ public struct Annotation: Identifiable, Equatable, Sendable {
     /// Two-point and box kinds: the drag's start. Text: the top-left of the text. Counter: the center.
     public var start: CGPoint
     public var end: CGPoint
-    /// Highlighter strokes.
+    /// Pencil and highlighter strokes.
     public var points: [CGPoint]
     public var color: RGBA
     public var width: CGFloat
@@ -218,12 +243,15 @@ public struct Annotation: Identifiable, Equatable, Sendable {
 
     public var highlighterWidth: CGFloat { max(14, width * 4) }
 
+    /// The width of a freehand stroke.
+    public var strokeWidth: CGFloat { kind == .highlighter ? highlighterWidth : width }
+
     /// Whether this annotation would leave no visible mark (a click without a drag).
     public var isEmpty: Bool {
         switch kind {
         case .arrow, .line: hypot(end.x - start.x, end.y - start.y) < 4
-        case .rectangle, .ellipse, .pixelate, .blur: rect.width < 4 || rect.height < 4
-        case .highlighter: points.count < 2
+        case .rectangle, .filledRectangle, .ellipse, .pixelate, .blur, .spotlight: rect.width < 4 || rect.height < 4
+        case .highlighter, .pencil: points.count < 2
         case .text: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .counter: false
         }
@@ -239,13 +267,13 @@ public struct Annotation: Identifiable, Equatable, Sendable {
             return rect.insetBy(dx: -width * 2, dy: -width * 2)
         case .rectangle, .ellipse:
             return rect.insetBy(dx: -width / 2, dy: -width / 2)
-        case .pixelate, .blur:
+        case .filledRectangle, .pixelate, .blur, .spotlight:
             return rect
-        case .highlighter:
+        case .highlighter, .pencil:
             guard let first = points.first else { return .zero }
             var box = CGRect(origin: first, size: .zero)
             for point in points.dropFirst() { box = box.union(CGRect(origin: point, size: .zero)) }
-            return box.insetBy(dx: -highlighterWidth / 2, dy: -highlighterWidth / 2)
+            return box.insetBy(dx: -strokeWidth / 2, dy: -strokeWidth / 2)
         case .text:
             return CGRect(origin: start, size: textSize(self))
         case .counter:
@@ -262,7 +290,7 @@ public struct Annotation: Identifiable, Equatable, Sendable {
         switch kind {
         case .arrow, .line:
             return Self.distance(from: point, toSegment: start, end) <= width / 2 + tolerance
-        case .rectangle:
+        case .rectangle, .spotlight:
             let outer = rect.insetBy(dx: -(width / 2 + tolerance), dy: -(width / 2 + tolerance))
             let inner = rect.insetBy(dx: width / 2 + tolerance, dy: width / 2 + tolerance)
             return outer.contains(point) && (inner.isNull || inner.isEmpty || !inner.contains(point))
@@ -273,12 +301,12 @@ public struct Annotation: Identifiable, Equatable, Sendable {
             let r = (nx * nx + ny * ny).squareRoot()
             let slack = (width / 2 + tolerance) / min(rx, ry)
             return abs(r - 1) <= slack
-        case .highlighter:
+        case .highlighter, .pencil:
             guard points.count > 1 else { return false }
             return zip(points, points.dropFirst()).contains {
-                Self.distance(from: point, toSegment: $0, $1) <= highlighterWidth / 2 + tolerance
+                Self.distance(from: point, toSegment: $0, $1) <= strokeWidth / 2 + tolerance
             }
-        case .pixelate, .blur, .text, .counter:
+        case .filledRectangle, .pixelate, .blur, .text, .counter:
             return box.insetBy(dx: -tolerance, dy: -tolerance).contains(point)
         }
     }
@@ -361,7 +389,7 @@ public struct Annotation: Identifiable, Equatable, Sendable {
     /// or at 45°; for boxes, makes them square.
     public static func constrained(start: CGPoint, end: CGPoint, kind: AnnotationKind) -> CGPoint {
         let dx = end.x - start.x, dy = end.y - start.y
-        if kind.isBox || kind == .highlighter {
+        if kind.isBox {
             let side = max(abs(dx), abs(dy))
             return CGPoint(x: start.x + (dx < 0 ? -side : side), y: start.y + (dy < 0 ? -side : side))
         }
