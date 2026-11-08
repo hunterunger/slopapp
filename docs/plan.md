@@ -67,10 +67,9 @@ Cheaper once phase 3's shared components exist.
 
 ## Phase 5: Later
 
-- Big favourites: Paper (Nitro PDF Pro), Dual (ForkLift), Commit (Gitfox). Each is a
-  product of its own; scope each one carefully before starting.
-- Popular Setapp apps outside the favourites: Snip, Tally, Devkit, Focus, Gauge, Tiles,
-  Shelf, Margin, Hours, Twins, Glance, Seek, Switches, Quit.
+- Big favourites: Paper (Nitro PDF Pro), Commit (Gitfox). Each is a product of its own;
+  scope each one carefully before starting.
+- Popular apps outside the favourites: Tally, Devkit, Focus, Gauge.
 - Awake predates the dev cycle: give it a research pass and blind test when there's time.
 
 ## Owner's picks (2026-11-07)
@@ -85,8 +84,8 @@ Still owed for each new app: the on-screen walkthrough (needs an unlocked Mac wi
 the owner's hand tests (listed in each research doc), blind test rounds, then beta and a release.
 
 Skipped: **Tuck** (Bartender; hiding icons on macOS 27 needs private, fragile behaviour), video
-downloaders (no legal risk wanted), Safari extensions and proxies. The remaining P3 apps (Snip,
-Tiles, Switches, Quit, Shelf, Margin, Hours, Twins, Glance, Seek, Dual) are on hold.
+downloaders (no legal risk wanted), Safari extensions and proxies. Removed from the roadmap (owner, 2026-11-07): Snip, Tiles,
+Switches, Quit, Shelf, Margin, Hours, Twins, Glance, Seek and Dual.
 
 Open owner decisions: Developer ID signing and notarization in CI (needs the certificate and a
 notary login as GitHub secrets), archiving Better Transcriber's repo after the switch-over.
