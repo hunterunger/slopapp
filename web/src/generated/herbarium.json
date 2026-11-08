@@ -98,6 +98,17 @@
     "print": "/prints/focus.webp",
     "source": "https://commons.wikimedia.org/wiki/File:K%C3%B6hler%27s_Medizinal-Pflanzen_in_naturgetreuen_Abbildungen_mit_kurz_erl%C3%A4uterndem_Texte_(Plate_60)_(6972249268).jpg"
   },
+  "gauge": {
+    "app": "Gauge",
+    "plant": "Taraxacum officinale",
+    "common": "dandelion",
+    "plate": "5",
+    "tile": "#4F7D78",
+    "icon": "/icons/gauge.webp",
+    "iconDark": "/icons/gauge-dark.webp",
+    "print": "/prints/gauge.webp",
+    "source": "https://commons.wikimedia.org/wiki/File:K%C3%B6hler%27s_Medizinal-Pflanzen_in_naturgetreuen_Abbildungen_mit_kurz_erl%C3%A4uterndem_Texte_(Plate_5)_(7118308873).jpg"
+  },
   "iconsmith": {
     "app": "Iconsmith",
     "plant": "Rosa × centifolia",
@@ -207,6 +218,17 @@
     "iconDark": "/icons/tidy-dark.webp",
     "print": "/prints/tidy.webp",
     "source": "https://commons.wikimedia.org/wiki/File:K%C3%B6hler%27s_Medizinal-Pflanzen_in_naturgetreuen_Abbildungen_mit_kurz_erl%C3%A4uterndem_Texte_(Plate_81)_(7118335655).jpg"
+  },
+  "triggers": {
+    "app": "Triggers",
+    "plant": "Aconitum napellus",
+    "common": "monkshood",
+    "plate": "72",
+    "tile": "#5B5A84",
+    "icon": "/icons/triggers.webp",
+    "iconDark": "/icons/triggers-dark.webp",
+    "print": "/prints/triggers.webp",
+    "source": "https://commons.wikimedia.org/wiki/File:K%C3%B6hler%27s_Medizinal-Pflanzen_in_naturgetreuen_Abbildungen_mit_kurz_erl%C3%A4uterndem_Texte_(Plate_72)_BHL303708.jpg"
   },
   "zones": {
     "app": "Zones",
