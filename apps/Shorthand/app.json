@@ -1,0 +1,17 @@
+{
+  "slug": "shorthand",
+  "name": "Shorthand",
+  "tagline": "Type a few letters, get the whole thing.",
+  "replaces": [
+    "TextExpander",
+    "Rocket Typist"
+  ],
+  "category": "Productivity",
+  "icon": "text-cursor-input",
+  "menuBarOnly": true,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.shorthand"
+}

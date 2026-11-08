@@ -572,44 +572,48 @@ owner's real apps, and never read the owner's real Text Replacements or clipboar
 
 Must-haves (the test step walks these):
 
-- [ ] Abbreviations expand as you type, in any app, immediately when the last character is
+- [x] Abbreviations expand as you type, in any app, immediately when the last character is
       typed (owner hand test in the test window, TextEdit, a browser, an Electron app).
-- [ ] Whole-word rule on by default; can be turned off.
-- [ ] Exact-case matching.
-- [ ] Automatic insertion: short single lines typed, long or multi-line pasted; Settings can
+      *Replayed through the real engine into the test pad; real keyboard = owner hand test.*
+- [x] Whole-word rule on by default; can be turned off.
+- [x] Exact-case matching (plus "adapt case" per snippet, a should).
+- [x] Automatic insertion: short single lines typed, long or multi-line pasted; Settings can
       force paste or type.
-- [ ] Clipboard snapshot and restore after a paste, every type intact, temporary write
+- [x] Clipboard snapshot and restore after a paste, every type intact, temporary write
       marked transient (Clips skips it), no restore if something new was copied.
-- [ ] Keys typed during an expansion are held and replayed in order; none lost.
-- [ ] Placeholders: date and time (locale presets), clipboard (plain text, concealed
-      respected), cursor position.
-- [ ] Pause/resume from the menu and an optional global shortcut (tap removed when paused).
-- [ ] "Don't expand in" app list with the default password-manager entries and Shorthand
+      *SlopKit `ClipboardPaster`; until "Paste from Other Apps" is allowed, pastes without
+      restoring (owner decision).*
+- [x] Keys typed during an expansion are held and replayed in order; none lost.
+      *Listen-only tap: they're remembered and retyped after the snippet (see build notes).*
+- [x] Placeholders: date and time (locale presets), clipboard (plain text, concealed
+      respected), cursor position. *Also offsets and custom formats (shoulds).*
+- [x] Pause/resume from the menu and an optional global shortcut (tap removed when paused).
+- [x] "Don't expand in" app list with the default password-manager entries and Shorthand
       itself; nothing buffered while one is in front.
-- [ ] Secure input: nothing read, buffer cleared, blocked icon, status line naming the
-      probable holder; no insert into `AXSecureTextField`.
-- [ ] IME active → matching paused; dead keys reset the buffer; non-US layouts match on
-      produced characters; ⌘V uses the layout's V.
-- [ ] Synthetic events (ours and other apps') never matched.
-- [ ] Library window: groups sidebar (enable/disable per group), snippet list, detail editor
+- [x] Secure input: nothing read, buffer cleared, blocked icon, status line naming the
+      probable holder; no insert into `AXSecureTextField`. *AX field check: owner hand test.*
+- [x] IME active → matching paused; dead keys reset the buffer; non-US layouts match on
+      produced characters; ⌘V uses the layout's V. *Unit-tested; real IME/layouts: hand test.*
+- [x] Synthetic events (ours and other apps') never matched.
+- [x] Library window: groups sidebar (enable/disable per group), snippet list, detail editor
       with Insert Placeholder menu, live preview, autosave, "Try it" field.
-- [ ] Toolbar search over name, abbreviation, content (⌘F), case- and accent-insensitive.
-- [ ] Conflict warnings: duplicate (blocks), prefix clash, plain-word warning.
-- [ ] Duplicate (⌘D), delete with undo (⌘⌫ / ⌘Z), delete group asks.
-- [ ] Import from macOS Text Replacements: from this Mac and from an exported plist, preview
+- [x] Toolbar search over name, abbreviation, content (⌘F), case- and accent-insensitive.
+- [x] Conflict warnings: duplicate (blocks), prefix clash, plain-word warning.
+- [x] Duplicate (⌘D), delete with undo (⌘⌫ / ⌘Z), delete group asks.
+- [x] Import from macOS Text Replacements: from this Mac and from an exported plist, preview
       with checkboxes, duplicates unticked, note about macOS's own copies (tested only with
-      fixtures; never the owner's list).
-- [ ] Menu bar icon states (normal, paused, blocked) with VoiceOver labels; status line;
+      fixtures; never the owner's list). *"From This Mac" on 27: owner hand test.*
+- [x] Menu bar icon states (normal, paused, blocked) with VoiceOver labels; status line;
       `MenuFooter`.
-- [ ] Permissions asked only when there's a snippet to expand, via `PermissionGate`, live
+- [x] Permissions asked only when there's a snippet to expand, via `PermissionGate`, live
       re-check; "Paste from Other Apps" explained when first needed; tap removed at once if
-      Accessibility is revoked.
-- [ ] Privacy: 32-character in-memory buffer only; test-mode logs contain no typed
+      Accessibility is revoked. *Revocation: hand test.*
+- [x] Privacy: 32-character in-memory buffer only; test-mode logs contain no typed
       characters (grep the log in the walkthrough); README states it.
-- [ ] Library stored as JSON in Application Support with atomic writes.
-- [ ] Performance: tap callback p99 ≤ 20 µs / max ≤ 1 ms / no timeouts and mask check via
+- [x] Library stored as JSON in Application Support with atomic writes (+ daily backups).
+- [x] Performance: tap callback p99 ≤ 20 µs / max ≤ 1 ms / no timeouts and mask check via
       `CGGetEventTapList`; matcher benchmark; insert latencies; house idle budgets.
-- [ ] Test mode (env vars above), replay timelines, throwaway test window; walkthrough never
+- [x] Test mode (env vars above), replay timelines, throwaway test window; walkthrough never
       posts outside the test window.
 
 Should (v1 if the spike and time allow, else v1.1): delimiter mode, adapt case, Backspace
@@ -721,3 +725,217 @@ One section per round, newest last. See docs/dev-cycle.md step 5.
 - **Shared code moves to SlopKit:** the clipboard snapshot (marked transient) and layout-aware typing
   and paste used by Dictate and Clips become one SlopKit implementation that all three use.
 - Other open questions: take the doc's recommendations.
+
+## Spike results (2026-11-07, macOS 27.2)
+
+### 1. Which permission does a listen-only keyboard tap need?
+
+Probe: a tiny Swift tool (`/tmp/shorthand-test/spike/probe.swift`, not in the repo) that reports
+`AXIsProcessTrusted`, `CGPreflightListenEventAccess`, `CGPreflightPostEventAccess`, then creates a
+`.listenOnly` and a `.defaultTap` keyboard tap (`keyDown | flagsChanged`) and reads them back with
+`CGGetEventTapList`. Its callback only ever read our own marker field, never a key.
+
+| Run | AX trusted | Listen (Input Monitoring) | Post | Listen-only tap | Active tap |
+|---|---|---|---|---|---|
+| Child of this terminal (inherits its grants) | yes | yes | yes | created, enabled, `options=1`, mask `0x1400` | created, enabled |
+| Fresh ad-hoc `.app` (own bundle id) via LaunchServices | no | no | no | not attempted (see below) | not attempted |
+
+- **The tap itself is created only after Accessibility is granted**, so a fresh install never
+  triggers macOS's "receive keystrokes" alert on its own. We didn't create a listen-only tap in
+  the ungranted bundle on purpose: macOS would put its Input Monitoring alert on the owner's
+  screen. `tccd` logged nothing readable for the probe.
+- Sources disagree on whether Accessibility alone covers a listen-only tap (Apple DTS says
+  listening is the separate ListenEvent service, shown as Input Monitoring; some projects
+  report Accessibility implies it on 13+). Nothing published covers 27.
+- **Decision (built):** Shorthand needs Accessibility to post keys anyway, so it asks for that
+  first. Then it checks `CGPreflightListenEventAccess()` and whether `tapCreate` succeeded; only
+  if macOS still refuses does the library show a second row for Input Monitoring
+  (`CGRequestListenEventAccess` + `Privacy_ListenEvent`). The row re-checks every second while
+  shown and the tap installs the moment it works. **Owner hand test H1** settles which of the
+  two macOS 27 actually wants.
+- **Synthetic vs hardware:** events created from a `.hidSystemState` source carry
+  `eventSourceStateID == 1`; `.combinedSessionState` and `nil` sources carry 0, private sources a
+  random ID; every app-created event carries the poster's pid. So: our own events are skipped by
+  marker (`eventSourceUserData`), anything with a state ID other than the HID system's is
+  "synthetic" and never matched (Dictate's typing, Clips' ⌘V). Hardware events reaching a
+  session tap with state ID 1 is the documented behaviour but couldn't be observed without
+  reading the owner's keys: **hand test H2** (if nothing expands at all, this is the first
+  suspect; the log line `stats` shows `syntheticSkipped`).
+- `postToPid` events don't reach session taps (probe saw 0 of its own marked events), which is
+  why walkthroughs feed keys into the engine in process instead.
+
+### 2. "Paste from Other Apps" when reading the clipboard back
+
+- A fresh ad-hoc app launched through LaunchServices on this Mac reports
+  `NSPasteboard.general.accessBehavior == .alwaysAllow`, as Clips' research found. So on this
+  Mac, restore works silently for a new install; on Macs where it's `.ask`, reading another
+  app's clipboard data raises macOS's alert.
+- Only the **snapshot before pasting** reads another app's data. Our own (transient) write is
+  never read back; the restore check uses `changeCount`, which never asks. Writing never asks.
+- We couldn't trigger the `.ask` state without changing System Settings (not allowed), and
+  reading the real clipboard is off limits, so the alert itself is **hand test H6**.
+- **Built per the owner decision:** if `accessBehavior` isn't `.alwaysAllow`, a long snippet
+  pastes **without reading the clipboard at all** (no alert mid-typing), the snippet stays on
+  the clipboard as a normal copy, a one-time HUD explains it, the menu gets "Allow Paste from
+  Other Apps…", and the editor shows the same row under any snippet that pastes or uses
+  `{clipboard}`. `{clipboard}` inserts nothing until allowed. Test override:
+  `SHORTHAND_PASTE_PRIVACY=asks`.
+
+## Decisions made while building
+
+| Question | Decision | Why |
+|---|---|---|
+| Active or listen-only tap | **Listen-only** (brief), `tailAppendEventTap`, `keyDown + flagsChanged`, own thread | A listen-only tap is never in anyone's typing path: a stalled Shorthand can't delay, drop or freeze typing, and macOS can't time it out of the event stream. |
+| Keys typed during an expansion (the doc assumed holding them) | The engine remembers up to 16 printable keys typed between the match and the insert (memory only, < 0.5 s); the insert deletes them with the abbreviation and retypes them after the snippet, in order. Any other key in that window (arrow, Return, Backspace, a shortcut, a click, synthetic input) drops the expansion and leaves the text as typed. Keys landing while our events are being posted (≈ 1–2 ms for typed snippets) are counted (`interleaved=` in the log) but can't be fixed; documented. | Gets "none lost, in order" without being in the event path. |
+| Insert-time password check cost | AX focus query with a 20 ms timeout, connection pre-warmed in the background when an app comes to the front | First query to an app took 50 ms (timeout); pre-warmed it's ~3 ms. |
+| Paste write delay | 30 ms (Dictate keeps its 60 ms) | Pasted budget is 120 ms; 30 ms was reliable in every replay. |
+| Typing speed | Unicode chunks of 20 UTF-16 units posted back to back (no sleeps; Dictate keeps 4 ms) | Fewer gaps for a fast typist's keys to land inside the snippet. |
+| Settings tabs | General, Apps, Shortcuts, Advanced, About, built from SlopKit's tab pieces (`GeneralSettingsTab`, `SettingsForm`, `AboutSettingsTab`) | `SlopSettings` has no slot for an extra tab. |
+| Reopen behaviour | Reopening the app opens the library (not Settings) | Research doc #52. |
+| Import "From a File…" | SlopKit `DropZone` (click to choose or drop) | One control instead of a button plus a hand-drawn target. |
+| Adapt case scope | ASCII and Latin-1 letters fold; other scripts match as written | Keeps the matcher allocation-free; documented. |
+| Fill-ins, quick search panel, delimiter mode | Not in this build | Fill-ins v1.1 (owner); search panel and delimiter mode are shoulds (deferred below). |
+| App icon | New tile colour **sloe** `#74506A` added to `herbarium.py` (every colour was taken); a rubber stamp (ochre accent) over a card of text lines; rosemary ("for remembrance") printed on the card | The few letters you type stamp the whole thing. Card uses the `base` role so it holds 1.35:1 in dark mode. |
+
+## Build notes (2026-11-07)
+
+### SlopKit consolidation (owner decision)
+
+New in `apps/SlopKit/Sources/SlopKit/TextInsertion/`:
+
+- `ClipboardSnapshot` (moved from DictateCore unchanged: every item and type, transient +
+  auto-generated markers).
+- `ClipboardPaster`: snapshot → transient write → delay → ⌘V → delay → restore only if
+  `changeCount` is still ours; `restore: false` reads nothing; `restorePendingNow()` for quitting.
+- `SyntheticKeyboard`: Unicode chunking (20 units, surrogate-safe, Return between lines), keys,
+  layout-aware ⌘V/⌘C; destination (`hidEventTap`, `annotatedSession`, `process(pid)`), Dictate's
+  suppression-state filter, an optional marker.
+- `KeyboardLayout.virtualKey(for:)` (the layout-aware lookup Dictate and Clips each had).
+- `PasteboardPrivacy` (Clips' `ClipboardAccess`, which was marked as a SlopKit candidate).
+- Tests: `Tests/SlopKitTests/TextInsertionTests.swift` (14: snapshot round trip, transient
+  marking, paster restore / newer copy kept / empty clipboard / no-restore / restore on quit,
+  chunking, surrogates, newlines, tabs, layout key).
+
+Switched over, behaviour kept identical: **Dictate** `TextInserter` uses
+`SyntheticKeyboard(destination: .hidEventTap, permitsLocalEventsWhileSuppressed: true)` and
+`ClipboardPaster` (same 60/450 ms, same transient rule; Return keeps inheriting the source's
+flags as before); its `ClipboardSnapshot` and `ClipboardTests` moved to SlopKit. **Clips**
+`Paster.sendPaste()` uses `SyntheticKeyboard(destination: .annotatedSession)` (same
+annotated-session post, same source, ⌘ only); `ClipboardAccess` is now a typealias of
+`PasteboardPrivacy`. `scripts/check.sh Dictate Clips`: all lint/icon/test/bundle/smoke pass
+(Clips 110 tests). Neither was installed.
+
+### Tests
+
+- ShorthandCore: **76 tests in 12 suites** (rolling buffer, matching and word rule, adapt case,
+  duplicates, dead keys, synthetic events, gate, keys typed meanwhile, timeouts, undo, key
+  decoding from real `CGEvent`s, rules and conflicts, placeholders incl. locales and month
+  ends, library, store and backups/recovery, Text Replacements import incl. 10,000 rows, search,
+  expander with recording fakes, benchmark).
+- SlopKit: 14 new tests (above).
+
+### Walkthrough (release build, test mode, replayed in process into the throwaway test pad)
+
+The screen stayed **locked for the whole session**, so macOS hid every window from
+Accessibility: `scripts/drive tree/shot/menubar` refused. What was verified instead:
+
+- Replays (`SHORTHAND_REPLAY`-style timelines via the `replay` hook) through the real engine,
+  keys posted only to the pad's pid, results read from the pad's own log and text file:
+  typed snippets, date, cursor marker (34 ← presses, later keys land at the cursor), adapt case
+  (`;Hi` → "Hello…"), multi-line paste with clipboard restored, keys typed right after a
+  match retyped in order (`…out.abc`), 20 keys at 15 ms across an expansion all delivered in
+  order, word rule (`design;sig` stays), word rule off (expands), Backspace undo (`;sig` back),
+  excluded front app (nothing), always-type / always-paste, `{clipboard}` (text, concealed →
+  empty), paste privacy "asks" (pastes, no read, snippet stays as a normal copy, `{clipboard}`
+  empty).
+- Secure input for real: with the screen locked, the status line read "Paused: secure input is
+  on, probably in loginwindow" and nothing expanded.
+- Real tap (launched `--direct`, still confined to the pad): `CGGetEventTapList` shows one tap,
+  mask `0x1400` (key-down + flags-changed only), listen-only, enabled. Pause → `taps=0`;
+  resume → reinstalled.
+- No permission (normal launch): status "Needs permission to expand", no tap, no system alert.
+- Logs: `grep` for every snippet text and abbreviation in all logs → 0 hits.
+- Offscreen snapshots (`SHORTHAND_SNAPSHOT_DIR`), light and dark: empty library, editor
+  (cursor preview, prefix clash, plain-word and unknown-placeholder warnings), import preview
+  and start, notices, Settings General/Apps/Advanced. Paths: `/tmp/shorthand-test/snaps/`.
+  Offscreen rendering can't draw the split view, toolbar or menus.
+
+### Measurements
+
+| Budget | Result |
+|---|---|
+| Matcher p99 ≤ 2 µs, 5,000 abbreviations (release, 1M keys) | mean 0.08 µs, p99 ≤ 1 µs, max 17.9 µs |
+| Callback path p99 ≤ 20 µs, max ≤ 1 ms (decode a real `CGEvent` + lock + engine + histogram, release, 1M keys) | mean 0.09 µs, p99 ≤ 1 µs, max 9.8 µs |
+| Same, during replays on the main thread (cold) | p99 ≤ 20 µs, max 71 µs |
+| Tap mask / mode (`CGGetEventTapList`) | `0x1400`, listen-only, enabled; real-key latency: hand test H3 |
+| Typed, match → last key posted ≤ 30 ms | 4.0–4.9 ms (3 ms of it the password-field check) |
+| Typed, match → arrived in the test pad | 22–34 ms; the pad is a background app on a locked screen receiving events by pid, which adds ~20 ms of delivery (the last replayed key itself took 3 ms) |
+| Pasted, match → ⌘V posted ≤ 120 ms | 36 ms (30 ms of it the write delay); arrived in the pad at 45–48 ms |
+| Clipboard restored ≤ 600 ms after paste | 450 ms after ⌘V (`clipboard restored` in the log) |
+| Keys during an expansion: 100%, in order | 18/18 in order (15 ms intervals); 3/3 retyped in order (same turn as the match) |
+| CPU while typing, 120 wpm for 60 s (replay, no echo) | 0.19% of one core (budget 0.5%) |
+| Idle (30 s, tap installed) | 0.006%; `perf.sh`: launch 144 ms, first status item 296 ms, idle 0.035%, footprint 21.9 MB (busy machine, load 6) |
+
+### Gates
+
+- `scripts/check.sh Shorthand Dictate Clips --perf`: everything passes except **Clips perf
+  memory 53.9 MB**, which is the owner's own running Clips (`/Applications/Slopapp/Clips.app`,
+  pid 29971: footprint 53.6 MB) that `perf.sh` latched onto because it shares the bundle id; it
+  was not quit. The rebuilt Clips run in its own test mode (`CLIPS_DATA_DIR`, private
+  pasteboard) measured 29.2 MB and 0.045% idle CPU.
+- `scripts/drive tree` (no `[unlabeled]`), window and status-item screenshots, the on-screen
+  walkthrough of the library and menus: **not run, screen locked**. Code review: every
+  icon-only control has a label (toolbar New Snippet, New Group, duplicate warning, import
+  checkboxes "Import <abbreviation>", text view "Snippet text", fields and pickers named).
+
+### Gap review (v1 scope)
+
+All must-haves are built (see the ticked list above). Shoulds built: adapt case, Backspace
+undo, date offsets and custom formats, export + daily backups, use counts, drag between groups
+(on-screen untested). Deferred:
+
+| Item | Status | Why |
+|---|---|---|
+| Fill-in fields and choices | later (v1.1) | Owner decision. |
+| Quick search panel (#42) | later (v1.1) | A should; the library, Try It and conflict warnings cover v1. Needs its own focus hand-off work. |
+| "After a space or punctuation" timing (#2) | later | Owner chose immediate; one setting less. |
+| New Snippet from Clipboard (#36) | later | Would read the clipboard; small, but not needed for v1. |
+| `scripts/perf.sh` tap-stats extension | not done | `scripts/` is off limits for app builders; the `stats` test hook logs the same `CGGetEventTapList` numbers. |
+| On-screen gates | pending | Screen locked all session. |
+
+### Design review (§10)
+
+Pass from code and snapshots: 1, 2 (light/dark snapshots), 3 (File/Edit/Snippet menus, status
+menu), 4, 5, 6, 7 (empty states with one action), 8 (rows only when there's a snippet, live
+re-check, exact panes), 9 (delete snippet/group undoable; group delete asks), 10 (no network
+code), 11, 13 (no custom animation), 15 (lint), 26 (semantic colours only; `.textOrange` /
+`.textRed` for warnings). Pending an unlocked screen: 12 (VoiceOver tree), 14, 16–25
+(window buttons, corners, alignment, hairlines, contrast, states, toolbar and sidebar on Golden
+Gate, inactive window).
+
+### Owner hand-test list
+
+Use the release build (`build/Shorthand.app`). Add a test snippet such as `;zz` → "hello" first.
+
+1. **H1 permissions:** first launch, add a snippet, press the row's button, grant Accessibility
+   only. Does the menu say "Expanding", or does a second row ask for Input Monitoring?
+2. **H2 real keys:** type `;zz` in TextEdit, Safari (a text field), an Electron app (VS Code or
+   Slack) and Terminal. It should expand the instant you type the last `z`.
+3. **H3 latency:** type normally for a few minutes with Shorthand running: no lag, no
+   dropped keys; expansions feel instant.
+4. **H4 fast typing:** type `;zz` then keep typing without pausing: nothing lost or reordered.
+5. **H5 password field:** Safari password field, then Terminal with Secure Keyboard Entry on:
+   menu icon turns to the lock, status names the app, nothing expands; back to normal after.
+6. **H6 Paste from Other Apps:** a multi-line snippet with the clipboard holding an image: the
+   image is back on the clipboard afterwards and Clips' history doesn't show the snippet. If
+   macOS is set to Ask, confirm no alert appears mid-typing and the menu offers the fix.
+7. **H7 layouts and IMEs:** a Dvorak or AZERTY layout (abbreviation matches what you type;
+   long snippets paste), US International dead keys (`´` then `e` never triggers), Japanese
+   input (paused while on, menu says so).
+8. **H8 revoke:** turn Shorthand off in Accessibility while it runs: typing keeps working
+   everywhere, the menu says it needs permission.
+9. **H9 Import from This Mac:** the preview lists your Text Replacements (`NSSpellChecker`
+   on 27; never read by us).
+10. **H10 Dictate and Clips:** dictate into a field and paste from Clips as usual: same
+    behaviour as before (they now use the shared SlopKit code). A dictated `;zz` must not
+    expand.

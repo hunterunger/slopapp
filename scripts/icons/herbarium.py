@@ -75,6 +75,7 @@ TILES = {
     "mist": "#9FB3C2", "bark": "#8A847A", "cloudberry": "#DE9F57",
     "bilberry": "#5B5A84",
     "tarn": "#4F7D78",
+    "sloe": "#74506A",
 }
 ACCENTS = {"lingonberry": "#B9473B", "ochre": "#E0B054", "clay": "#C4704F", "spruce": "#4F7A72"}
 

@@ -890,7 +890,13 @@
       "menuBarOnly": true,
       "priority": 4,
       "favourite": false,
-      "status": "planned"
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.shorthand",
+      "dir": "apps/Shorthand",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/shorthand-v0.1.0/Shorthand.zip"
     },
     {
       "slug": "dual",
