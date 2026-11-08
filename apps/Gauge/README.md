@@ -9,9 +9,9 @@ An open alternative to iStat Menus.
 
 ## What it does
 
-One item in the menu bar shows up to three live readouts: CPU (default), network down and up
-(default), GPU, memory pressure, free space on the startup disk, or battery. Click it (or press
-the shortcut you set in Settings) for the panel:
+One item in the menu bar shows CPU by default. In Settings you can show up to three readouts,
+in any order: CPU, network down and up, GPU, memory pressure, free space on the startup disk,
+or battery. Click it (or press the shortcut you set in Settings) for the panel:
 
 - **An overview row per section**, each with its live value and a small graph of the last ten
   minutes. Click a row, press **1–6**, or **← →** to pick a section.
@@ -53,11 +53,11 @@ Gauge runs all day, so it's built to cost as little as possible. See "Build note
   sampled while the panel is open.
 - Redrawing a menu bar item costs macOS 27 10–17 ms of CPU each time, in Gauge, and about as
   much again in the system's menu bar process (it renders the item again for every Space and
-  display). So the menu bar redraws only when a value changes noticeably (CPU or memory by 5
-  points, GPU by 10, a rate halving or doubling, a download starting or stopping), and
-  catches up on small changes every 20 seconds (10 at the 1 s setting). Small wobbles are
-  averaged over a few seconds so the menu bar reads calmly; big changes show at once. The
-  panel shows each second's value.
+  display). So the defaults are calm: the menu bar shows CPU only, and redraws only when a
+  value changes noticeably (CPU or memory by 8 points, GPU by 15, a rate tripling or falling
+  to a third, a download starting or stopping). Smaller changes wait for a catch-up every 30
+  seconds (15 at the 1 s setting, 60 at 5 s). Small wobbles are averaged over a few seconds;
+  big changes show at once. The panel shows each second's value.
 - Sampling stops while the Mac or its display sleeps; the graphs show a gap.
 - History is kept in memory only (an hour), nothing is written to disk.
 

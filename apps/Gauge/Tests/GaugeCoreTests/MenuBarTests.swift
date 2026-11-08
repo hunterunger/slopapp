@@ -5,8 +5,14 @@ import Testing
 @Suite struct MenuBarTextTests {
     let battery = BatteryInfo(percent: 84, source: .battery, minutesToEmpty: 192)
 
-    @Test func defaultsShowCPUAndNetwork() {
-        let content = MenuBarText.content(for: Preferences(),
+    @Test func defaultIsCPUOnly() {
+        let content = MenuBarText.content(for: Preferences(), values: ReadoutValues(cpu: 0.12), locale: us)
+        #expect(content.segments.map(\.readout) == [.cpu])
+        #expect(content.accessibilityLabel == "Gauge, CPU 12 percent")
+    }
+
+    @Test func cpuAndNetwork() {
+        let content = MenuBarText.content(for: Preferences(readouts: [.cpu, .network]),
                                           values: ReadoutValues(cpu: 0.12, network: ByteRates(down: 1_200_000, up: 40_000)),
                                           locale: us)
         #expect(content.segments.map(\.readout) == [.cpu, .network])
@@ -48,8 +54,9 @@ import Testing
     }
 
     @Test func layoutKeyIgnoresValues() {
-        let a = MenuBarText.content(for: Preferences(), values: ReadoutValues(cpu: 0.1), locale: us)
-        let b = MenuBarText.content(for: Preferences(), values: ReadoutValues(cpu: 0.9, network: .zero), locale: us)
+        let both = Preferences(readouts: [.cpu, .network])
+        let a = MenuBarText.content(for: both, values: ReadoutValues(cpu: 0.1), locale: us)
+        let b = MenuBarText.content(for: both, values: ReadoutValues(cpu: 0.9, network: .zero), locale: us)
         #expect(a.layoutKey == b.layoutKey)
         #expect(a.drawnText != b.drawnText)
         let bits = MenuBarText.content(for: Preferences(rateUnit: .bits), values: ReadoutValues(), locale: us)
@@ -67,16 +74,18 @@ import Testing
 }
 
 @Suite struct RedrawPolicyTests {
+    static let readouts: [Readout] = [.cpu, .network]
+
     func content(_ cpu: Double?, _ down: Double = 0) -> (MenuBarContent, ReadoutValues) {
         let values = ReadoutValues(cpu: cpu, network: ByteRates(down: down, up: 0))
-        return (MenuBarText.content(for: Preferences(), values: values, locale: us), values)
+        return (MenuBarText.content(for: Preferences(readouts: Self.readouts), values: values, locale: us), values)
     }
 
     final class Box { var policy = RedrawPolicy() }
 
     func redraw(_ box: Box, _ cpu: Double?, _ down: Double = 0, at now: Double, interval: Double = 2) -> Bool {
         let (content, values) = content(cpu, down)
-        return box.policy.shouldRedraw(content, values: values, readouts: Preferences.defaultReadouts, interval: interval, now: now)
+        return box.policy.shouldRedraw(content, values: values, readouts: Self.readouts, interval: interval, now: now)
     }
 
     @Test func firstContentDrawsAndIdenticalTextNever() {
@@ -90,22 +99,22 @@ import Testing
         let policy = Box()
         #expect(redraw(policy, 0.05, at: 0))
         #expect(!redraw(policy, 0.06, at: 2))   // 1 point: waits
-        #expect(!redraw(policy, 0.09, at: 3))   // 4 points: waits
+        #expect(!redraw(policy, 0.12, at: 3))   // 7 points: waits
         #expect(!redraw(policy, 0.04, at: 4))
         #expect(redraw(policy, 0.40, at: 6))    // a spike shows at once
         #expect(!redraw(policy, 0.41, at: 8))
-        #expect(!redraw(policy, 0.42, at: 25))
-        #expect(redraw(policy, 0.42, at: 26))   // waited 20 s: shows
+        #expect(!redraw(policy, 0.42, at: 35))
+        #expect(redraw(policy, 0.42, at: 36))   // waited 30 s: shows
     }
 
     @Test func settleTimeFollowsTheInterval() {
-        #expect(RedrawPolicy.settleSeconds(for: 1) == 10)
-        #expect(RedrawPolicy.settleSeconds(for: 2) == 20)
-        #expect(RedrawPolicy.settleSeconds(for: 5) == 30)
+        #expect(RedrawPolicy.settleSeconds(for: 1) == 15)
+        #expect(RedrawPolicy.settleSeconds(for: 2) == 30)
+        #expect(RedrawPolicy.settleSeconds(for: 5) == 60)
         let policy = Box()
         #expect(redraw(policy, 0.05, at: 0, interval: 1))
-        #expect(!redraw(policy, 0.06, at: 9, interval: 1))
-        #expect(redraw(policy, 0.06, at: 10, interval: 1))
+        #expect(!redraw(policy, 0.06, at: 14, interval: 1))
+        #expect(redraw(policy, 0.06, at: 15, interval: 1))
     }
 
     @Test func networkChangesByFactorOrToAndFromIdle() {
@@ -115,7 +124,7 @@ import Testing
         #expect(!redraw(policy, 0.05, 40_000, at: 4))
         #expect(redraw(policy, 0.05, 1_500_000, at: 6))    // a download starts
         #expect(!redraw(policy, 0.05, 2_700_000, at: 8))   // ×1.8: waits
-        #expect(redraw(policy, 0.05, 3_100_000, at: 10))   // doubled: shows
+        #expect(redraw(policy, 0.05, 4_600_000, at: 10))   // tripled: shows
         #expect(redraw(policy, 0.05, 200, at: 12))         // back to idle
         #expect(!redraw(policy, 0.05, 90_000, at: 14))     // chatter again
     }
@@ -129,9 +138,10 @@ import Testing
     @Test func layoutChangeAndResetRedraw() {
         let policy = Box()
         #expect(redraw(policy, 0.05, at: 0))
-        let bits = MenuBarText.content(for: Preferences(rateUnit: .bits), values: ReadoutValues(cpu: 0.05, network: .zero), locale: us)
+        let bits = MenuBarText.content(for: Preferences(readouts: Self.readouts, rateUnit: .bits),
+                                       values: ReadoutValues(cpu: 0.05, network: .zero), locale: us)
         let switched = policy.policy.shouldRedraw(bits, values: ReadoutValues(cpu: 0.05, network: .zero),
-                                                  readouts: Preferences.defaultReadouts, interval: 2, now: 1)
+                                                  readouts: Self.readouts, interval: 2, now: 1)
         #expect(switched)
         policy.policy.reset()
         #expect(redraw(policy, 0.05, at: 2))
@@ -146,7 +156,7 @@ import Testing
                                               values: values, readouts: readouts, interval: 2, now: now)
         }
         #expect(draw(0.10, at: 0))
-        #expect(!draw(0.17, at: 2))
+        #expect(!draw(0.24, at: 2))
         #expect(draw(0.25, at: 4))
     }
 
@@ -175,6 +185,8 @@ import Testing
 
     @Test func setAndMove() {
         var preferences = Preferences()
+        #expect(preferences.readouts == [.cpu])
+        preferences.set(.network, shown: true)
         preferences.set(.memory, shown: true)
         #expect(preferences.readouts == [.cpu, .network, .memory])
         #expect(!preferences.canAdd(.disk))

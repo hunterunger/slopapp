@@ -151,13 +151,13 @@ public enum MenuBarText {
 /// between 4% and 6%) is shown at most every `settleSeconds`.
 public struct RedrawPolicy: Sendable {
     /// Percent readouts: a change of at least this many points shows at once. Smaller ones
-    /// are the jitter of a Mac at rest (4%, 7%, 5%…) and wait.
-    public var percentStep: Int = 5
+    /// (a Mac at rest wobbling between 4% and 11%) wait for the periodic catch-up.
+    public var percentStep: Int = 8
     /// GPU utilisation jumps around with every animation on screen, so it needs a bigger
     /// change to redraw at once.
-    public var gpuStep: Int = 10
+    public var gpuStep: Int = 15
     /// Rates: a change by at least this factor shows at once…
-    public var rateFactor: Double = 2
+    public var rateFactor: Double = 3
     /// …unless both values are under this (background chatter of a few KB/s, which
     /// wobbles by large factors every second), or it's a change to or from 0.
     public var rateFloor: Double = 100_000
@@ -169,11 +169,11 @@ public struct RedrawPolicy: Sendable {
 
     public init() {}
 
-    /// How long a small change may wait: 20 s, 30 s at the 5 s interval (Low Power Mode),
-    /// 10 s for people who chose 1 s updates. Each redraw costs 10–17 ms of CPU on macOS 27, so
+    /// How long a small change may wait: 30 s, 60 s at the 5 s interval (Low Power Mode),
+    /// 15 s for people who chose 1 s updates. Each redraw costs 10–17 ms of CPU on macOS 27, so
     /// at rest this is what sets Gauge's cost.
     public static func settleSeconds(for interval: TimeInterval) -> TimeInterval {
-        interval <= 1 ? 10 : interval >= 5 ? 30 : 20
+        interval <= 1 ? 15 : interval >= 5 ? 60 : 30
     }
 
     /// True if `content` should be drawn now; records it as shown when it is.

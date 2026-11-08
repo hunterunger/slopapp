@@ -52,7 +52,9 @@ public enum UpdateInterval: Int, Sendable, Codable, CaseIterable, Identifiable {
 /// the defaults so an older or newer copy of Gauge never loses the rest.
 public struct Preferences: Sendable, Equatable, Codable {
     public static let maxReadouts = 3
-    public static let defaultReadouts: [Readout] = [.cpu, .network]
+    /// CPU only: each menu bar redraw costs macOS 27 tens of milliseconds, and network rates are
+    /// the busiest readout. The rest are a checkbox away in Settings.
+    public static let defaultReadouts: [Readout] = [.cpu]
 
     /// In menu bar order. At most `maxReadouts`, no duplicates.
     public var readouts: [Readout] {
