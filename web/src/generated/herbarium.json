@@ -142,6 +142,17 @@
     "print": "/prints/ruler.webp",
     "source": "https://commons.wikimedia.org/wiki/File:K%C3%B6hler%27s_Medizinal-Pflanzen_in_naturgetreuen_Abbildungen_mit_kurz_erl%C3%A4uterndem_Texte_(Plate_93)_(8232775772).jpg"
   },
+  "shorthand": {
+    "app": "Shorthand",
+    "plant": "Rosmarinus officinalis",
+    "common": "rosemary",
+    "plate": "122",
+    "tile": "#74506A",
+    "icon": "/icons/shorthand.webp",
+    "iconDark": "/icons/shorthand-dark.webp",
+    "print": "/prints/shorthand.webp",
+    "source": "https://commons.wikimedia.org/wiki/File:K%C3%B6hler%27s_Medizinal-Pflanzen_in_naturgetreuen_Abbildungen_mit_kurz_erl%C3%A4uterndem_Texte_(Plate_122)_(8231727669).jpg"
+  },
   "slopapp": {
     "app": "Slopapp",
     "plant": "Tilia cordata",
