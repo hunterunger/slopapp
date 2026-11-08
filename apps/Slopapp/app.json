@@ -7,11 +7,12 @@
   "icon": "layout-grid",
   "menuBarOnly": false,
   "status": "beta",
-  "version": "0.2.0",
-  "build": 2,
+  "version": "0.2.1",
+  "build": 3,
   "minimumMacOS": "14.0",
   "bundleId": "app.slopapp.slopapp",
   "hub": true,
+  "dmg": true,
   "infoPlist": {
     "SlopappFeedURL": "https://hunterunger.github.io/slopapp/feed.json"
   }

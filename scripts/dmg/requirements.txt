@@ -1,0 +1,5 @@
+# dmgbuild lays out the disk image window (icon positions, size, hidden toolbar) by writing
+# the .DS_Store itself, so it needs no Finder and runs on CI. All MIT licensed.
+dmgbuild==1.6.7
+ds_store==1.3.3
+mac_alias==2.2.3

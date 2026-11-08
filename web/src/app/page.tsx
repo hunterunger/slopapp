@@ -164,12 +164,29 @@ export default function Home() {
                   <p className="mt-1.5 max-w-xl leading-relaxed text-text">
                     One small app that installs, updates and removes every app in the collection.
                   </p>
+                  {isBuilt(launcher) && (
+                    <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted">
+                      Open the disk image and drag {brand.name} to Applications. It isn&apos;t notarized yet, so the
+                      first time you open it, macOS stops it: open System Settings &gt; Privacy &amp; Security,
+                      scroll down and click Open Anyway. You only need to do this once.
+                    </p>
+                  )}
                 </div>
                 {isBuilt(launcher) && (
-                  <a href={launcher.downloadUrl} className={buttonPrimary}>
-                    <Download size={17} aria-hidden />
-                    Download{launcher.version ? ` ${launcher.version}` : ""}
-                  </a>
+                  <div className="flex flex-col items-start gap-2.5 sm:items-center">
+                    <a href={launcher.dmgUrl ?? launcher.downloadUrl} className={buttonPrimary}>
+                      <Download size={17} aria-hidden />
+                      Download{launcher.version ? ` ${launcher.version}` : ""}
+                    </a>
+                    {launcher.dmgUrl && (
+                      <a
+                        href={launcher.downloadUrl}
+                        className={`rounded-sm text-sm text-muted underline decoration-line-strong underline-offset-4 hover:text-heading ${focusRing}`}
+                      >
+                        or as a .zip
+                      </a>
+                    )}
+                  </div>
                 )}
               </div>
             </PrintPanel>

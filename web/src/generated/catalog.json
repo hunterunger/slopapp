@@ -46,10 +46,11 @@
       "hub": true,
       "priority": 0,
       "status": "beta",
-      "version": "0.2.0",
-      "build": 2,
+      "version": "0.2.1",
+      "build": 3,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.slopapp",
+      "dmg": true,
       "infoPlist": {
         "SlopappFeedURL": "https://hunterunger.github.io/slopapp/feed.json"
       },
@@ -90,7 +91,8 @@
         }
       ],
       "shotsVersion": "0.2.0-1",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.0/Slopapp.zip"
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.1/Slopapp.zip",
+      "dmgUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.1/Slopapp.dmg"
     },
     {
       "slug": "switchboard",

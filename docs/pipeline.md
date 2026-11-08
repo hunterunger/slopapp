@@ -92,7 +92,16 @@ Logs go to `build/logs/<Name>-{build,test,sign,smoke}.log`.
 tests, optionally signs and notarizes, and attaches `<Name>.zip` to a GitHub Release. The
 website links to `releases/download/<slug>-v<version>/<Name>.zip`. Signing secrets are
 listed at the top of the workflow. Without them, releases are ad-hoc signed and users must
-right-click > Open on first launch.
+click **Open Anyway** in System Settings > Privacy & Security on first launch.
+
+Apps with `"dmg": true` in `app.json` (only the launcher) also get `<Name>.dmg`, built by
+`scripts/dmg.sh` with [dmgbuild](https://github.com/dmgbuild/dmgbuild) (MIT, pinned in
+`scripts/dmg/requirements.txt`, installed into `build/tools/`). The website's launcher button
+points at it; the launcher still installs every app from its zip.
+
+Only the launcher's release is marked **Latest** on GitHub; app releases are published with
+`--latest=false`. So `releases/latest/download/Slopapp.dmg` is a stable link to the newest
+launcher, and other sites can use it.
 
 ## Definition of done for a new app
 

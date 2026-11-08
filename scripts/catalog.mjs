@@ -29,17 +29,20 @@ for (const dir of existsSync(appsDir) ? readdirSync(appsDir, { withFileTypes: tr
 }
 
 // Each app is released under its own tag, <slug>-v<version> (see .github/workflows/release.yml),
-// so link to that tag. "releases/latest" would point at whichever app shipped last.
-const downloadUrl = (app) =>
-  `${brand.repoUrl}/releases/download/${app.slug}-v${app.version}/${app.name}.zip`;
+// so link to that tag. Apps with "dmg": true (the launcher) also ship a disk image.
+const releaseFile = (app, file) => `${brand.repoUrl}/releases/download/${app.slug}-v${app.version}/${file}`;
+const downloads = (app) => ({
+  downloadUrl: releaseFile(app, `${app.name}.zip`),
+  ...(app.dmg && { dmgUrl: releaseFile(app, `${app.name}.dmg`) }),
+});
 const apps = roadmap.map((planned) => {
   const app = built.get(planned.slug);
   built.delete(planned.slug);
-  return app ? { ...planned, ...app, downloadUrl: downloadUrl(app) } : { ...planned, status: "planned" };
+  return app ? { ...planned, ...app, ...downloads(app) } : { ...planned, status: "planned" };
 });
 // Apps built without a roadmap entry still show up.
 for (const app of built.values()) {
-  apps.push({ priority: 3, ...app, downloadUrl: downloadUrl(app) });
+  apps.push({ priority: 3, ...app, ...downloads(app) });
 }
 for (const app of apps) delete app.spec;
 

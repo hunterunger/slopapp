@@ -21,7 +21,10 @@ export type CatalogApp = {
   menuBarOnly?: boolean;
   status: AppStatus;
   version?: string;
+  /** The release's zip. The launcher installs from it too. */
   downloadUrl?: string;
+  /** The release's disk image, for apps that ship one (the launcher). Preferred for downloads. */
+  dmgUrl?: string;
   /** Store screenshots (docs/screenshots.md), for beta+ apps that have a set. */
   shots?: Shot[];
   /** "<app version>-<showcase version>": changes whenever the set is retaken. */

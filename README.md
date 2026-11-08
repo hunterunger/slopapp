@@ -168,8 +168,8 @@ folder has its own README.
 
 ## Get started
 
-1. **[Download the Slopapp launcher](https://hunterunger.github.io/slopapp/)** and drag it to
-   your Applications folder.
+1. **[Download the Slopapp launcher](https://github.com/hunterunger/slopapp/releases/latest/download/Slopapp.dmg)**
+   (a disk image), open it and drag Slopapp to your Applications folder.
 2. Open it, pick the apps you want and click **Install**. Updates arrive in the launcher.
 
 Needs macOS 14 Sonoma or later (Dictate needs macOS 26.4). Each app can also be downloaded on

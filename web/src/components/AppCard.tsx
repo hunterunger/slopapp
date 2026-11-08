@@ -59,7 +59,7 @@ export function AppCard({ app }: { app: CatalogApp }) {
             </p>
             {built && (
               <a
-                href={app.downloadUrl}
+                href={app.dmgUrl ?? app.downloadUrl}
                 className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-action px-3.5 py-1.5 text-sm font-semibold text-on-action transition-colors hover:bg-action-hover ${focusRing}`}
               >
                 <Download size={15} aria-hidden />

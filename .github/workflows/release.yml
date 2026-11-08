@@ -3,7 +3,13 @@
 #   git tag awake-v0.1.0 && git push origin awake-v0.1.0
 #
 # The version must match apps/<Name>/app.json. The zip (and its icon) is attached to a
-# GitHub Release under that tag, which is where the website's download links point.
+# GitHub Release under that tag, which is where the website's download links point. Apps
+# with "dmg": true in app.json (the launcher) also get a <Name>.dmg for people who download
+# them by hand; the launcher itself always installs from the zip.
+#
+# Only the launcher's release is marked Latest, so releases/latest (and
+# releases/latest/download/Slopapp.dmg) always mean the launcher. App releases are
+# published with --latest=false.
 #
 # Then the update feed is regenerated from the latest release of every app (feed.yml,
 # scripts/feed.mjs) and published to the gh-pages branch as feed.json, which is what the
@@ -64,6 +70,8 @@ jobs:
           [ "$VERSION" = "$APP_VERSION" ] || { echo "::error::tag version $VERSION != app.json version $APP_VERSION"; exit 1; }
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dmg=$(jq -r '.dmg // false' "$MANIFEST")" >> "$GITHUB_OUTPUT"
+          echo "hub=$(jq -r '.hub // false' "$MANIFEST")" >> "$GITHUB_OUTPUT"
 
       - name: Import Developer ID certificate
         if: env.HAS_SIGNING == 'true'
@@ -106,18 +114,44 @@ jobs:
           rm "build/$NAME.zip"
           ditto -c -k --keepParent "build/$NAME.app" "build/$NAME.zip"
 
+      # Packed from the stapled app, so the copy inside the image is notarized too.
+      - name: Disk image
+        if: steps.app.outputs.dmg == 'true'
+        env:
+          SLOPAPP_SIGN_IDENTITY: ${{ env.HAS_SIGNING == 'true' && secrets.DEVELOPER_ID_IDENTITY || '-' }}
+        run: scripts/dmg.sh "${{ steps.app.outputs.name }}"
+
+      - name: Notarize disk image
+        if: steps.app.outputs.dmg == 'true' && env.HAS_SIGNING == 'true' && env.HAS_NOTARY == 'true'
+        env:
+          NAME: ${{ steps.app.outputs.name }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          xcrun notarytool submit "build/$NAME.dmg" \
+            --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD" --wait
+          xcrun stapler staple "build/$NAME.dmg"
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           NAME: ${{ steps.app.outputs.name }}
           VERSION: ${{ steps.app.outputs.version }}
+          HUB: ${{ steps.app.outputs.hub }}
         run: |
-          NOTE="Ad-hoc signed: right-click the app and choose Open the first time."
+          NOTE="Not notarized yet: the first time you open $NAME, macOS stops it. Open System Settings > Privacy & Security, scroll down and click Open Anyway. You only need to do this once."
           [ "$HAS_NOTARY" = "true" ] && [ "$HAS_SIGNING" = "true" ] && NOTE="Signed and notarized."
-          gh release create "$GITHUB_REF_NAME" "build/$NAME.zip" "build/$NAME-icon.png" \
+          ASSETS=("build/$NAME.zip" "build/$NAME-icon.png")
+          [ -f "build/$NAME.dmg" ] && ASSETS=("build/$NAME.dmg" "${ASSETS[@]}")
+          # Latest is reserved for the launcher (see the top of this file).
+          LATEST="--latest=false"
+          [ "$HUB" = "true" ] && LATEST="--latest"
+          gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
             --title "$NAME $VERSION" \
             --notes "$NOTE" \
-            --generate-notes
+            --generate-notes \
+            "$LATEST"
 
   # Then the launcher's feed, with this release in it.
   feed:
