@@ -1,0 +1,35 @@
+{
+  "appVersion" : "0.2.0",
+  "date" : "2026-11-08",
+  "shots" : [
+    {
+      "dark" : "hero-dark.webp",
+      "dark1x" : "hero-dark@1x.webp",
+      "height" : 1800,
+      "id" : "hero",
+      "light" : "hero-light.webp",
+      "light1x" : "hero-light@1x.webp",
+      "width" : 2880
+    },
+    {
+      "dark" : "app-dark.webp",
+      "dark1x" : "app-dark@1x.webp",
+      "height" : 1800,
+      "id" : "app",
+      "light" : "app-light.webp",
+      "light1x" : "app-light@1x.webp",
+      "width" : 2880
+    },
+    {
+      "dark" : "updates-dark.webp",
+      "dark1x" : "updates-dark@1x.webp",
+      "height" : 1800,
+      "id" : "updates",
+      "light" : "updates-light.webp",
+      "light1x" : "updates-light@1x.webp",
+      "width" : 2880
+    }
+  ],
+  "showcaseVersion" : 1,
+  "slug" : "slopapp"
+}
