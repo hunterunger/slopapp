@@ -140,7 +140,6 @@ public final class DictationController {
     @ObservationIgnored private let feedback: DictationFeedback
     @ObservationIgnored private let history: HistoryStore
     @ObservationIgnored private let settings: DictateSettings
-    @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
     @ObservationIgnored private let previewInterval: Duration
     /// Called when a dictation ends by itself (error, cancel), so the trigger forgets it.
     @ObservationIgnored public var onEnded: () -> Void = {}
@@ -162,8 +161,7 @@ public final class DictationController {
     public init(audio: AudioCapturing, models: ModelHost, delivery: TextDelivering, processor: TranscriptProcessor,
                 microphone: MicrophoneAuthorizing, frontApp: @escaping () -> FrontApp?, feedback: DictationFeedback,
                 history: HistoryStore, settings: DictateSettings,
-                previewInterval: Duration = .milliseconds(900),
-                sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
+                previewInterval: Duration = .milliseconds(900)) {
         self.audio = audio
         self.models = models
         self.delivery = delivery
@@ -174,7 +172,6 @@ public final class DictationController {
         self.history = history
         self.settings = settings
         self.previewInterval = previewInterval
-        self.sleep = sleep
     }
 
     public var isBusy: Bool { isStarting || phase.isBusy }
@@ -380,9 +377,8 @@ public final class DictationController {
         feedback.notify(message, fix: fix)
         onEnded()
         errorResetTask?.cancel()
-        let sleep = self.sleep
         errorResetTask = Task { [weak self] in
-            try? await sleep(.seconds(4))
+            try? await Task.sleep(for: .seconds(4))
             guard let self, !Task.isCancelled, case .error = self.phase else { return }
             self.phase = .idle
             self.problemFix = nil
@@ -395,10 +391,11 @@ public final class DictationController {
         previewTask?.cancel()
         guard settings.showLivePreview else { return }
         let interval = previewInterval
-        let sleep = self.sleep
         previewTask = Task { [weak self] in
             while !Task.isCancelled {
-                do { try await sleep(interval) } catch { return }
+                // Task.sleep, not a stored sleep closure: calling an async closure value in
+                // this loop aborts on Swift 6.3 ("freed pointer was not the last allocation").
+                do { try await Task.sleep(for: interval) } catch { return }
                 guard let self, !Task.isCancelled, self.phase == .recording, generation == self.generation else { return }
                 let samples = self.audio.recentSamples(seconds: Self.previewWindowSeconds)
                 guard samples.count >= Self.minimumSamples else { continue }
