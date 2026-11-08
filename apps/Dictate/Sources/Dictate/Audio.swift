@@ -22,6 +22,13 @@ final class AudioRecorder: AudioCapturing {
 
     func start() throws {
         guard sink == nil else { return }
+        restarts = 0
+        try startEngine(continuing: nil)
+    }
+
+    /// A fresh engine on the current microphone. `continuing` keeps what was already recorded
+    /// (a restart after the audio setup changed mid-recording).
+    private func startEngine(continuing previous: AudioSink?) throws {
         // A fresh engine each time picks up the current default device and format.
         let engine = AVAudioEngine()
         let input = engine.inputNode
@@ -30,7 +37,8 @@ final class AudioRecorder: AudioCapturing {
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw RecorderError.noInput
         }
-        let sink = AudioSink(inputFormat: format)
+        let sink = previous ?? AudioSink(inputFormat: format)
+        if previous != nil { sink.reset(inputFormat: format) }
         // Small buffers keep the ring's reaction to the voice tight.
         input.installTap(onBus: 0, bufferSize: 2048, format: format) { buffer, _ in
             sink.process(buffer)
@@ -44,14 +52,48 @@ final class AudioRecorder: AudioCapturing {
         }
         self.engine = engine
         self.sink = sink
-        meterTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            let next = sink.nextFeatures()
-            MainActor.assumeIsolated { self?.features = next }
+        if meterTimer == nil {
+            meterTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let sink = self.sink else { return }
+                    self.features = sink.nextFeatures()
+                }
+            }
         }
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
         configObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onInterruption() }
+            MainActor.assumeIsolated { self?.audioSetupChanged() }
+        }
+    }
+
+    /// Restarts after an audio setup change, at most this many times per recording.
+    private static let maxRestarts = 3
+    private var restarts = 0
+
+    /// The audio hardware changed: a sound started playing (our own start sound does it),
+    /// the default device or its format changed, or the microphone went away. The engine stops
+    /// itself for most of these. Keep recording on whatever microphone is there now; only
+    /// when there's none (or it keeps failing) does the recording end, with what was said so far.
+    private func audioSetupChanged() {
+        guard let engine, let sink else { return }
+        if engine.isRunning { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        self.engine = nil
+        restarts += 1
+        guard restarts <= Self.maxRestarts else {
+            Diagnostics.record("audio setup changed: gave up after \(Self.maxRestarts) restarts")
+            onInterruption()
+            return
+        }
+        do {
+            try startEngine(continuing: sink)
+            Diagnostics.record("audio setup changed: recording continues (restart \(restarts))")
+        } catch {
+            Diagnostics.record("audio setup changed: no microphone (\(error.localizedDescription))")
+            onInterruption()
         }
     }
 
@@ -61,9 +103,11 @@ final class AudioRecorder: AudioCapturing {
 
     @discardableResult
     func stop() -> [Float] {
-        guard let sink, let engine else { return [] }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        guard let sink else { return [] }
+        if let engine {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+        }
         meterTimer?.invalidate()
         meterTimer = nil
         if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
@@ -97,14 +141,25 @@ private nonisolated final class AudioSink: @unchecked Sendable {
     private var current = AudioFeatures()
     private let targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioDecoder.sampleRate,
                                              channels: 1, interleaved: false)!
-    private let converter: AVAudioConverter?
+    private var converter: AVAudioConverter?
 
     init(inputFormat: AVAudioFormat) {
         converter = AVAudioConverter(from: inputFormat, to: targetFormat)
         samples.reserveCapacity(Int(AudioDecoder.sampleRate) * 60)
     }
 
+    /// A new input format after a restart; the samples so far are kept.
+    func reset(inputFormat: AVAudioFormat) {
+        let next = AVAudioConverter(from: inputFormat, to: targetFormat)
+        lock.lock()
+        converter = next
+        lock.unlock()
+    }
+
     func process(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        let converter = self.converter
+        lock.unlock()
         guard let converter else { return }
         let ratio = targetFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1)
