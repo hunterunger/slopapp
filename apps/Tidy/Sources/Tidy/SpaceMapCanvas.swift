@@ -341,26 +341,34 @@ struct MapInteraction: View {
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Space map blocks")
-            .accessibilityChildren {
-                ZStack(alignment: .topLeading) {
-                    ForEach(Array(cache.tiles.enumerated()).filter { $0.element.level == 1 }, id: \.offset) { _, tile in
-                        if let item = cache.item(for: tile) {
-                            Rectangle()
-                                .frame(width: tile.rect.width, height: tile.rect.height)
-                                .offset(x: tile.rect.minX, y: tile.rect.minY)
-                                .accessibilityLabel(label(item))
-                                .accessibilityAddTraits(.isButton)
-                                .accessibilityAction { space.selection = [item.id] }
-                                .accessibilityAction(named: "Open") { MapActions.primary(model, item) }
-                                .accessibilityAction(named: space.isChecked(item) ? "Uncheck" : "Check") {
-                                    space.setChecked(item, !space.isChecked(item))
-                                }
-                                .accessibilityAction(named: "Show in Finder") { if let url = space.url(of: item) { Finder.reveal([url]) } }
-                                .accessibilityAction(named: "Quick Look") { model.previewURL = space.url(of: item) }
-                        }
-                    }
+            .accessibilityChildren { accessibleBlocks }
+    }
+
+    /// One VoiceOver element per top-level block, placed over it. (Split out of `body` so the
+    /// compiler type-checks it in reasonable time.)
+    private var accessibleBlocks: some View {
+        let blocks = cache.tiles.indices.filter { cache.tiles[$0].level == 1 }
+        return ZStack(alignment: .topLeading) {
+            ForEach(blocks, id: \.self) { index in accessibleBlock(cache.tiles[index]) }
+        }
+    }
+
+    @ViewBuilder private func accessibleBlock(_ tile: MapTile) -> some View {
+        let space = model.space
+        if let item = cache.item(for: tile) {
+            Rectangle()
+                .frame(width: tile.rect.width, height: tile.rect.height)
+                .offset(x: tile.rect.minX, y: tile.rect.minY)
+                .accessibilityLabel(label(item))
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { space.selection = [item.id] }
+                .accessibilityAction(named: "Open") { MapActions.primary(model, item) }
+                .accessibilityAction(named: space.isChecked(item) ? "Uncheck" : "Check") {
+                    space.setChecked(item, !space.isChecked(item))
                 }
-            }
+                .accessibilityAction(named: "Show in Finder") { if let url = space.url(of: item) { Finder.reveal([url]) } }
+                .accessibilityAction(named: "Quick Look") { model.previewURL = space.url(of: item) }
+        }
     }
 
     private func item(at point: CGPoint) -> MapItem? {

@@ -173,11 +173,14 @@ func millis(_ d: Duration) -> Double {
 /// Release builds are several times faster than the debug builds `swift test` makes.
 func budget(release: Double, debug: Double) -> Double {
     #if DEBUG
-    return debug
+    return debug * ciSlack
     #else
-    return release
+    return release * ciSlack
     #endif
 }
+
+/// Shared CI runners are much slower than a real Mac: time budgets get 4x headroom there.
+let ciSlack: Double = ProcessInfo.processInfo.environment["CI"] == nil ? 1 : 4
 
 /// The fixture folder, if make-fixtures.sh has been run.
 func fixture(_ name: String) -> URL? {

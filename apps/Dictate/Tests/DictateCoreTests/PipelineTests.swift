@@ -38,9 +38,11 @@ struct ModelHostTests {
         engine.loadDelay = .milliseconds(30)
         let host = ModelHost(engines: [.parakeet: engine], selected: v3, retention: .oneHour, sleep: neverSleep)
         #expect(host.state == .unloaded)
-        async let a: Void = host.prepare()
-        async let b: Void = host.prepare()
-        _ = try await (a, b)
+        // Tasks, not `async let`: awaiting throwing async lets together aborts the Swift 6.2
+        // runtime on CI ("freed pointer was not the last allocation").
+        let a = Task { try await host.prepare() }
+        let b = Task { try await host.prepare() }
+        _ = try await (a.value, b.value)
         #expect(engine.loadCount == 1)
         #expect(host.state == .ready)
     }
@@ -50,10 +52,8 @@ struct ModelHostTests {
         engine.installed = [v3.key]
         engine.transcriptDelay = .milliseconds(20)
         let host = ModelHost(engines: [.parakeet: engine], selected: v3, retention: .oneHour, sleep: neverSleep)
-        async let one = host.transcribe([1])
-        async let two = host.transcribe([2])
-        async let three = host.transcribe([3])
-        _ = try await (one, two, three)
+        let runs = [[Float(1)], [2], [3]].map { samples in Task { try await host.transcribe(samples) } }
+        for run in runs { _ = try await run.value }
         #expect(engine.transcribeCount == 3)
         #expect(engine.maxConcurrent == 1)
     }

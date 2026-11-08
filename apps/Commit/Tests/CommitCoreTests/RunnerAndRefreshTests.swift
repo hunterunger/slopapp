@@ -167,10 +167,10 @@ import Testing
         try await Task.sleep(for: .milliseconds(300)) // let the stream start
         let wrote = clock.now
         try repo.write("a.txt", "changed\n")
-        for _ in 0..<40 where refreshedAt == nil { try await Task.sleep(for: .milliseconds(50)) }
+        for _ in 0..<Int(40 * ciSlack) where refreshedAt == nil { try await Task.sleep(for: .milliseconds(50)) }
         let at = try #require(refreshedAt)
         #expect(seen == ["a.txt"])
-        #expect(at - wrote < .milliseconds(1500))
+        #expect(at - wrote < .milliseconds(1500 * ciSlack))
         print("COMMIT_PERF edit_to_refresh_ms=\(String(format: "%.0f", millis(at - wrote)))")
     }
 

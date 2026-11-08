@@ -169,8 +169,8 @@ struct LibraryWindow: View {
         if let id = selectedSnippet?.id { duplicateAction = { duplicate(id) } }
         var deleteAction: (() -> Void)?
         if !selection.isEmpty && listFocused { deleteAction = { deleteSelection() } }
-        let group: SnippetGroup? = groupID.flatMap { model.library.group($0) }
         let model = self.model
+        let group: SnippetGroup? = groupID.flatMap { model.library.group($0) }
         return LibraryActions(
             newSnippet: { newSnippet() },
             newGroup: { newGroup() },
