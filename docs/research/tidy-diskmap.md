@@ -584,46 +584,46 @@ The rules the build must keep, each with a unit test:
 
 The test step walks this list item by item (fixtures only).
 
-- [ ] Scope pull-down: Home Folder (default), startup disk, other local disks (from
+- [x] Scope pull-down: Home Folder (default), startup disk, other local disks (from
       `TIDY_VOLUMES` in test mode), Recent, Choose Folder… (any folder); drop a folder on
       the page to map it.
-- [ ] Startup disk: Data volume walked with firmlinked paths, the system volume as one
+- [x] Startup disk: Data volume walked with firmlinked paths, the system volume as one
       locked "macOS" tile, mount points skipped, nothing counted twice.
-- [ ] Parallel `getattrlistbulk` walker behind a `DirectoryReader` protocol; dataless
+- [x] Parallel `getattrlistbulk` walker behind a `DirectoryReader` protocol; dataless
       materialization off on its threads; private size only for partial clones.
-- [ ] Budgets met: 200k synthetic tree < 150 ms warm; 1 M < 1 s; first map < 500 ms; Stop
+- [ ] Budgets met (all but the 1 M walk, 1.4–1.6 s here; see Build notes): 200k synthetic tree < 150 ms warm; 1 M < 1 s; first map < 500 ms; Stop
       < 100 ms; 5 M fake tree peak < 400 MB, retained < 150 MB; idle CPU < 0.2 %.
-- [ ] Results grow while scanning (≤ 4 updates/s), unfinished folders marked "+"; Stop
+- [x] Results grow while scanning (≤ 4 updates/s), unfinished folders marked "+"; Stop
       keeps a partial map labelled as such.
-- [ ] Nested treemap (2 levels, header bands, `Spacing.xs` insets, `Radius` tokens) drawn
+- [x] Nested treemap (2 levels, header bands, `Spacing.xs` insets, `Radius` tokens) drawn
       in one `Canvas`, at 120 Hz while hovering; tiles < 4×4 pt merged.
-- [ ] List and map share hover and selection; the details strip shows the hovered or
+- [x] List and map share hover and selection; the details strip shows the hovered or
       selected item at a fixed height.
-- [ ] Drill down (double-click, Return, `⌘↓`, header band) and up (`⌘↑`, breadcrumb);
+- [x] Drill down (double-click, Return, `⌘↓`, header band) and up (`⌘↑`, breadcrumb);
       Back and Forward (`⌘[` / `⌘]`).
-- [ ] "N smaller items" opens (re-reads that one folder) and its items can be checked; the
+- [x] "N smaller items" opens (re-reads that one folder) and its items can be checked; the
       group itself can't.
-- [ ] Volume bar for disk scopes: Mapped / Other used space / Purgeable (separate, dashed,
+- [x] Volume bar for disk scopes: Mapped / Other used space / Purgeable (separate, dashed,
       explained) / Free; "Not mapped" tile at the disk root; folder totals with "+" when
       partial.
-- [ ] Sizes on disk; hard links and full clones counted once and marked; dataless counted
+- [x] Sizes on disk; hard links and full clones counted once and marked; dataless counted
       as 0 with "in iCloud" in the details; sparse and compressed explained in the details.
-- [ ] Checked-items tray: running "N checked · up to X", a popover with Uncheck, Show in
+- [x] Checked-items tray: running "N checked · up to X", a popover with Uncheck, Show in
       Finder, Quick Look; nested checks collapse to the outer folder.
-- [ ] Move to Trash… confirms (names, count, "up to"), moves through `TrashService`, sizes
+- [x] Move to Trash… confirms (names, count, "up to"), moves through `TrashService`, sizes
       update in place, Put Back and `⌘Z` restore them; another volume's items go to that
       volume's Trash.
-- [ ] Safety refusals, each unit-tested: system paths, package insides, iCloud Drive and
+- [x] Safety refusals, each unit-tested: system paths, package insides, iCloud Drive and
       CloudStorage contents, Mail and Messages, virtual items, changed-since-scan check;
       apps route to Uninstall….
-- [ ] Without Full Disk Access: notice, locked partial rows, Allow…, "Rescan to include"
+- [x] Without Full Disk Access: notice, locked partial rows, Allow…, "Rescan to include"
       after it's granted.
-- [ ] Reveal in Finder (`⇧⌘R`), Quick Look (`⌘Y`), Space = check, every action in a menu
+- [x] Reveal in Finder (`⇧⌘R`), Quick Look (`⌘Y`), Space = check, every action in a menu
       with its shortcut; context menus are text only.
-- [ ] VoiceOver: the list names every row with its size and state; map tiles are labelled
+- [ ] VoiceOver (built; `drive tree` not run, screen locked): the list names every row with its size and state; map tiles are labelled
       elements with Open, Check, Show in Finder and Quick Look actions; `scripts/drive tree`
       shows 0 `[unlabeled]`.
-- [ ] Light and dark, active and inactive window, Reduce Motion; screenshots from fixtures
+- [ ] Light and dark (done, offscreen renders), active window and Reduce Motion (not yet: screen locked); screenshots from fixtures
       only.
 
 ## Open questions (owner's call)
@@ -696,6 +696,174 @@ The test step walks this list item by item (fixtures only).
   [Healey: Maybe the fastest disk usage program on macOS](https://healeycodes.com/maybe-the-fastest-disk-usage-program-on-macos),
   [filesystem-dev list on fts vs bulk](https://mail-archive.com/filesystem-dev@lists.apple.com/msg00265.html),
   and our own benchmark above.
+
+## Build notes (2026-11-07)
+
+Built in `apps/Tidy` (steps 3–4 of the dev cycle for a feature). Everything ran on synthetic
+trees under `/tmp/tidy-test` and Tidy's test mode; no real file of the owner's was scanned,
+shown or moved, and the real-home benchmark wasn't run (see Budgets).
+
+### What's built
+
+- **Core (`Sources/TidyCore/Map/`)**: `DirectoryReader` protocol, with `BulkDirectoryReader`
+  (`getattrlistbulk`, parsed by the returned-attributes bitmap, one 128 KB buffer per thread,
+  `openat` fallback past `PATH_MAX`) and `DatalessPolicy` (`setiopolicy_np` materialization
+  off, per scanner thread only). `MapScanner`: dedicated `Thread`s (3–6 by core count), a
+  shared LIFO work stack, one store commit per folder, running totals rolled up as each folder
+  is read, a pending counter per folder so "final" is exact, hard links and full clones
+  counted once (first reached, owner recorded so a rescan can count them again), partial
+  clones flagged, dataless items never read (0 on disk, logical size tallied as "in iCloud"),
+  packages one item (contents walked without nodes), mount points / other devices / test-mode
+  disk stand-ins skipped, excluded (protected) folders kept as locked partial rows, Stop
+  between bulk calls with no unfinished folder ever marked final, and Rescan This Folder /
+  Show Package Contents splicing a subtree back in. `MapStore`: 64-byte nodes and a name
+  arena in `mmap`ed chunks (`Chunks.swift`), all folders but only the top 64 files ≥ 1 MB per
+  folder. `MapLayout` (two levels over the existing `Treemap.layout`, now O(1) per step),
+  hit-testing and arrow-key neighbours. `CheckTray` (nesting rules), `MapSafety` (locks and the
+  last-moment check), `MapVolume`/`VolumeFigures`/`TestVolumes`/`SystemVolumes`/`Firmlinks`/
+  `MapPaths`, `SmallItemsReader`, `ItemFacts`. `TrashPolicy` gained `allowedVolumeRoots` (a
+  disk's contents, never its root or system folders).
+- **UI (`Sources/Tidy/SpaceMap*.swift`)**: scope pull-down (Home Folder, startup disk, other
+  disks, Recent with Clear Recent, Choose Folder…) with a used/free line, Full Disk Access /
+  "Not mapped" / network notes, folder drop on the intro and the map; results page from the
+  first moment of the scan (progress "N items · X", Stop on Esc, "Stopped: partial map" with
+  Rescan); volume bar (Mapped / Other used / Purgeable dashed / Free, each with help);
+  breadcrumbs with Back, Forward and Up; the list (checkbox, icon, name, bar, size with "+",
+  lock / link / clone / iCloud badges, chevrons, "N smaller items" row that opens); the map
+  (one `Canvas` for tiles and labels, a second light `Canvas` for the hover highlight so
+  pointing never redraws the tiles, header bands, hatched groups, check badges, selection
+  ring, accessibility children per first-level tile with Open/Check/Show in Finder/Quick Look);
+  the fixed-height details strip; Get Info popover; the tray button and popover; the confirm
+  alert; result line with Put Back and Open Trash. Menus: File ▸ Map Folder… (`⇧⌘O`, section
+  aware), Get Info `⌘I`, Copy Path `⌥⌘C`, Rescan / Rescan This Folder `⌘R` / `⌥⌘R`; View ▸
+  Open `⌘↓`, Enclosing Folder `⌘↑`, Back `⌘[`, Forward `⌘]`, Show Package Contents, Show
+  Checked Items `⇧⌘K`.
+- **Test data**: `tidy-tool fixtures <root> --map` (map content in the fixture home: exports,
+  a sparse VM image, clones, a hard link, 3,000 small files, a `node_modules`, iCloud and
+  CloudStorage stand-ins, a photo library, Mail; plus stand-in disks and the `TIDY_VOLUMES`
+  value), `tidy-tool map-tree` (synthetic benchmark tree), `TIDY_VOLUMES` in
+  `TidyEnvironment`, `FakeFileSystem` (DSL) and `GeneratedFileSystem` (procedural, millions of
+  files without disk) in `TidyFixtures`, and a test-mode-only `TIDY_SNAPSHOT_SCRIPT` that steps
+  the UI and renders its windows offscreen (used because the screen was locked, below).
+
+### The nine problems in the old code
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | Nested checks double counted | `CheckTray`: a checked folder absorbs checks inside it; checking inside a checked folder is refused with a note. Tested. |
+| 2 | A class and a `URL` per node; a folder's children all held until it finished | 64-byte nodes in mmap'd chunks, names in an arena, paths rebuilt from ids; per folder only the top 64 files ≥ 1 MB are ever copied. A folder of 1 M files: 1 node chunk (tested). |
+| 3 | iCloud downloads during scans | Materialization off on every scanner thread (and small-item and Get Info reads); dataless folders never read; tested with the fake and on a real thread (`getiopolicy_np`). |
+| 4 | Nothing shown until done; Stop threw the map away | Results page at once, snapshots up to 4×/s, Stop keeps the partial map ("+", "Stopped: partial map"). |
+| 5 | Home or a folder in it only | Any folder, the startup disk (Data volume with firmlinked paths, macOS volume as one locked block), other disks. |
+| 6 | "N smaller items" a dead end | Opens: one bulk re-read of that folder, biggest first, each file checkable. |
+| 7 | One-level map | Two levels with header bands and `Spacing.xs` insets. |
+| 8 | No context for totals | Volume bar, "Not mapped" and "macOS" blocks, "+" for lower bounds, iCloud and unreadable counts in the details. |
+| 9 | A SwiftUI view per tile | One `Canvas` (plus a hover overlay), cached layout, hit-testing over rects. |
+
+### Decisions made while building
+
+- **Back and Forward sit in the map's navigation bar** (left of Up and the breadcrumbs), not
+  in the window toolbar: Tidy's toolbar always has the module's Start Over chevron, and three
+  look-alike chevrons side by side read badly. Still `⌘[` / `⌘]` in the View menu.
+- **Private size is read on demand** (Get Info, partial clones only), never during the scan.
+  Partial clones count at their allocated size in the map (we can't group them); Get Info
+  shows "Frees at least X".
+- **Show Checked Items is `⇧⌘K`**; `⇧⌘O` is section aware (Map Folder… in Space Map).
+- **No automatic release after 10 minutes away**: losing a map you were working with is
+  worse than holding ~25–40 MB; Start Over releases it (the owner's 150 MB allowance holds).
+- **Top-level home folders stay locked** in the map (existing `TrashPolicy` rule); their
+  contents can be checked.
+- **Space has no menu key equivalent** (it would steal Space from the search field); Check
+  and Uncheck are in every context menu, Space works in the list and the map.
+- **Layout runs on the main actor**, cached per folder, version and size: 0.15 ms for 2,067
+  tiles in release, so a background hop would only add a frame of lag while resizing.
+- **Time Machine disks**: only non-browsable volumes are hidden; detecting a backup disk
+  without reading it is not verified.
+- **Drop**: a `dropDestination` on the intro and the map (the intro keeps the module hero
+  layout rather than becoming a `DropZone`).
+- **Test mode**: the excluded Trash fixture folder shows the "Needs Full Disk Access" lock
+  reason (only in test mode; the real `~/.Trash` is a protected folder).
+
+### Budgets (2026-11-07, this Mac: Apple silicon, macOS 27.2, internal SSD, load 7–23 from other builders)
+
+| Metric | Budget | Measured | |
+|---|---|---|---|
+| Walk, synthetic 200k tree, warm | < 150 ms | **82 ms** (6 threads; 84 ms with 3, 111 ms with 4); 230–250 ms when other processes had evicted the vnode cache | pass (warm) |
+| Walk, synthetic 1 M tree | < 1 s | **1.43–1.58 s** (6 threads), the app 1.57 s | **miss**: this Mac's vnode cache holds 263,168 vnodes, so 1 M files can't be warm. A single-threaded walk asking only for names takes 5.3 s and `du` 10 s on the same tree; ours is 6.5× faster than `du`, and more threads don't help (kernel-bound: 4.4 s of system time). |
+| Real home, cold | < 10 s | not run | the brief forbids scanning the owner's files; `tidy-tool bench map ~` prints counts only if the owner wants it |
+| First map after Scan | < 500 ms | **99 ms** (fixture), 216–248 ms (200k and 1 M trees) | pass (test-mode timing log) |
+| Updates while scanning | ≤ 4/s | 4/s (250 ms poll, first at 120 ms); each copies one folder and its biggest children | pass |
+| Stop | < 100 ms | ≤ 0.2 ms (`bench stop`, 4 points in a 2 M generated walk); unit test at 4 random points | pass |
+| Memory, 5 M files | peak < 400, retained < 150 MB | generated 5.09 M files / 300k folders / 899k nodes: **peak +66 MB, retained +67 MB**, +1 MB after release | pass |
+| Memory, 1 M files | retained < 60 MB above baseline | store 1–5 MB for the 1 M tree (11k nodes); 1.2 M generated files with 300k folders: 22 MB. The app with a 1 M map shown, settled: 84–94 MB vs 58 MB idle (+26–36 MB including the drawn UI) | pass |
+| Idle with the map shown | CPU < 0.2 % | 0.15 % (22 ms over 15 s, 1 M map) | pass |
+| Idle after Start Over | < 120 MB | 68.9 MB | pass |
+| Layout, ≤ 2,000 tiles | < 4 ms | 0.15 ms (2,067 tiles, release) | pass |
+| Drawing and hover at 120 Hz | < 8.3 ms/frame | not measured | the screen was locked (no display, no Instruments trace); hover redraws only the overlay canvas |
+
+A note on memory while drawing: with the display locked, CoreAnimation keeps every frame's
+surfaces until the window is composited, so the app showed ~280 MB of "graphics" footprint
+while the map updated and dropped back seconds after it stopped. A 40-line SwiftUI app
+redrawing a `Canvas` 4× a second does exactly the same (280 MB, back to 61 MB), so it's the
+locked display, not the map. Re-check on an unlocked screen.
+
+### Spikes
+
+- **Purgeable formula** (volume figures only, no names): `volumeAvailableCapacity` 17.97 GB
+  matches diskutil's container free space and `df`; `…ForImportantUsage` 28.60 GB, so
+  purgeable = 10.63 GB. The system volume's `ATTR_VOL_SPACEUSED` (13.76 GB) matches diskutil's
+  "Volume Used Space" for `/`. The bar uses exactly these.
+- **Removable-disk prompt, exFAT, another disk's Trash: not run.** `hdiutil` is refused in
+  this sandbox ("Operation not permitted"), and mounting a disk while the owner is away could
+  leave a Files and Folders prompt on their screen. Listing disks reads only URL resource
+  values (no files on them). The parser takes only the attributes a file system returns (exFAT
+  returns no clone ids or extended flags, which then read as 0). Moves on another disk go
+  through `FileManager.trashItem`; any failure other than permission or "gone" becomes "This
+  disk has no Trash. Use Show in Finder to delete it there." To check by hand: a USB stick or an
+  exFAT image under `/tmp/tidy-test`, map it, move a synthetic file, Put Back.
+- **Network disks**: not checked (no share available).
+
+### Tests and gates
+
+- **Tests**: 143 Swift Testing tests in 24 suites (55 new in 7 map suites: scanner on the fake
+  and on real temp folders, layout, tray, safety, volumes, paths), all passing.
+- `scripts/check.sh Tidy --perf` (final run): Tidy lint, icon, **test**, bundle, smoke and perf
+  **pass** (launch 130 ms, first window 354 ms, idle CPU 0.017 %, 60.6 MB; load 14). The run
+  still exits 1 on one **SlopKit** test (`Clipboard paster on quit › restoresPendingRightAway`),
+  which belongs to another builder's uncommitted `TextInsertion` work and wasn't touched here.
+- **Walkthrough with `scripts/drive`: blocked.** The screen was locked for the whole session
+  (`CGSSessionScreenIsLocked`), so Accessibility sees no windows, `scripts/drive tree` can't
+  list controls and ScreenCaptureKit can't capture. Instead, the real release build was stepped
+  through every v1 flow with the test-mode snapshot script and its windows rendered offscreen
+  (inactive-window look; the sidebar's material renders black offscreen): intro (home, startup
+  disk, disk with bar), scanning, stopped partial map, startup disk with macOS and Not mapped,
+  nested map with header bands, hover highlight of block and folder, details strip, smaller
+  items opened and checked, nesting note, Get Info for a clone and a hard link, iCloud lock,
+  sparse file, absorbed check, tray popover, confirm alert, moved with sizes updated, Put Back
+  (`⌘Z`) restoring, another disk's move, a read-only disk, light and dark. Two crashes and
+  several layout defects were found and fixed this way (below). **Still to do on an unlocked
+  screen**: `scripts/drive` walkthrough, `scripts/drive tree` for `[unlabeled]` controls,
+  active-window shots, real hover and drag-drop, Reduce Motion.
+
+Defects found in the offscreen pass and fixed: a crash pairing old tiles with new items in
+the accessibility children (the layout is now an immutable value per render); an infinite
+recursion in Scan; list rows squeezing names ("Ap…ns"); canvas labels truncated by a guess
+(now measured, middle-truncated, cached); narrow header bands showing only a size (the name
+wins); the previous map's move result lingering on a new map; the list pane collapsing to
+260 pt.
+
+Screenshots (not committed): `/tmp/tidy-test/shots/a/*.png` (light: intro, map, nested,
+smaller items, checks, tray, confirm, moved, undone), `/tmp/tidy-test/shots/b/*.png` (dark:
+home, hover, Get Info, iCloud, sparse, absorbed, disks, read-only, scanning, stopped),
+`/tmp/tidy-test/shots/c/*.png` (stopped partial map), `/tmp/tidy-test/shots/d/d01-1m.png`.
+
+### Deferred
+
+- Pinch to open/close, colour by kind, saved scans and export (owner: never), FSEvents
+  refresh, Open in Terminal / Disk Utility, live free-space refresh, whole-map search: `later`
+  as in the inventory.
+- Time Machine disk detection beyond "not browsable"; the removable-disk, exFAT and network
+  checks above (need a disk or share and the owner nearby).
 
 ## Blind test log
 

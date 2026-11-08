@@ -90,8 +90,8 @@ public struct TrashService: Sendable {
     public let policy: TrashPolicy
     public let trasher: Trasher
 
-    public init(environment: TidyEnvironment, trasher: Trasher? = nil) {
-        policy = TrashPolicy(environment: environment)
+    public init(environment: TidyEnvironment, trasher: Trasher? = nil, allowedVolumeRoots: [URL] = []) {
+        policy = TrashPolicy(environment: environment, allowedVolumeRoots: allowedVolumeRoots)
         self.trasher = trasher ?? environment.trashDirectory.map { FolderTrasher(folder: $0) as Trasher } ?? SystemTrasher()
     }
 

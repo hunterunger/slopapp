@@ -20,6 +20,12 @@ public enum TrashRefusal: Error, Equatable, Sendable, CustomStringConvertible {
     }
 }
 
+/// Every refusal's message (the map tells them apart from "this disk has no Trash").
+public enum TrashRefusalMessages {
+    public static let all: Set<String> = Set([TrashRefusal.notAbsolute, .outsideAllowedFolders, .protectedFolder, .appleItem,
+                                              .notAnApp].map(\.description))
+}
+
 /// The last line of defence before anything is moved to the Trash.
 public struct TrashPolicy: Sendable {
     public let environment: TidyEnvironment
@@ -27,14 +33,25 @@ public struct TrashPolicy: Sendable {
     private let appDirectories: [[String]]
     private let systemLibrary: [String]?
     private let trash: [String]?
+    /// Other disks whose contents may be moved (to that disk's own Trash): the space map
+    /// sets this for the disk it maps. Never the disk itself or its system folders.
+    private let volumeRoots: [[String]]
 
-    public init(environment: TidyEnvironment) {
+    public init(environment: TidyEnvironment, allowedVolumeRoots: [URL] = []) {
         self.environment = environment
         home = Self.components(environment.home)
         appDirectories = environment.applicationDirectories.map(Self.components)
         systemLibrary = environment.systemLibrary.map(Self.components)
         trash = environment.trashDirectory.map(Self.components)
+        volumeRoots = allowedVolumeRoots.map(Self.components).filter { !$0.isEmpty }
     }
+
+    /// Folders at the top of a disk that belong to macOS or another system.
+    static let volumeSystemNames: Set<String> = [
+        ".trashes", ".spotlight-v100", ".fseventsd", ".documentrevisions-v100", ".temporaryitems",
+        ".pkinstallsandboxmanager", ".pkinstallsandboxmanager-systemsoftware", ".mobilebackups", "backups.backupdb",
+        "system volume information", "$recycle.bin", ".hfs+ private directory data\r", ".journal", ".journal_info_block",
+    ]
 
     /// Folders inside the home folder that are never removed themselves (their contents can be).
     static let protectedHomePaths: Set<String> = [
@@ -91,6 +108,14 @@ public struct TrashPolicy: Sendable {
         }
         if let systemLibrary, parts.count > systemLibrary.count + 1, parts.starts(with: systemLibrary) {
             try Self.rejectApple(parts.dropFirst(systemLibrary.count))
+            return
+        }
+        for root in volumeRoots where parts.starts(with: root) {
+            guard parts.count > root.count else { throw TrashRefusal.protectedFolder }
+            let inside = parts.dropFirst(root.count)
+            if inside.contains(where: { Self.volumeSystemNames.contains($0.lowercased()) || $0 == ".Trash" }) {
+                throw TrashRefusal.protectedFolder
+            }
             return
         }
         throw TrashRefusal.outsideAllowedFolders

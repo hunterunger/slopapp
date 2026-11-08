@@ -214,32 +214,27 @@ public enum Treemap {
     /// values get empty rectangles.
     public static func layout(_ values: [Double], in rect: CGRect) -> [CGRect] {
         var result = Array(repeating: CGRect.zero, count: values.count)
-        let total = values.filter { $0 > 0 }.reduce(0, +)
+        let total = values.reduce(0) { $1 > 0 ? $0 + $1 : $0 }
         guard total > 0, rect.width > 0, rect.height > 0 else { return result }
         let scale = Double(rect.width * rect.height) / total
         let order = values.indices.filter { values[$0] > 0 }.sorted { values[$0] > values[$1] }
         var remaining = rect
-        var row: [Int] = []
-        var index = 0
+        // The current row: a range of `order`, with its area sum, smallest and largest.
+        var rowStart = 0
+        var sum = 0.0, minA = Double.infinity, maxA = 0.0
 
-        func areas(_ indices: [Int]) -> [Double] { indices.map { values[$0] * scale } }
-
-        func worst(_ indices: [Int], side: Double) -> Double {
-            let a = areas(indices)
-            guard let maxA = a.max(), let minA = a.min(), side > 0 else { return .infinity }
-            let sum = a.reduce(0, +)
+        func worst(sum: Double, minA: Double, maxA: Double, side: Double) -> Double {
+            guard side > 0, sum > 0, minA > 0 else { return .infinity }
             return max(side * side * maxA / (sum * sum), (sum * sum) / (side * side * minA))
         }
 
-        func place(_ indices: [Int]) {
-            let a = areas(indices)
-            let sum = a.reduce(0, +)
+        func place(_ range: Range<Int>, sum: Double) {
             if remaining.width >= remaining.height {
                 // Lay the row down the left side.
                 let width = remaining.height > 0 ? CGFloat(sum) / remaining.height : 0
                 var y = remaining.minY
-                for (i, area) in zip(indices, a) {
-                    let height = width > 0 ? CGFloat(area) / width : 0
+                for i in order[range] {
+                    let height = width > 0 ? CGFloat(values[i] * scale) / width : 0
                     result[i] = CGRect(x: remaining.minX, y: y, width: width, height: height)
                     y += height
                 }
@@ -248,8 +243,8 @@ public enum Treemap {
             } else {
                 let height = remaining.width > 0 ? CGFloat(sum) / remaining.width : 0
                 var x = remaining.minX
-                for (i, area) in zip(indices, a) {
-                    let width = height > 0 ? CGFloat(area) / height : 0
+                for i in order[range] {
+                    let width = height > 0 ? CGFloat(values[i] * scale) / height : 0
                     result[i] = CGRect(x: x, y: remaining.minY, width: width, height: height)
                     x += width
                 }
@@ -258,18 +253,24 @@ public enum Treemap {
             }
         }
 
+        var index = 0
         while index < order.count {
-            let item = order[index]
+            let area = values[order[index]] * scale
             let side = Double(min(remaining.width, remaining.height))
-            if row.isEmpty || worst(row + [item], side: side) <= worst(row, side: side) {
-                row.append(item)
+            let empty = index == rowStart
+            if empty || worst(sum: sum + area, minA: min(minA, area), maxA: max(maxA, area), side: side)
+                <= worst(sum: sum, minA: minA, maxA: maxA, side: side) {
+                sum += area
+                minA = min(minA, area)
+                maxA = max(maxA, area)
                 index += 1
             } else {
-                place(row)
-                row = []
+                place(rowStart..<index, sum: sum)
+                rowStart = index
+                sum = 0; minA = .infinity; maxA = 0
             }
         }
-        if !row.isEmpty { place(row) }
+        if rowStart < order.count { place(rowStart..<order.count, sum: sum) }
         return result
     }
 }

@@ -11,6 +11,8 @@ import Foundation
 ///     TIDY_TRASH_DIR=/tmp/tidy-test/Trash           where "Move to Trash" moves things (default: $TIDY_HOME/.Trash)
 ///     TIDY_SYSTEM_LIBRARY=/tmp/tidy-test/Library    stands in for /Library (default in test mode: none)
 ///     TIDY_RUNNING_IDS=com.example.App,...          bundle ids to treat as running (test mode only)
+///     TIDY_VOLUMES=path|name|kind|total|free...     stand-in disks for Space Map (test mode only; see
+///                                                    `TestVolumes`). Without it, test mode lists no disks.
 public struct TidyEnvironment: Sendable, Equatable {
     public var home: URL
     public var applicationDirectories: [URL]
@@ -26,6 +28,9 @@ public struct TidyEnvironment: Sendable, Equatable {
     public var usesLaunchServices: Bool
     /// Problems with the test-mode setup, shown in the window so they're never silent.
     public var warnings: [String]
+    /// Test mode: the stand-in disks for Space Map (`TIDY_VOLUMES`). Real disks are never
+    /// listed in test mode.
+    public var testVolumes: String?
 
     public init(home: URL, applicationDirectories: [URL], systemLibrary: URL?, trashDirectory: URL?,
                 isTestMode: Bool, simulatedRunningBundleIDs: Set<String> = [], usesLaunchServices: Bool,
@@ -81,7 +86,7 @@ public struct TidyEnvironment: Sendable, Equatable {
         let trash = value("TIDY_TRASH_DIR").map(directory) ?? home.appendingPathComponent(".Trash", isDirectory: true)
         let running = Set((value("TIDY_RUNNING_IDS") ?? "").split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
-        return TidyEnvironment(
+        var result = TidyEnvironment(
             home: home,
             applicationDirectories: apps,
             systemLibrary: value("TIDY_SYSTEM_LIBRARY").map(directory),
@@ -91,6 +96,13 @@ public struct TidyEnvironment: Sendable, Equatable {
             usesLaunchServices: false,
             warnings: warnings
         )
+        result.testVolumes = value("TIDY_VOLUMES") ?? ""
+        return result
+    }
+
+    /// The disks Space Map offers: the stand-ins in test mode, else the mounted volumes.
+    public var volumeSource: any VolumeSource {
+        isTestMode ? TestVolumes(testVolumes ?? "") : SystemVolumes()
     }
 
     /// `home/Library`.

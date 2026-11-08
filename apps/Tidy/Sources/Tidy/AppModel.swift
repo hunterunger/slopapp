@@ -510,7 +510,7 @@ final class AppModel {
         case .junk: return stage(.junk) == .review && cleanup.pane != .trash && !actionableJunk.isEmpty
         case .large: return !actionableLarge.isEmpty
         case .maintenance: return stage(.maintenance) == .review && maintenance.pane == .backgroundItems && !actionableLaunchItems.isEmpty
-        case .spaceLens: return !space.checkedNodes.isEmpty
+        case .spaceLens: return !space.tray.isEmpty && space.status != .disconnected
         case .smartScan: return false
         }
     }
@@ -597,10 +597,11 @@ final class AppModel {
 
     func move(_ urls: [URL], section: SidebarSection, stopIfFirstFails: Bool = false,
               appName: String? = nil, keptAppName: String? = nil, leftInPlace: [Leftover] = [],
-              clearsRedo: Bool = true) {
+              clearsRedo: Bool = true, service: TrashService? = nil, refused: [TrashFailure] = []) {
         Task {
             await performMove(urls, section: section, stopIfFirstFails: stopIfFirstFails, appName: appName,
-                              keptAppName: keptAppName, leftInPlace: leftInPlace, clearsRedo: clearsRedo)
+                              keptAppName: keptAppName, leftInPlace: leftInPlace, clearsRedo: clearsRedo,
+                              service: service, refused: refused)
         }
     }
 
@@ -609,14 +610,21 @@ final class AppModel {
     @discardableResult
     func performMove(_ urls: [URL], section: SidebarSection, stopIfFirstFails: Bool = false,
                      appName: String? = nil, keptAppName: String? = nil, leftInPlace: [Leftover] = [],
-                     clearsRedo: Bool = true, reportsFailures: Bool = true) async -> ActionResult? {
+                     clearsRedo: Bool = true, reportsFailures: Bool = true, service: TrashService? = nil,
+                     refused: [TrashFailure] = []) async -> ActionResult? {
         guard !urls.isEmpty, !isMoving else { return nil }
         isMoving = true
         let items = urls.map { (url: $0, bytes: knownSize($0)) }
-        let trash = self.trash
-        let result = await Task.detached(priority: .userInitiated) {
-            trash.moveToTrash(items, stopIfFirstFails: stopIfFirstFails)
+        // Space Map passes its own service: it may move things on the disk it maps (to that
+        // disk's Trash).
+        let trash = service ?? (section == .spaceLens ? space.trash ?? self.trash : self.trash)
+        let otherDisk = section == .spaceLens && space.isOtherVolume
+        var result = await Task.detached(priority: .userInitiated) {
+            var result = trash.moveToTrash(items, stopIfFirstFails: stopIfFirstFails)
+            if otherDisk { result.failures = result.failures.map(Self.otherDiskFailure) }
+            return result
         }.value
+        result.failures = refused + result.failures
         isMoving = false
         let movedApp = appName != nil && result.moved.first?.original == urls.first
         let outcome = ActionResult(section: section, moved: result.moved, failures: result.failures,
@@ -633,6 +641,16 @@ final class AppModel {
         }
         afterChange(movedPaths: Set(result.moved.map(\.original.path)), section: section)
         return outcome
+    }
+
+    /// On another disk, a failed move usually means it has no Trash: never fall back to
+    /// deleting, say what to do instead.
+    nonisolated static func otherDiskFailure(_ failure: TrashFailure) -> TrashFailure {
+        let message = failure.message
+        let known = ["It's no longer there.", "Something with the same name is already there."]
+        guard !known.contains(message), !message.hasPrefix("You don't have permission"),
+              !TrashRefusalMessages.all.contains(message) else { return failure }
+        return TrashFailure(url: failure.url, message: "This disk has no Trash. Use Show in Finder to delete it there.")
     }
 
     /// The best size Tidy knows for something about to move.
@@ -908,7 +926,7 @@ final class AppModel {
         case .junk: return (cleanup.pane == .trash ? cleanup.trashSelection : junkSelection).map { URL(fileURLWithPath: $0) }
         case .large: return largeSelection.map { URL(fileURLWithPath: $0) }
         case .maintenance: return maintenance.selection.map { URL(fileURLWithPath: $0) }
-        case .spaceLens: return space.selection.map { URL(fileURLWithPath: $0) }
+        case .spaceLens: return space.selection.sorted().compactMap { space.url(forID: $0) }
         case .smartScan: return []
         }
     }
@@ -932,7 +950,7 @@ final class AppModel {
         case .junk: startCleanupScan()
         case .large: startLargeScan()
         case .maintenance: startMaintenanceScan()
-        case .spaceLens: space.scan(environment: environment, hasFullDiskAccess: hasFullDiskAccess)
+        case .spaceLens: startSpaceScan()
         case .smartScan: startSmartScan()
         }
     }
@@ -947,7 +965,11 @@ final class AppModel {
 
     func stage(_ section: SidebarSection) -> ModuleStage { stages[section] ?? .intro }
 
-    func setStage(_ stage: ModuleStage, for section: SidebarSection) { stages[section] = stage }
+    func setStage(_ stage: ModuleStage, for section: SidebarSection) {
+        // Leaving the map's results drops the map and its memory.
+        if section == .spaceLens, stage == .intro, stages[section] != .intro { space.reset() }
+        stages[section] = stage
+    }
 }
 
 /// A counter shared between a scan and the UI polling it.

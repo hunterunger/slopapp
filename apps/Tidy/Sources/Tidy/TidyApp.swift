@@ -32,6 +32,14 @@ struct TidyCommands: Commands {
     let info: AppInfo
     @Environment(\.openWindow) private var openWindow
 
+    private var scanTitle: String {
+        switch model.section {
+        case .uninstall, .leftovers: "Scan Again"
+        case .spaceLens: model.space.hasMap ? "Rescan" : "Scan"
+        default: "Scan"
+        }
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
             Button("About Tidy") { AboutWindow.show(info: info) }
@@ -39,8 +47,12 @@ struct TidyCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("Choose App…") { model.chooseApp() }
                 .keyboardShortcut("o")
-            Button("Choose Folder for Large Files…") { model.chooseLargeFolder() }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
+            // Follows the section: map a folder in Space Map, look for large files elsewhere.
+            Button(model.section == .spaceLens ? "Map Folder…" : "Choose Folder for Large Files…") {
+                if model.section == .spaceLens { model.chooseSpaceFolder() } else { model.chooseLargeFolder() }
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(model.isModalUp)
         }
         CommandGroup(after: .newItem) {
             Divider()
@@ -60,10 +72,19 @@ struct TidyCommands: Commands {
             Button("Quick Look") { model.quickLookSelection() }
                 .keyboardShortcut("y")
                 .disabled(model.selectedURLs.isEmpty)
+            Button("Get Info") { model.mapGetInfo() }
+                .keyboardShortcut("i")
+                .disabled(!model.mapHasSingleSelection || model.isModalUp)
+            Button("Copy Path") { model.copyMapPaths(model.space.selection) }
+                .keyboardShortcut("c", modifiers: [.command, .option])
+                .disabled(model.section != .spaceLens || model.selectedURLs.isEmpty)
             Divider()
-            Button(model.section == .uninstall || model.section == .leftovers ? "Scan Again" : "Scan") { model.rescan() }
+            Button(scanTitle) { model.rescan() }
                 .keyboardShortcut("r")
                 .disabled(model.isModalUp)
+            Button("Rescan This Folder") { model.space.rescanCurrentFolder() }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+                .disabled(!model.mapIsBrowsable || model.space.isScanning || model.isModalUp)
             Button("Empty Trash…") { model.emptyTrashCommand() }
                 .keyboardShortcut(.delete, modifiers: [.command, .shift])
                 .disabled(model.isModalUp)
@@ -90,6 +111,25 @@ struct TidyCommands: Commands {
                 .disabled(model.isModalUp)
         }
         CommandGroup(before: .sidebar) {
+            // Space Map navigation.
+            Button("Open") { model.mapOpenSelection() }
+                .keyboardShortcut(.downArrow, modifiers: .command)
+                .disabled(!model.mapCanOpenSelection)
+            Button("Enclosing Folder") { model.space.goUp() }
+                .keyboardShortcut(.upArrow, modifiers: .command)
+                .disabled(!model.mapIsBrowsable || !model.space.canGoUp)
+            Button("Back") { model.space.back() }
+                .keyboardShortcut("[")
+                .disabled(!model.mapIsBrowsable || model.space.backStack.isEmpty)
+            Button("Forward") { model.space.forward() }
+                .keyboardShortcut("]")
+                .disabled(!model.mapIsBrowsable || model.space.forwardStack.isEmpty)
+            Button("Show Package Contents") { model.mapShowPackageContents() }
+                .disabled(model.mapSelectedPackage == nil || model.space.isScanning)
+            Button("Show Checked Items") { model.space.showingTray = true }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+                .disabled(!model.mapIsBrowsable || model.space.tray.isEmpty)
+            Divider()
             ForEach(Array(SidebarSection.sidebar.enumerated()), id: \.element) { index, section in
                 Button(section.title) { model.section = section }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
@@ -131,6 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppModel.shared.start()
+        SnapshotScript.runIfRequested(AppModel.shared)
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

@@ -32,9 +32,14 @@ with one big round button, then result tiles with Review, then a checkable revie
   **Leftovers** tab lists files from apps that are no longer installed; nothing is checked
   until you check it.
 - **Large & Old** (`⌘5`): big files in your home folder, filtered by size, last use and kind.
-- **Space Map** (`⌘6`): a map of what takes space in your home folder (or a folder in it):
-  a list biggest-first beside a map of rectangles sized by space on disk. Open folders to go
-  deeper (`⌘↑` goes back up), check items and move them to the Trash (asks first).
+- **Space Map** (`⌘6`): what takes space in your home folder, any folder, the startup disk
+  or another disk. A list biggest-first beside a two-level map of blocks sized by space on
+  disk; it draws while it scans, and Stop keeps what was counted. Open folders (or a folder's
+  "smaller items") to go deeper, check items anywhere (the tray at the bottom collects them),
+  then Move to Trash (asks first; another disk's items go to that disk's Trash). Hard links and
+  clones count once; iCloud placeholders are never downloaded; synced folders, package
+  insides, Mail and Messages are shown but never moved; apps go to the Uninstaller. Scans
+  live only in memory.
 
 Everything except emptying the Trash goes to the Trash after you review it, and Put Back
 (`⌘Z`, or File ▸ Recently Moved to Trash…) brings it back while it's still there, even after
@@ -78,7 +83,9 @@ Launch agents count if they run a program inside the app. See `Sources/TidyCore`
 `⌘1`–`⌘6` modules · Return = the big button · `⌘R` scan · `⇧⌘⌫` Empty Trash… · `⌘F` search · `⌘0` show the window · `⌘O` choose an app · `⇧⌘O` choose a folder for large files ·
 Space check/uncheck the selected rows · `⌘⌫` Move to Trash (asks first for uninstalls) ·
 `⌘Z` / `⇧⌘Z` undo/redo a move (File ▸ Recently Moved to Trash… for earlier ones) ·
-`⌘Y` Quick Look · `⇧⌘R` Show in Finder · `⌘↑` up a folder in Space Map
+`⌘Y` Quick Look · `⇧⌘R` Show in Finder · Space Map: `⇧⌘O` Map Folder…, `⌘↓`/Return open,
+`⌘↑` up, `⌘[` / `⌘]` back/forward, `⌘I` Get Info, `⌥⌘C` Copy Path, `⌥⌘R` Rescan This Folder,
+`⇧⌘K` Show Checked Items, Esc stops a scan, arrow keys move between blocks in the map
 
 ## Develop
 
@@ -105,6 +112,14 @@ tasks never run: they're appended to `/tmp/tidy-test/tidy-maintenance-log.txt`
 prompt). Emptying the Trash in test mode erases only inside `TIDY_TRASH_DIR`.
 `swift run -c release --package-path apps/Tidy tidy-tool bench` times every scan read-only
 and prints only counts, sizes and timings.
+
+Space Map in test mode: `tidy-tool fixtures /tmp/tidy-test/mac --map` adds map content and
+stand-in disks and prints a `TIDY_VOLUMES` value (stand-in disks with made-up names and
+capacities; real disks are never listed in test mode). `tidy-tool map-tree [root] --files N`
+builds a synthetic tree; `tidy-tool bench map|fake|stop|layout` measures the walk, memory on a
+generated 5 M-file tree, Stop and the layout. `TIDY_SNAPSHOT_SCRIPT` / `TIDY_SNAPSHOT_DIR`
+(test mode only) step the UI from a script and render the windows to PNGs, for design review
+when Accessibility can't see the screen (see `Sources/Tidy/SnapshotScript.swift`).
 
 Logic lives in `Sources/TidyCore` (tested), fixtures in `Sources/TidyFixtures`, views and
 wiring in `Sources/Tidy`.

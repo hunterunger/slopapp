@@ -68,7 +68,7 @@ struct MainView: View {
         ), presenting: model.pendingSpaceMove) { plan in
             Button("Move to Trash") {
                 model.pendingSpaceMove = nil
-                model.move(plan.urls, section: .spaceLens)
+                model.performSpaceMove(plan)
             }
             Button("Cancel", role: .cancel) { model.pendingSpaceMove = nil }
         } message: { plan in
