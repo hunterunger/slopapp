@@ -43,6 +43,10 @@ public struct ClipboardPaster {
         let sendPaste = self.sendPaste
         let writeDelay = self.writeDelay
         let restoreDelay = self.restoreDelay
+        // Registered before anything waits, so quitting at any point after our write (even
+        // before ⌘V goes out) still puts the user's clipboard back.
+        let token = UUID()
+        if !saved.isEmpty { Self.pending[token] = (pasteboard, saved, ours) }
         return Task { @MainActor in
             try? await Task.sleep(for: writeDelay)
             sendPaste()
@@ -51,8 +55,6 @@ public struct ClipboardPaster {
                 completion?(.leftCopied)
                 return .leftCopied
             }
-            let token = UUID()
-            Self.pending[token] = (pasteboard, saved, ours)
             try? await Task.sleep(for: restoreDelay)
             guard Self.pending.removeValue(forKey: token) != nil else {
                 completion?(.restored)   // already put back by `restorePendingNow()`
