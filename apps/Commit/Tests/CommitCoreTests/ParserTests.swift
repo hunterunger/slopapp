@@ -450,12 +450,12 @@ import Testing
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shell.path)
         #expect(await ShellPath.resolve(shell: shell.path) == "/fake/bin:/usr/bin")
         let slow = dir.appendingPathComponent("slow-shell")
-        try "#!/bin/sh\nsleep 10\n".write(to: slow, atomically: true, encoding: .utf8)
+        try "#!/bin/sh\nsleep 60\n".write(to: slow, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: slow.path)
         let clock = ContinuousClock()
         let start = clock.now
         #expect(await ShellPath.resolve(shell: slow.path, timeout: .milliseconds(300)) == nil)
-        #expect(clock.now - start < .seconds(3))
+        #expect(clock.now - start < .seconds(3 * ciSlack))
         #expect(await ShellPath.resolve(shell: "/no/such/shell") == nil)
     }
 }

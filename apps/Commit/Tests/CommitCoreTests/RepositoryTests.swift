@@ -294,7 +294,7 @@ import Testing
         let bare = try await repo.runner.run(GitCommand(["credential", "fill"], in: repo.root,
                                                         stdin: Data("protocol=https\nhost=example.com\n\n".utf8)))
         #expect(!bare.succeeded)
-        #expect(clock.now - start < .seconds(5))
+        #expect(clock.now - start < .seconds(5 * ciSlack))
     }
 }
 

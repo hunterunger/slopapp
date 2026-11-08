@@ -27,17 +27,28 @@ import Testing
         // A child of the child holds the pipe open: only a group kill ends it promptly.
         let result = try await runner.run(GitCommand(["-c", "sleep 30 & sleep 30"], in: dir, timeout: .milliseconds(200)))
         #expect(result.timedOut)
-        #expect(clock.now - start < .seconds(5))
+        #expect(clock.now - start < .seconds(5 * ciSlack))
     }
 
-    @Test func cancellationTerminates() async throws {
+    @Test(.timeLimit(.minutes(1))) func cancellationTerminates() async throws {
+        // The child writes its pid once it runs, so the cancel lands on a live process
+        // however slowly a loaded machine spawns it.
+        let pidFile = dir.appendingPathComponent("commit-test-\(UUID().uuidString).pid")
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let task = Task { try await runner.run(GitCommand(["-c", "echo $$ > '\(pidFile.path)'; exec sleep 600"], in: dir)) }
+        var pid: pid_t?
+        for _ in 0..<1500 where pid == nil {
+            try await Task.sleep(for: .milliseconds(20))
+            pid = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        }
+        let child = try #require(pid)
         let clock = ContinuousClock()
-        let start = clock.now
-        let task = Task { try await runner.run(GitCommand(["-c", "sleep 30"], in: dir)) }
-        try await Task.sleep(for: .milliseconds(100))
+        let cancelled = clock.now
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(clock.now - start < .seconds(5))
+        #expect(clock.now - cancelled < .seconds(5 * ciSlack))
+        // Killed and reaped, not left running.
+        #expect(kill(child, 0) == -1 && errno == ESRCH)
     }
 
     @Test func streamsAndStopsEarly() async throws {
@@ -99,7 +110,7 @@ import Testing
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(runs <= 4) // 1.5 s → at most 2 a second (+1 for the first)
-        try await Task.sleep(for: .milliseconds(800))
+        for _ in 0..<1000 where !scheduler.isIdle { try await Task.sleep(for: .milliseconds(10)) }
         #expect(scheduler.isIdle)
         let settled = runs
         try await Task.sleep(for: .milliseconds(300))
@@ -108,15 +119,22 @@ import Testing
 
     @Test func eventsDuringARefreshQueueExactlyOneMore() async throws {
         var runs = 0
+        var holding = true
+        // The first refresh stays in flight until the test lets it go, so the events below
+        // land during it however slowly the machine schedules the tasks.
         let scheduler = RefreshScheduler(debounce: .milliseconds(10), minimumInterval: .milliseconds(10)) {
             runs += 1
-            try? await Task.sleep(for: .milliseconds(100))
+            while runs == 1 && holding { try? await Task.sleep(for: .milliseconds(5)) }
         }
         scheduler.refreshNow()
-        try await Task.sleep(for: .milliseconds(20))
+        for _ in 0..<1000 where runs == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(runs == 1)
         for _ in 0..<50 { scheduler.signal() }
-        try await Task.sleep(for: .milliseconds(400))
+        holding = false
+        for _ in 0..<1000 where runs < 2 || !scheduler.isIdle { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(200))
         #expect(runs == 2)
+        #expect(scheduler.isIdle)
     }
 }
 

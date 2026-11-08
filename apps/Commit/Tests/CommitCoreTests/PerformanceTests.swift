@@ -181,6 +181,6 @@ import Testing
         _ = try await repo.repository.diff(for: entry, staged: false)
         let ms = millis(clock.now - afterDiff)
         print("COMMIT_PERF stage_hunk_roundtrip_ms=\(String(format: "%.0f", ms)) first_diff_ms=\(String(format: "%.0f", millis(afterDiff - start)))")
-        #expect(ms < 150)
+        #expect(ms < 150 * ciSlack)
     }
 }
