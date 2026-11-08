@@ -40,9 +40,7 @@ final class AudioRecorder: AudioCapturing {
         let sink = previous ?? AudioSink(inputFormat: format)
         if previous != nil { sink.reset(inputFormat: format) }
         // Small buffers keep the ring's reaction to the voice tight.
-        input.installTap(onBus: 0, bufferSize: 2048, format: format) { buffer, _ in
-            sink.process(buffer)
-        }
+        input.installTap(onBus: 0, bufferSize: 2048, format: format, block: Self.tap(into: sink))
         engine.prepare()
         do {
             try engine.start()
@@ -66,6 +64,13 @@ final class AudioRecorder: AudioCapturing {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.audioSetupChanged() }
         }
+    }
+
+    /// The tap block. It runs on Core Audio's realtime thread, so it must not inherit this
+    /// class's main-actor isolation: a closure written inside a method here would, and Swift
+    /// stops the app when it then runs off the main thread. Built in a nonisolated function.
+    private nonisolated static func tap(into sink: AudioSink) -> AVAudioNodeTapBlock {
+        { buffer, _ in sink.process(buffer) }
     }
 
     /// Restarts after an audio setup change, at most this many times per recording.
