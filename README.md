@@ -14,6 +14,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/hunterunger/slopapp/actions/workflows/apps.yml"><img src="https://github.com/hunterunger/slopapp/actions/workflows/apps.yml/badge.svg?branch=main" alt="Build status"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-3F5E4E?style=flat-square" alt="macOS 14 or later">
   <img src="https://img.shields.io/badge/Swift-6-C4704F?style=flat-square" alt="Swift 6">
   <img src="https://img.shields.io/badge/license-MIT-5D7E9A?style=flat-square" alt="MIT license">
