@@ -54,6 +54,42 @@
         "SlopappFeedURL": "https://hunterunger.github.io/slopapp/feed.json"
       },
       "dir": "apps/Slopapp",
+      "shots": [
+        {
+          "id": "hero",
+          "title": "Every app in one place",
+          "caption": "Browse the whole collection by what you need it for, and install any app with one click. Free, and no account.",
+          "width": 2880,
+          "height": 1800,
+          "light": "shots/slopapp/hero-light.webp",
+          "dark": "shots/slopapp/hero-dark.webp",
+          "light1x": "shots/slopapp/hero-light@1x.webp",
+          "dark1x": "shots/slopapp/hero-dark@1x.webp"
+        },
+        {
+          "id": "app",
+          "title": "See it before you install it",
+          "caption": "Each app has its own page with screenshots, what's new and similar apps.",
+          "width": 2880,
+          "height": 1800,
+          "light": "shots/slopapp/app-light.webp",
+          "dark": "shots/slopapp/app-dark.webp",
+          "light1x": "shots/slopapp/app-light@1x.webp",
+          "dark1x": "shots/slopapp/app-dark@1x.webp"
+        },
+        {
+          "id": "updates",
+          "title": "Updates in one click",
+          "caption": "Slopapp checks for new versions in the background. Update one app, or all of them at once.",
+          "width": 2880,
+          "height": 1800,
+          "light": "shots/slopapp/updates-light.webp",
+          "dark": "shots/slopapp/updates-dark.webp",
+          "light1x": "shots/slopapp/updates-light@1x.webp",
+          "dark1x": "shots/slopapp/updates-dark@1x.webp"
+        }
+      ],
+      "shotsVersion": "0.2.0-1",
       "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.0/Slopapp.zip"
     },
     {

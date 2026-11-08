@@ -220,6 +220,7 @@ for testing; production is HTTPS-only):
 | `SLOPAPP_INSTALL_DIR` | Install here. Nothing outside it is ever modified; copies elsewhere are shown read-only. |
 | `SLOPAPP_TRASH_DIR` | "Move to Trash" moves here instead of the real Trash. |
 | `SLOPAPP_LIBRARY_DIR` | The Library folder "Also remove its settings and data" cleans. |
+| `SLOPAPP_STATE_DIR` | Icon, screenshot and feed caches go here instead of `~/Library/Caches` and `Application Support`. |
 
 See `apps/Slopapp/README.md` for the scenarios (`bump`, `bad-sha`, `bad-sig`, `corrupt`,
 `offline`).

@@ -15,6 +15,11 @@ struct SlopappApp: App {
     @State private var navigation = Navigation.shared
     private let info = AppInfo.current(fallbackName: "Slopapp")
 
+    init() {
+        // Store screenshots capture the window only; keep the copy out of the menu bar.
+        if Showcase.isActive { MenuBarIcon.isVisible = false }
+    }
+
     var body: some Scene {
         Window("Slopapp", id: WindowID.main) {
             MainWindow(store: store, navigation: navigation)

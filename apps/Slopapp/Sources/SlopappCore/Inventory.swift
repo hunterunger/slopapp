@@ -62,10 +62,13 @@ public struct InstallRoots: Sendable, Equatable {
 
     /// Picks the install folder: `override` (SLOPAPP_INSTALL_DIR) if given, else
     /// /Applications/Slopapp when /Applications is writable, else ~/Applications/Slopapp.
-    /// With an override, nothing outside it is ever modified.
-    public static func resolve(override: URL?, home: URL, isWritable: (URL) -> Bool, folderName: String = "Slopapp") -> InstallRoots {
+    /// With an override, nothing outside it is ever modified. With `searchesElsewhere` false
+    /// (store screenshots), nothing outside it is even looked at.
+    public static func resolve(override: URL?, home: URL, folderName: String = "Slopapp", searchesElsewhere: Bool = true,
+                               isWritable: (URL) -> Bool) -> InstallRoots {
         if let override {
-            return InstallRoots(installDirectory: override, managedDirectories: [], applicationsDirectories: [])
+            return InstallRoots(installDirectory: override, managedDirectories: [], applicationsDirectories: [],
+                                searchesElsewhere: searchesElsewhere)
         }
         let system = URL(fileURLWithPath: "/Applications", isDirectory: true)
         let user = home.appendingPathComponent("Applications", isDirectory: true)
@@ -79,7 +82,8 @@ public struct InstallRoots: Sendable, Equatable {
             install = userFolder
         }
         let otherManaged = [systemFolder, userFolder].filter { $0 != install }
-        return InstallRoots(installDirectory: install, managedDirectories: otherManaged, applicationsDirectories: [system, user])
+        return InstallRoots(installDirectory: install, managedDirectories: otherManaged, applicationsDirectories: [system, user],
+                            searchesElsewhere: searchesElsewhere)
     }
 
     public func location(of url: URL) -> CopyLocation {

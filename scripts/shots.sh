@@ -79,7 +79,7 @@ OUT="$ROOT/web/public/shots/$SLUG"
 command -v cwebp >/dev/null 2>&1 || die "cwebp not found. Install it with: brew install webp"
 
 # --- Capture ---------------------------------------------------------------------------
-APP_PID=""; BACKDROP_PID=""; BACKDROP_WID=""; COPY=""
+APP_PID=""; BACKDROP_PID=""; BACKDROP_WID=""; COPY=""; FIXTURES=""
 cleanup() {
   [[ -n "$APP_PID" ]] && kill "$APP_PID" 2>/dev/null && wait "$APP_PID" 2>/dev/null || true
   [[ -n "$BACKDROP_PID" ]] && kill "$BACKDROP_PID" 2>/dev/null && wait "$BACKDROP_PID" 2>/dev/null || true
@@ -88,6 +88,12 @@ cleanup() {
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$COPY" >/dev/null 2>&1 || true
     rm -rf "$COPY"
     forget_copy_data
+  fi
+  # Apps among an app's fixtures (the launcher's) must never be what macOS opens for their bundle id.
+  if [[ -n "${FIXTURES:-}" ]]; then
+    find "$WORK/fixtures" "$WORK/data" -maxdepth 3 -name '*.app' -type d 2>/dev/null | while IFS= read -r app; do
+      /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$app" >/dev/null 2>&1 || true
+    done
   fi
 }
 
@@ -168,6 +174,7 @@ capture_scene() {
   rm -rf "$data" "$raw" "$ready"
   mkdir -p "$data" "$raw" "$(dirname "$ready")"
   [[ -d "$DIR/showcase" ]] && ditto "$DIR/showcase" "$data"
+  [[ -n "$FIXTURES" ]] && ditto "$FIXTURES" "$data"
   local env_args=(
     "SLOP_SHOWCASE=$scene" "SLOP_SHOWCASE_READY=$ready" "SLOP_SHOWCASE_DATA=$data" "SLOP_APPEARANCE=$appearance"
   )
@@ -209,6 +216,12 @@ if [[ $CAPTURE -eq 1 ]]; then
   GATE="$("$SHOTS" gate)" || die "can't take shots now: $GATE"
   mkdir -p "$WORK/logs"
   prepare_copy
+  # Fixtures an app builds from this repo (apps/<Name>/showcase-fixtures.sh <dir>): made once
+  # per run, before the idle wait, and copied into every scene's {data} like showcase/.
+  if [[ -x "$DIR/showcase-fixtures.sh" ]]; then
+    FIXTURES="$WORK/fixtures"
+    run_logged "$WORK/logs/fixtures.log" "$DIR/showcase-fixtures.sh" "$FIXTURES" || die "$NAME's showcase fixtures failed"
+  fi
   wait_for_owner_away
   LAST_INPUT=$(( $(date +%s) - $(idle_seconds) ))
   for appearance in $APPEARANCES; do

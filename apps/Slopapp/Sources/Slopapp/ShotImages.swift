@@ -50,6 +50,15 @@ final class ShotImages {
         phases[Self.key(url, maxPixel: maxPixel)]
     }
 
+    /// `url` decoded at any size that's in memory, for showing while another size loads.
+    func anySize(of url: URL) -> NSImage? {
+        let prefix = url.absoluteString + "#"
+        for (key, phase) in phases where key.hasPrefix(prefix) {
+            if case .loaded(let image) = phase { return image }
+        }
+        return nil
+    }
+
     /// Starts loading `url` for `app`'s current set, unless it's loaded or loading.
     func load(_ url: URL, app: FeedApp, maxPixel: Int) {
         let key = Self.key(url, maxPixel: maxPixel)

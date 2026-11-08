@@ -17,6 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Store.shared.start()
+        if let scene = Showcase.scene {
+            ShowcaseScenes.run(scene, store: .shared, navigation: .shared)
+        }
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { _ = Task<Void, Never> { @MainActor in await Store.shared.checkIfDue() } }

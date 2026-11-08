@@ -162,6 +162,7 @@ The overrides (testing only; they also allow `file://` and `http://localhost` UR
 | `SLOPAPP_INSTALL_DIR` | Install here; nothing outside it is ever changed |
 | `SLOPAPP_TRASH_DIR` | "Move to Trash" moves here instead |
 | `SLOPAPP_LIBRARY_DIR` | Library folder for "Move to Trash with Its Data" |
+| `SLOPAPP_STATE_DIR` | Caches and the feed cache go here instead of `~/Library` |
 | `SLOPAPP_APPEARANCE` | `light` or `dark`, for screenshots |
 
 "Testbed" is a copy of Awake with its own bundle id, so there are two installable apps.

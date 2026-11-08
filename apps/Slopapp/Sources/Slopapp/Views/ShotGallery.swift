@@ -230,18 +230,15 @@ struct ShotImage: View {
             shape.fill(.quaternary.opacity(0.6))
             switch images.phase(url, maxPixel: maxPixel) {
             case .loaded(let image):
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fill)
-                    .transition(.opacity)
+                picture(image)
             case .failed:
                 Image(systemName: "photo")
                     .font(.largeTitle)
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
             case .loading, nil:
-                EmptyView()
+                // A new size is loading (the window was resized): keep showing the old one.
+                if let image = images.anySize(of: url) { picture(image) }
             }
         }
         .clipShape(shape)
@@ -249,7 +246,16 @@ struct ShotImage: View {
         .contentShape(shape)
         .animation(.easeOut(duration: 0.15), value: images.phase(url, maxPixel: maxPixel) != nil)
         .onAppear { images.load(url, app: app, maxPixel: maxPixel) }
-        .onChange(of: url) { images.load(url, app: app, maxPixel: maxPixel) }
+        // The URL, or the size it's decoded at (a resize can cross a size bucket).
+        .onChange(of: ShotImages.key(url, maxPixel: maxPixel)) { images.load(url, app: app, maxPixel: maxPixel) }
+    }
+
+    private func picture(_ image: NSImage) -> some View {
+        Image(nsImage: image)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fill)
+            .transition(.opacity)
     }
 }
 

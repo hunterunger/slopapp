@@ -132,8 +132,7 @@ final class Store {
 
     init(config: Config = .load()) {
         self.config = config
-        let caches = (try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true))?
-            .appendingPathComponent("app.slopapp.slopapp/icons", isDirectory: true)
+        let caches = Self.stateFolder(.cachesDirectory, config: config)?.appendingPathComponent("icons", isDirectory: true)
         icons = Icons(fetcher: network, urlPolicy: config.urlPolicy, cacheDirectory: caches)
         shotImages = ShotImages(fetcher: network, urlPolicy: config.urlPolicy,
                                 cacheDirectory: caches?.deletingLastPathComponent().appendingPathComponent("shots", isDirectory: true),
@@ -161,6 +160,11 @@ final class Store {
         update(favorites.installable(in: items))
     }
 
+    /// Store screenshots only (Showcase.swift): a "Recently Updated" list, never saved.
+    func showcaseRecentUpdates(_ updates: [RecentUpdate]) {
+        recentUpdates = updates
+    }
+
     private func recordUpdate(_ update: RecentUpdate) {
         recentUpdates.removeAll { $0.slug == update.slug }
         recentUpdates.insert(update, at: 0)
@@ -175,11 +179,20 @@ final class Store {
     private var lastCheckKey: String { "lastCheck:\(config.feedURL.absoluteString)" }
 
     private var cacheFile: URL? {
-        guard let support = try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        else { return nil }
+        guard let support = Self.stateFolder(.applicationSupportDirectory, config: config) else { return nil }
         // Test feeds get their own cache so they never mix with the real catalog.
         let name = config.isDeveloperFeed ? "feed-cache-dev-\(Self.stableKey(config.feedURL.absoluteString)).json" : "feed-cache.json"
-        return support.appendingPathComponent("app.slopapp.slopapp", isDirectory: true).appendingPathComponent(name)
+        return support.appendingPathComponent(name)
+    }
+
+    /// ~/Library/Caches/app.slopapp.slopapp or ~/Library/Application Support/app.slopapp.slopapp,
+    /// or the matching folder in `SLOPAPP_STATE_DIR` (tests and store screenshots).
+    private static func stateFolder(_ kind: FileManager.SearchPathDirectory, config: Config) -> URL? {
+        if let state = config.stateDirectory {
+            return state.appendingPathComponent(kind == .cachesDirectory ? "Caches" : "Application Support", isDirectory: true)
+        }
+        return (try? FileManager.default.url(for: kind, in: .userDomainMask, appropriateFor: nil, create: true))?
+            .appendingPathComponent("app.slopapp.slopapp", isDirectory: true)
     }
 
     private static func stableKey(_ text: String) -> String {

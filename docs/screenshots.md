@@ -68,7 +68,9 @@ scripts/shots.sh Snapper --compose-only   # re-compose the last captures (compos
 - **Adding a set to an app**: write `apps/<Name>/showcase.json` (`version`, `env` with the
   app's test-data variables, `{data}` = the scene's scratch folder; `shots` with `id`, `title`,
   `caption`, `scene`, optional `size` "1160x720", `zoom`, `menuBar`, `callout`), put any fixture
-  files in `apps/<Name>/showcase/` (copied into `{data}`), and handle `Showcase.scene` at launch:
+  files in `apps/<Name>/showcase/` (copied into `{data}`), or, for fixtures built from the repo
+  (the launcher's local feed and older app copies), an executable `apps/<Name>/showcase-fixtures.sh
+  <dir>` that the script runs once per run and copies into every `{data}`; handle `Showcase.scene` at launch:
   load synthetic data, open the window, call `Showcase.ready { [window] }` (SlopKit). The
   composer scales every shot's windows to about three quarters of the frame width, or as tall as
   the frame allows when that comes first, and never magnifies past 2× (the captures are 2×). A

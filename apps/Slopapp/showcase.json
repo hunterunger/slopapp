@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "env": {
+    "SLOPAPP_FEED_URL": "{data}/feed/feed.json",
+    "SLOPAPP_INSTALL_DIR": "{data}/Applications",
+    "SLOPAPP_TRASH_DIR": "{data}/Trash",
+    "SLOPAPP_LIBRARY_DIR": "{data}/Library",
+    "SLOPAPP_STATE_DIR": "{data}/State"
+  },
+  "shots": [
+    {
+      "id": "hero",
+      "scene": "discover",
+      "title": "Every app in one place",
+      "caption": "Browse the whole collection by what you need it for, and install any app with one click. Free, and no account.",
+      "size": "1160x720",
+      "menuBar": false
+    },
+    {
+      "id": "app",
+      "scene": "app",
+      "title": "See it before you install it",
+      "caption": "Each app has its own page with screenshots, what's new and similar apps.",
+      "size": "1160x720",
+      "menuBar": false
+    },
+    {
+      "id": "updates",
+      "scene": "updates",
+      "title": "Updates in one click",
+      "caption": "Slopapp checks for new versions in the background. Update one app, or all of them at once.",
+      "size": "1160x720",
+      "menuBar": false
+    }
+  ]
+}
