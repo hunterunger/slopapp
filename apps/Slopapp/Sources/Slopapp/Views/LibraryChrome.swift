@@ -81,19 +81,7 @@ struct Sidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: Spacing.xs) {
-                // Drags the window from the empty part of the row only, never from under the
-                // buttons, so a click on Back or Forward is always theirs.
-                WindowDragArea().frame(maxWidth: .infinity, maxHeight: .infinity)
-                HistoryButton(symbol: "chevron.left", label: "Back", help: "Back (⌘[)",
-                              enabled: navigation.history.canGoBack) { navigation.goBack() }
-                HistoryButton(symbol: "chevron.right", label: "Forward", help: "Forward (⌘])",
-                              enabled: navigation.history.canGoForward) { navigation.goForward() }
-            }
-            // Forward's chevron ends on the rows' trailing content edge (where the count ends).
-            .padding(.trailing, Sidebar.inset)
-            .frame(height: WindowChrome.buttonRowHeight)
-
+            Color.clear.frame(height: WindowChrome.buttonRowHeight)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(SidebarItem.top) { item in
@@ -120,6 +108,24 @@ struct Sidebar: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Sidebar")
         }
+        // On top, not above: macOS stretches the list's scroll view up under the (empty)
+        // toolbar, and anything underneath a scroll view never gets its clicks.
+        .overlay(alignment: .top) { historyRow }
+    }
+
+    private var historyRow: some View {
+        HStack(spacing: Spacing.xs) {
+            // Drags the window from the empty part of the row only, never from under the
+            // buttons, so a click on Back or Forward is always theirs.
+            WindowDragArea().frame(maxWidth: .infinity, maxHeight: .infinity)
+            HistoryButton(symbol: "chevron.left", label: "Back", help: "Back (⌘[)",
+                          enabled: navigation.history.canGoBack) { navigation.goBack() }
+            HistoryButton(symbol: "chevron.right", label: "Forward", help: "Forward (⌘])",
+                          enabled: navigation.history.canGoForward) { navigation.goForward() }
+        }
+        // Forward's chevron ends on the rows' trailing content edge (where the count ends).
+        .padding(.trailing, Sidebar.inset)
+        .frame(height: WindowChrome.buttonRowHeight)
     }
 
     /// Rows sit this far from the sidebar's edges; their icons are centred under the close button.

@@ -16,11 +16,15 @@ struct MainWindow: View {
                 .frame(width: WindowChrome.sidebarWidth)
             ContentPanel(fill: Color(nsColor: Herbarium.paper)) {
                 VStack(spacing: 0) {
-                    ContentHeader(store: store, navigation: navigation)
+                    Color.clear.frame(height: WindowChrome.panelHeaderHeight)
                     PageStack(store: store, navigation: navigation)
                     // Below the pages, so it shows on app pages too.
                     StatusBanner(store: store)
                 }
+                // On top of the pages, not above them: macOS stretches a page's scroll view
+                // up under the (empty) toolbar, and anything underneath a scroll view never
+                // gets its clicks.
+                .overlay(alignment: .top) { ContentHeader(store: store, navigation: navigation) }
             }
             .padding([.top, .trailing, .bottom], WindowChrome.panelInset)
         }
