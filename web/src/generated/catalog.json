@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-07",
+  "generatedAt": "2026-11-08",
   "brand": {
     "name": "Slopapp",
     "tagline": "Native Mac apps, made with care.",
@@ -868,7 +868,13 @@
       "menuBarOnly": true,
       "priority": 3,
       "favourite": false,
-      "status": "planned"
+      "status": "alpha",
+      "version": "0.1.0",
+      "build": 1,
+      "minimumMacOS": "14.0",
+      "bundleId": "app.slopapp.triggers",
+      "dir": "apps/Triggers",
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/triggers-v0.1.0/Triggers.zip"
     },
     {
       "slug": "shorthand",

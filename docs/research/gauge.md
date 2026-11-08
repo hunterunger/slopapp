@@ -519,3 +519,261 @@ One section per round, newest last. See docs/dev-cycle.md step 5.
 - **GPU usage: in v1** (IOKit `PerformanceStatistics`), hidden if the key ever disappears.
 - **Process list: no Quit or Force Quit.** Show the culprits; the only action is "Open Activity Monitor".
 - **Menu bar: one combined item only** (up to three readouts, fixed width).
+
+## Build notes (2026-11-07)
+
+Built per the owner decisions above: no temperatures or fans, GPU % in v1, no Quit or Force
+Quit (process rows only open Activity Monitor or copy), one combined item with up to three
+readouts. 92 Swift Testing tests in `GaugeCoreTests`. The Mac was locked with its display
+asleep for most of the session; the walkthrough ran once it was unlocked (see "Gates").
+
+### Spike: what one menu bar redraw costs on macOS 27
+
+Measured first, before the panel existed, with a throwaway status item app
+(`NSStatusItem` + timer, `getrusage` for CPU) on this Mac (M4 Max, macOS 27.2):
+
+| Change per update | CPU per update |
+|---|---|
+| Nothing (timer only) | 0.04–0.15 ms |
+| `button.title` | 6–14 ms |
+| `button.attributedTitle` | 14 ms |
+| A text subview (`NSTextField`) | 145 ms (pathological) |
+| A custom `NSView` with `needsDisplay` | 6–12 ms |
+| `button.image` (template, drawing handler) | 6–13 ms |
+| `button.image` (pre-rendered bitmap) | 6–8 ms |
+| Layer `contents` swap | 0.5 ms, but the menu bar never updates |
+
+Why: on Golden Gate every visible change makes AppKit re-render the item into a bitmap once
+per menu bar copy ("replicant": one per Space and display; counted with a swizzle in the
+scratch spike only, never in the app) and send it to MenuBarAgent. Here that's 10 copies at
+~0.4 ms each plus the button's own display and a Core Animation commit. The cost is the same
+for text, attributed text or an image, and it doesn't depend on what's drawn. So each redraw
+costs **10–17 ms of CPU** in the app, cold, at 2 s spacing (the probe's 15-redraw average:
+11–17 ms). That is 10× the ~1 ms the plan assumed, so per the plan: **redraw less often, and
+tell the owner** (see "Needs the owner's call").
+
+### What was built to fit that
+
+- **Ticks are cheap**: one `DispatchSourceTimer` (2 s, 20% leeway) reads CPU ticks, VM stats,
+  memory pressure, swap, network counters, GPU %, disk I/O and load. Measured per source
+  (warm): CPU 5 µs, memory 3 µs, network 80 µs (per-interface reads of the en* interfaces with
+  a link, a full listing every 10 s), GPU 25 µs, disk I/O 16 µs (physical drivers found once a
+  minute; disk images left out), load <1 µs. A whole tick: p50 0.4–0.8 ms, p95 0.5–1.4 ms
+  cold (`GAUGE_PROBE`). With no readouts drawn, Gauge costs 0.07% CPU and exactly 0.50
+  wakeups/s (one per tick).
+- **Redraw only when it matters** (`RedrawPolicy`): the menu bar redraws when the drawn text
+  changes *and* the change is noticeable (CPU or memory by 5 points, GPU by 10, a rate by ×2
+  either way, a rate crossing 100 KB/s to or from idle, any disk or battery change), or when a
+  small change has waited 20 s (10 s at the 1 s setting, 30 s at 5 s).
+- **Menu bar values are smoothed** (`ReadoutSmoother`, exponential average, 4 s time
+  constant): a bursty upload flipping between 0 and 700 KB/s each tick reads as a steady
+  rate instead of redrawing every tick. Big changes jump instead of ramping (CPU/GPU by 15
+  points either way, a rate tripling past 100 KB/s), so a spike is one redraw, not five;
+  rates ease down so a finished download fades. The panel shows each tick's value; the
+  README says so.
+- **One template image** for the whole item, rendered once per change into 1x/2x bitmaps
+  (symbols and text in fixed, right-aligned slots measured once per configuration), so the
+  width never changes and macOS tints it for any menu bar; skipped entirely while the item is
+  hidden.
+- **Processes only while the panel is open**: a sweep at open, 0.3 s later, then every 2 s
+  (it's most of the open panel's cost); `ps` at open, a second later, then every 5 s; top-5 by
+  a single pass, not a sort; app bundle resolved once per process.
+- **Panel graphs are SwiftUI shapes, not `Canvas`**: a `Canvas` filled with any saturated
+  colour (the accent, even resolved to plain RGB) made the open panel allocate ~220 MB of
+  graphics memory on macOS 27 (footprint 264 MB vs 42 MB). Worth knowing for SlopKit: its
+  `Hairline` is a Canvas but draws `separatorColor`, which doesn't trigger it.
+
+### Budgets, measured (release build, this Mac, other agents building in parallel: load 1.4–7.8)
+
+`scripts/drive stats`/`proc_pid_rusage` over 120 s per scenario, 8 s after launch, test
+settings via `GAUGE_READOUTS`/`GAUGE_INTERVAL` (never the real defaults), wakeups =
+`ri_interrupt_wkups + ri_pkg_idle_wkups`, energy = `top -stats power` averaged.
+
+| Scenario | Budget | Measured | Redraws | Wakeups/s | top POWER | Pass |
+|---|---|---|---|---|---|---|
+| A. Defaults (CPU + network, 2 s) | < 0.10% | 0.17%, 0.24%, 0.22%, 0.34% (four runs, load 3, 1.4, 14, 6) | 5.5–13/min | 1.24–2.63 (budget ≤ 0.6) | 0.13–0.29 (≤ 0.3) | **No** (CPU, wakeups); energy yes |
+| B. Three readouts, 2 s (CPU, GPU, network) | < 0.20% | 0.156% | 3/min | 1.04 | 0.09 | Yes |
+| B. (CPU, memory, network) | < 0.20% | 0.182%, 0.162% (final build) | 2.5–4.5/min | 0.83–1.18 | 0.11–0.13 | Yes |
+| B. (disk, battery, memory) | < 0.20% | 0.141% | 3.5/min | 1.08 | 0.08 | Yes |
+| C. Three readouts, 1 s (CPU, GPU, network) | < 0.35% | 0.43% (6 s settle), 0.46% (10 s settle; load 6), 0.52% (final build, load 2–6) | 17–20/min | 3.4–4.4 | 0.38–0.46 | **No** |
+| D. Panel open, 1 s, processes | < 2% | 1.44% final (1.65%; 2.5% before the fixes below) | 9/min | 2.8–3.4 | 1.40–1.60 | Yes |
+| No readouts (ticks only) | | 0.07% | 0 | 0.50 | 0.00 | |
+| Memory, closed | < 35 MB | 22.5 MB | | | | Yes |
+| Memory, panel open | < 50 MB | 36.0–42.3 MB (264 MB before the Canvas fix) | | | | Yes |
+| Memory growth, 1 h | < 2 MB | +0.8 MB (22.5 → 23.3 MB over 61 min; range 22.2–23.3; sampling paused for part of it by display sleep) | | | | Yes |
+| Launch / first status item | < 300 / < 600 ms | 117–149 / 224–280 ms | | | | Yes |
+| House gate `perf.sh` (lowest of 3 × 5 s) | < 0.2% | 0.006–0.092% (2 of 9 runs failed at 0.52%: a redraw in every window) | | | | Yes (flaky on a busy Mac) |
+
+Where A misses: the cost is ~0.07% for ticks plus ~14 ms per redraw. On this busy Mac the
+network readout has real bursts (agents streaming) and CPU moves by 5+ points often, so A
+sees 5–13 redraws a minute; on a quiet Mac it falls to the 20 s settle (3/min), about 0.14%.
+Hitting 0.10% would mean a settle of ~40 s or dropping the network readout from the
+defaults. Wakeups: one per tick from Gauge's timer (0.50/s); the rest come with redraws
+(AppKit's replicant update timer, the Core Animation commit), about 6 per redraw.
+
+System side (recorded, not gated), 120 s each, defaults: **MenuBarAgent 0.025% without
+Gauge, 0.30% with it** (12.5 redraws a minute at load 14), so each redraw costs MenuBarAgent
+about as much again as it costs Gauge (~13 ms). WindowServer 45.3% → 46.3%: within its noise
+(other agents' windows kept it at 45% with the display asleep).
+
+Not measured: Activity Monitor's Energy Impact column (needs a person at an unlocked Mac;
+`top`'s POWER is above), Instruments signposts (the `tick` interval is signposted under
+`app.slopapp.gauge`; the probe's timings are above instead).
+
+### Decisions made while building
+
+1. **Panel layout: an overview row per section plus one detail**, instead of every section
+   stacked. All of them stacked was ~850 pt tall; this is 320 × 653 pt, never scrolls, keeps
+   every live value visible at a glance (each row has its value and a 10-minute mini graph),
+   and the detail has room for a real graph and the top 5. Switching sections: click, 1–6,
+   ← →, Tab. The detail area has one fixed height so switching never resizes the panel.
+2. **The panel is SlopKit's `FloatingPanel`** (non-activating glass) at pop-up-menu level,
+   centred under the item; on macOS 27 it's driven by `expandedInterfaceDelegate`
+   (`statusItem(_:didBegin:)` shows it, the session's end hides it, closing it ourselves
+   cancels the session); on 14–26 by the button's action with a 0.3 s guard against the
+   reopening second click. Guarded with `#if compiler(>=6.4)` + `#available(macOS 27, *)`
+   so CI's Xcode 26 still builds. Hidden item: it opens at the top right of the screen with
+   the pointer (shortcut or relaunch).
+3. **Network counts en* interfaces only** (Wi-Fi, Ethernet, USB/Thunderbolt adapters), so a
+   VPN's traffic isn't counted twice; the primary connection and IP are read from
+   SystemConfiguration when the panel opens and every 5 s while it's open, not with an
+   `NWPathMonitor` running all day (zero cost while closed).
+4. **"Show symbols beside values" was dropped**: symbols are always on (three bare
+   percentages would be ambiguous) and it's one knob fewer.
+5. **Memory readout = memory pressure %**; battery readout = percent with a level symbol (a
+   bolt on the adapter), time left in the panel only (a time would make the slot wide).
+6. **GPU**: `IOAccelerator` → `PerformanceStatistics` → "Device Utilization %" (Intel/AMD
+   "GPU Activity(%)" as a fallback), the busiest GPU wins. Hidden everywhere after 3 failed
+   reads at launch, or 30 in a row if it ever worked. No per-app GPU list (no public API);
+   the GPU detail says so.
+7. **Per-core**: the performance and efficiency core averages (from `hw.perflevelN` and the
+   device tree's `cluster-type`, any number of levels) instead of per-core bars. Bars later.
+8. **After waking**: a baseline is taken at wake and real values appear a second later
+   (no "–" flash); history shows a gap. Sleep and display sleep both pause sampling.
+9. **Process rows**: icon, name, value; no process-count badge (it read as noise; the
+   tooltip and VoiceOver say "4 processes"). Context menu: Copy, Open Activity Monitor.
+   Activity Monitor can't be told which process to select (no API).
+10. **Root processes** come from `/bin/ps -Aceo pid,time,rss,comm` (owner question 4,
+    recommendation taken): their memory is resident size, and the row's tooltip says so.
+11. **Icon**: a dial instrument face-on (case = tile, face bleeding off the bottom, scale cut
+    by 45° ticks, lingonberry needle). All tile colours were taken, so a new one, **tarn
+    `#4F7D78`** (a muted lake teal), was added to `TILES`. Plate: **dandelion, Taraxacum
+    officinale** (Köhler plate 5): a dandelion clock is the gauge children read by blowing on
+    it, and its jagged leaves print well. `herbarium.py check Gauge` passes. The website
+    export (`export_web.py`, writes to `web/`) was not run: out of this build's scope.
+12. **Menu bar "full" hint in Settings** (Flow 2) not built: on macOS 27 an app can't tell
+    whether its item is hidden (occlusion is broken there, FB23349447). Relaunching opens
+    Settings and the shortcut opens the panel anywhere.
+
+### Gates
+
+- `scripts/check.sh Gauge --perf`: **green** on the final build (lint, icon, 92 tests,
+  universal bundle, smoke, perf: launch 123 ms, first status item 229 ms, idle 0.056% lowest
+  window, 22.7 MB). Not every run passes: 2 of 9 perf runs failed the lowest idle window
+  (0.52%) because every 5 s window happened to contain a redraw (heavy CPU and upload bursts
+  from other agents). The gate assumes an app's idle work is steady; Gauge's follows what the
+  Mac is doing. Its "first status item" probe also read -1 once: the owner's menu bar is
+  full, so macOS 27 puts the item behind the overflow arrow.
+- `scripts/lint.sh Gauge`: passes.
+- Walkthrough with `scripts/drive` on the release build, demo data (`GAUGE_DEMO=1`, a test
+  defaults suite), light and dark, once the Mac was unlocked and idle ≥ 60 s (note: `drive
+  key` itself resets the HID idle timer, so the gate is checked before each pass, not
+  between steps). Done: the status item is in the menu bar's accessibility tree; pressing it
+  opens the panel (320 × 653); 1–6 switch sections (CPU, Memory, Network, Disk, Battery,
+  GPU shots); ↓ ↓ selects the second process row; Return closes the panel and shows "Would
+  open Activity Monitor" (`GAUGE_NO_OPEN`); Esc closes the panel; ⌘, opens Settings;
+  Settings checkboxes add Disk free, move it left and remove CPU, and the menu bar redraws
+  with the new layout each time (render log). `drive tree` of the panel, Settings and the
+  menu bar item: **no `[unlabeled]`**. Settings' close button is 16 × 16.
+- Found and fixed in the walkthrough: on macOS 27 an Accessibility press (VoiceOver,
+  scripts) reaches the button's action, not the expanded session, so the action is kept on
+  27 too, de-duplicated against the session; the readout move buttons were 5 × 9 pt hit
+  targets (now 20 × 20).
+- Not walked: the status item's own pixels (the owner's menu bar is full, so it sits behind
+  macOS 27's overflow arrow; its drawing is the same bitmap reviewed offscreen in light and
+  dark via `GAUGE_SNAPSHOT_DIR`), a real click on it (needs the mouse in the menu bar; the
+  27 session path is untested by hand), ⌘C (would write the owner's clipboard; `copyText` is
+  unit-tested), sleep/wake, Low Power Mode and unplugging (system changes). The soak run
+  shows sampling stopping during display sleep (CPU time flat for 30 min).
+- Screenshots (not committed): `/tmp/gauge-test/walk/` (on-screen panel, every section,
+  light and dark; Settings) and `/tmp/gauge-test/snap/` (offscreen renders incl. the menu
+  bar item).
+
+### Design review (design-system §10)
+
+1 one click (or the optional shortcut) ✓ · 2 native: FloatingPanel glass, system controls,
+accent only, no hex, light and dark ✓ · 3 keyboard: 1–6, ← → Tab, ↑ ↓, Return, Esc, ⌘C, ⌘,,
+⌘Q, the panel's menu rows show their shortcuts ✓ · 4 Esc / ⌘, / ⌘Q ✓ · 5 General (launch at
+login, show in menu bar) + About ✓ · 6 HIG copy ✓ · 7 empty states ("Measuring…", "No
+volumes to show.", reserved process rows) ✓ · 8 no permissions ✓ · 9 nothing destructive ✓
+· 10 no network APIs at all ✓ · 11 house budgets ✓, Gauge's own A and C ✗ (above) · 12 no
+`[unlabeled]`, every row has a value ✓ · 13 nothing animates ✓ · 14 Settings position
+(SwiftUI), last panel section remembered ✓ · 15 lint ✓ · 16 16 × 16 window buttons ✓ · 17
+row highlights `Radius.nested(in: 16, padding: 8)`; measured panel radius 15.4 pt ✓ · 18
+`Spacing` tokens only ✓ · 19 overview symbols, detail text and process icons share the
+16 pt leading edge (measured on the 2x shots) ✓ · 20 SlopKit `Hairline` ✓ · 21 primary text
+passes; secondary is the system's `.secondary` on glass (the accepted floor) ✓ · 22 hover,
+selected (accent, grey when inactive), keyboard selection ✓ · 23 middle truncation, fixed
+slots for huge numbers ✓ · 24 fixed detail height, reserved rows, monospaced digits, fixed
+menu bar width ✓ · 25 text-only context menu ✓ · 26 checked in light and dark, on screen and
+offscreen ✓.
+
+### Gap review (v1 scope)
+
+- [x] One status item; defaults CPU and network; choose and order up to three (Settings:
+      checkboxes + move left/right); fixed width, no jitter.
+- [x] Panel: CPU (total, user/system, 10 min / 1 h graph, load, uptime, top 5), GPU, Memory
+      (pressure, app/wired/compressed/cached, swap, swapping rate, top 5), Network (rates,
+      graph, connection, IP), Disks (free per volume, I/O graph), Battery when present,
+      thermal state line.
+- [x] Process rows: icon, name, value; root processes via `ps`; click or Return opens
+      Activity Monitor; ⌘C copies; Esc closes. (Owner: no Quit.)
+- [x] macOS 27 `expandedInterfaceDelegate`; 14–26 button action (kept on 27 for
+      Accessibility presses). A real click on 27 not exercised (item behind the overflow).
+- [x] Update interval 1/2/5 s; battery (IOPS run-loop source), thermal, volumes (mount
+      notifications) event-driven; network path read on open; sampling pauses on sleep and
+      display sleep with a history gap.
+- [x] Settings: General (launch at login, show in menu bar, readouts, interval, Low Power
+      Mode, units, combine helpers), Shortcuts (open Gauge, unset), About.
+- [ ] Budgets: B, D, memory, growth, energy, launch and the house gate met; **A (0.10%),
+      C (0.35%) and the wakeup budget missed** on this busy Mac, see above.
+- [x] Unit tests: tick deltas (wrap, reset), rates, quantising and smoothing, pressure
+      mapping, ring buffers, buckets, gaps, decimation, process deltas with PID reuse, `ps`
+      parsing (truncated UTF-8, day formats, junk), app grouping, formatting (locales),
+      fixed-width candidates, redraw policy, preferences (tolerant decoding), demo session,
+      real-source smoke tests.
+- [x] No network traffic, no permission prompts, no `[unlabeled]` controls.
+- Should-haves: GPU ✓, disk I/O ✓, swapping rate ✓, adapter watts ✓, cycle count and
+  health ✓ (matches System Settings' 91% here), process icons ✓, group by app ✓ (setting),
+  Low Power Mode slowdown ✓, bits/s ✓, readout order ✓, global shortcut ✓ (unset).
+  Per-core bars: partly (P/E averages). Quit from the list: no (owner).
+
+### Deferred (moved to later)
+
+Per-core bars; persisted history (days); notifications (high CPU, low disk); per-app disk
+activity; Wi-Fi name; link speed; battery history graph; separate items per readout; a graph
+style for the menu bar readout; the "menu bar is full" hint (can't be detected on 27);
+localisation.
+
+### Shared components built in-app (SlopKit candidates)
+
+- `StatusItemController` + `MenuBarLayout` (`StatusItemController.swift`): a status item
+  that adopts macOS 27's `expandedInterfaceDelegate` behind availability checks, and renders
+  fixed-slot readouts into one template bitmap. Zones/Awake could share the 27 handling.
+- `PanelMenuRow` (`PanelView.swift`): menu-style text rows (title + shortcut, hover
+  highlight) for the bottom of a panel, the panel equivalent of `MenuFooter`.
+- `Sparkline`/`HistoryGraph` (`Sparkline.swift`): a fixed-span history graph with gaps, as
+  shapes (see the Canvas memory note).
+- `Snapshots` (`Snapshots.swift`): the offscreen review renderer, same pattern as Awake's.
+
+### Needs the owner's call
+
+- **Budget A and wakeups.** A menu bar redraw costs 10–17 ms on macOS 27 (AppKit renders
+  the item once per Space/display), so "< 0.10% with defaults" and "≤ 0.6 wakeups/s" can't
+  both hold with a readout that updates when things change. Built: calm redraws + smoothing,
+  0.17–0.24% on this busy Mac (≈0.14% expected at rest), passing the house gate, and
+  MenuBarAgent pays about the same again per redraw. C (1 s) is 0.43–0.52% against 0.35%.
+  Options: (a) accept ~0.25% (A) and ~0.5% (C) as the budgets on macOS 27; (b) default to
+  CPU only (no network readout), which roughly halves redraws on a Mac with bursty traffic;
+  (c) calmer thresholds (CPU by 8 points, a 40 s settle), at the cost of a readout that lags
+  more; (d) drop the 1 s option.

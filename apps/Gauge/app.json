@@ -1,0 +1,16 @@
+{
+  "slug": "gauge",
+  "name": "Gauge",
+  "tagline": "CPU, memory, network and battery in your menu bar.",
+  "replaces": [
+    "iStat Menus"
+  ],
+  "category": "Utilities",
+  "icon": "gauge",
+  "menuBarOnly": true,
+  "status": "alpha",
+  "version": "0.1.0",
+  "build": 1,
+  "minimumMacOS": "14.0",
+  "bundleId": "app.slopapp.gauge"
+}
