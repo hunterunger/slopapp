@@ -1,0 +1,85 @@
+<!doctype html>
+<!-- The README banner. Rendered to .github/readme/hero-{light,dark}.png by scripts/readme-art.sh
+     (open it with ?dark for the dark version). Icons come from web/public/icons. -->
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=block" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f5f0e8; --card: #fbf8f3; --text: #2f2d2a; --heading: #23211f; --muted: #6b655c;
+    --line: rgb(47 45 42 / 0.12); --chip: rgb(63 94 78 / 0.09); --chip-text: #3f5e4e;
+    --shadow: 0 1px 2px rgb(47 45 42 / .10), 0 10px 24px rgb(47 45 42 / .16);
+  }
+  :root.dark {
+    --paper: #1e1d1a; --card: #262420; --text: #e9e2d6; --heading: #f3ede3; --muted: #a89f93;
+    --line: rgb(233 226 214 / 0.1); --chip: rgb(169 191 165 / 0.12); --chip-text: #bccfb8;
+    --shadow: 0 1px 2px rgb(0 0 0 / .35), 0 12px 28px rgb(0 0 0 / .45);
+  }
+  html, body { margin: 0; background: transparent; }
+  .banner {
+    position: relative; width: 1280px; height: 520px; box-sizing: border-box; overflow: hidden;
+    border-radius: 28px; background: var(--paper); border: 1px solid var(--line);
+    font-family: Inter, sans-serif; color: var(--text);
+  }
+  .copy { position: absolute; left: 72px; top: 0; bottom: 0; width: 640px;
+    display: flex; flex-direction: column; justify-content: center; z-index: 2; }
+  .mark { width: 88px; height: 88px; filter: drop-shadow(0 6px 14px rgb(0 0 0 / .18)); margin-bottom: 26px; }
+  h1 { font-family: Newsreader, serif; font-weight: 600; font-size: 84px; line-height: .95;
+    letter-spacing: -0.02em; margin: 0 0 18px; color: var(--heading); }
+  .tagline { font-family: Newsreader, serif; font-weight: 500; font-size: 32px; line-height: 1.2;
+    margin: 0 0 30px; color: var(--text); }
+  .chips { display: flex; gap: 8px; }
+  .chip { font-size: 16px; font-weight: 500; padding: 7px 14px; border-radius: 999px;
+    background: var(--chip); color: var(--chip-text); }
+  /* The wall of icons on the right, tilted, fading out toward the copy. */
+  .wall { position: absolute; left: 640px; top: -170px; width: 900px; height: 900px;
+    transform: rotate(-12deg); z-index: 1;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 26%, #000 100%); }
+  .row { display: flex; gap: 26px; margin-bottom: 26px; }
+  .row:nth-child(even) { margin-left: 64px; }
+  .row img { width: 112px; height: 112px; flex: none; filter: drop-shadow(0 2px 3px rgb(0 0 0 / .12)) drop-shadow(0 10px 18px rgb(0 0 0 / .14)); }
+  :root.dark .row img { filter: drop-shadow(0 2px 3px rgb(0 0 0 / .35)) drop-shadow(0 12px 20px rgb(0 0 0 / .4)); }
+</style>
+</head>
+<body>
+<div class="banner">
+  <div class="copy">
+    <img class="mark" id="mark" alt="">
+    <h1>Slopapp</h1>
+    <p class="tagline">Native Mac apps, made with care.</p>
+    <div class="chips">
+      <span class="chip" id="count"></span>
+      <span class="chip">Free and open source</span>
+      <span class="chip">No account, no tracking</span>
+    </div>
+  </div>
+  <div class="wall" id="wall"></div>
+</div>
+<script>
+  const dark = location.search.includes("dark");
+  if (dark) document.documentElement.classList.add("dark");
+  const icons = "../../web/public/icons/";
+  const icon = (slug) => icons + slug + (dark ? "-dark" : "") + ".webp";
+  document.getElementById("mark").src = icon("slopapp");
+  // Mixed so neighbouring tiles differ in colour.
+  const apps = ["clips", "snapper", "switchboard", "tidy", "dropper", "commit", "dictate",
+    "gauge", "paper", "squish", "zones", "tally", "shorthand", "crate", "ruler", "triggers",
+    "convert", "specimen", "focus", "iconsmith", "devkit", "awake"];
+  document.getElementById("count").textContent = `${apps.length} apps`;
+  const wall = document.getElementById("wall");
+  for (let r = 0; r < 6; r++) {
+    const row = document.createElement("div");
+    row.className = "row";
+    for (let c = 0; c < 6; c++) {
+      const img = document.createElement("img");
+      img.src = icon(apps[(r * 6 + c + r * 2) % apps.length]);
+      img.alt = "";
+      row.appendChild(img);
+    }
+    wall.appendChild(row);
+  }
+</script>
+</body>
+</html>
