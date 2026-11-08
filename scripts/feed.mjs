@@ -200,6 +200,9 @@ function plannedEntry(planned, dir) {
     menuBarOnly: Boolean(planned.menuBarOnly),
     hub: Boolean(planned.hub) || undefined,
     status: "planned",
+    // A built app without a release yet: its bundle id lets the launcher find (and open)
+    // a copy already on this Mac.
+    ...(dir && planned.bundleId ? { bundleId: planned.bundleId } : {}),
     // A built app without a zip here (a local test feed) still has its screenshots.
     ...(dir ? shotsFields(planned, dir) : {}),
   };

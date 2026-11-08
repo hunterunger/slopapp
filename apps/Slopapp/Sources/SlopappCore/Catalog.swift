@@ -57,10 +57,32 @@ public struct CatalogItem: Sendable, Equatable, Identifiable {
 public enum CatalogBuilder {
     /// Joins the feed with the copies on disk. The launcher itself (`hub`) is left out of
     /// the lists; it updates separately.
-    public static func items(feed: Feed, copies: (FeedApp) -> [InstalledCopy]) -> [CatalogItem] {
-        feed.apps.filter { !$0.isHub }.map { app in
-            CatalogItem(app: app, copies: app.bundleId == nil ? [] : copies(app))
+    ///
+    /// Apps with no release yet have no bundle id in the feed. With `bundleIDNamespace`
+    /// ("app.slopapp"), they get "<namespace>.<slug>", the id every Slopapp app has, so a
+    /// copy already on this Mac (a build installed by hand) is found, shown and opened.
+    public static func items(feed: Feed, bundleIDNamespace: String? = nil, copies: (FeedApp) -> [InstalledCopy]) -> [CatalogItem] {
+        feed.apps.filter { !$0.isHub }.map { feedApp in
+            var app = feedApp
+            if app.bundleId?.isEmpty ?? true { app.bundleId = expectedBundleID(slug: app.slug, namespace: bundleIDNamespace) }
+            return CatalogItem(app: app, copies: app.bundleId == nil ? [] : copies(app))
         }
+    }
+
+    /// "<namespace>.<slug>", or nil when either part can't be part of a bundle id.
+    public static func expectedBundleID(slug: String, namespace: String?) -> String? {
+        guard let namespace, !namespace.isEmpty, !slug.isEmpty else { return nil }
+        let allowed = { (c: Character) in c.isASCII && (c.isLetter || c.isNumber || c == "-") }
+        guard slug.allSatisfy(allowed),
+              namespace.split(separator: ".", omittingEmptySubsequences: false).allSatisfy({ !$0.isEmpty && $0.allSatisfy(allowed) })
+        else { return nil }
+        return "\(namespace).\(slug)"
+    }
+
+    /// "app.slopapp" from the launcher's own "app.slopapp.slopapp".
+    public static func namespace(ofBundleID id: String?) -> String? {
+        guard let id, let dot = id.lastIndex(of: "."), dot > id.startIndex else { return nil }
+        return String(id[..<dot])
     }
 
     public static func updates(in items: [CatalogItem]) -> [CatalogItem] {

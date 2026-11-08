@@ -36,7 +36,10 @@ Acting (no mouse movement, no global keys unless asked)
   type <app> <text> [--activate]         type into the app (posted to its pid)
   key <app> <combo> [--activate] [--global]
         combo like cmd+shift+v, escape, down. --global posts system-wide: it goes to
-        whatever is frontmost (needed for global hotkeys). Use sparingly.
+        whatever is frontmost (needed for global hotkeys). Use sparingly. Modifiers are
+        pressed and released as their own key events, and always released, even on Ctrl-C.
+  release-modifiers                      system-wide key-ups for cmd/opt/ctrl/shift/fn, if one
+                                         ever seems stuck after a --global key
 
 Mouse (moves the real cursor; needs --allow-mouse and the target app)
   clickxy <app> <x> <y> --allow-mouse [--right] [--double] [--menubar] [--allow-over Owner]... [--check]
@@ -388,7 +391,7 @@ struct SlopDrive {
         case "type":
             let (app, _) = try target(args)
             if args.has("--activate") { app.activate(); try await Task.sleep(for: .milliseconds(250)) }
-            Keys.type(try args.arg(1, "text"), pid: app.processIdentifier)
+            try Keys.type(try args.arg(1, "text"), pid: app.processIdentifier)
             print("typed \(args.positional[1].count) characters into \(app.localizedName ?? "app")")
 
         case "key":
@@ -396,8 +399,19 @@ struct SlopDrive {
             let (code, flags) = try Keys.parse(try args.arg(1, "combo"))
             if args.has("--activate") { app.activate(); try await Task.sleep(for: .milliseconds(250)) }
             let global = args.has("--global")
-            Keys.press(code, flags: flags, pid: global ? nil : app.processIdentifier)
+            let stuck = try Keys.press(code, flags: flags, pid: global ? nil : app.processIdentifier)
             print("pressed \(args.positional[1])\(global ? " system-wide" : " in \(app.localizedName ?? "app")")")
+            if !stuck.isEmpty {
+                let names = Keys.modifierKeys.filter { stuck.contains($0.flag) }.map { Keys.name(of: $0.flag) }
+                FileHandle.standardError.write(Data("warning: \(names.joined(separator: "+")) still read as held after the press; released them again. If a modifier still seems stuck, run `drive release-modifiers`.\n".utf8))
+            }
+
+        case "release-modifiers":
+            // Recovery: system-wide ups for every modifier (no app needed).
+            KeyStrokes.release(Keys.modifierKeys.map(\.code))
+            let left = CGEventSource.flagsState(.combinedSessionState).intersection(Keys.allModifiers)
+            print(left.isEmpty ? "released cmd, opt, ctrl, shift and fn system-wide"
+                  : "released them, but \(Keys.modifierKeys.filter { left.contains($0.flag) }.map { Keys.name(of: $0.flag) }.joined(separator: "+")) still read as held (a key physically down?)")
 
         case "wait":
             try needAX()

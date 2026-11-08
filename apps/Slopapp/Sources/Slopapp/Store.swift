@@ -285,10 +285,13 @@ final class Store {
         let feed = feed ?? Feed(apps: [])
         let roots = config.roots
         let locator = locator
+        // Unreleased apps have no bundle id in the feed; ours all share the launcher's prefix.
+        let namespace = CatalogBuilder.namespace(ofBundleID: Bundle.main.bundleIdentifier)
+            ?? CatalogBuilder.namespace(ofBundleID: feed.apps.first(where: \.isHub)?.bundleId)
         scanGeneration += 1
         let generation = scanGeneration
         let items = await Task.detached(priority: .userInitiated) {
-            CatalogBuilder.items(feed: feed) { app in
+            CatalogBuilder.items(feed: feed, bundleIDNamespace: namespace) { app in
                 Inventory.copies(of: app.bundleId ?? "", appName: app.name, roots: roots, locator: locator)
             }
         }.value

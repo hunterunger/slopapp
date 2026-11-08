@@ -7,6 +7,8 @@ let package = Package(
     name: "SlopDrive",
     platforms: [.macOS(.v14)],
     targets: [
-        .executableTarget(name: "SlopDrive", path: "Sources/SlopDrive")
+        .executableTarget(name: "SlopDrive", path: "Sources/SlopDrive"),
+        // Pure logic only (key strokes, parsing): `swift test --package-path tools/SlopDrive`.
+        .testTarget(name: "SlopDriveTests", dependencies: ["SlopDrive"], path: "Tests/SlopDriveTests"),
     ]
 )

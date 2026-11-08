@@ -12,6 +12,13 @@ Design choices:
 - **Nothing lands in the user's apps.** Clicks are `AXPress` (no mouse movement); keys and
   typing are posted to the target app's process. Mouse commands and system-wide keys are
   opt-in flags.
+- **Modifiers are never left held.** A key press posts each modifier as its own
+  flagsChanged event (down before the key, up after it, in reverse), not just flags on the
+  key event, which could leave ⌘/⌥/⌃ registered as held system-wide after `key --global`.
+  A stroke runs under a lock and SIGINT/SIGTERM/SIGHUP/SIGQUIT wait for it to finish, so
+  Ctrl-C never cuts one off mid-way. After a `--global` press the session's modifier state
+  is checked, and anything still held is released again (with a warning).
+  `release-modifiers` releases them all by hand (e.g. after a `kill -9`).
 - **Mouse commands are fenced to the target app.** `clickxy <app> x y` and
   `drag <app> x1 y1 x2 y2` need `--allow-mouse` and the target app. Before acting, every point
   they click or pass over (start, end, 19 samples along a drag) must be on one of the app's
@@ -44,3 +51,4 @@ Needs Accessibility and Screen Recording permission for the terminal that runs i
 Files: `Drive.swift` (commands), `Tree.swift` (tree printing, refs, search), `AX.swift`
 (element snapshots), `Apps.swift` (find/launch/quit, window server), `Input.swift`
 (keys, mouse, CPU/memory usage), `MouseGuard.swift` (where mouse commands may act).
+Tests (pure logic: key parsing, stroke order): `swift test --package-path tools/SlopDrive`.

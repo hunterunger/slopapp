@@ -179,7 +179,9 @@ When you get a Developer ID, set `teamId` in both places and sign every app with
   download), `downloadUrl`, `iconUrl`, `sha256` and `size` of the zip, `installedSize`
   (unzipped bytes) and `releaseNotes`.
 - **Planned apps** (roadmap only, or built without a zip) have `"status": "planned"` and no
-  download fields: the launcher shows them as Coming Soon.
+  download fields: the launcher shows them as Coming Soon. Built ones also carry `bundleId`,
+  so a copy already on the Mac shows as installed, with its own icon and Open (older feeds
+  without it: the launcher assumes `app.slopapp.<slug>`).
 - `hub: true` marks the launcher itself; it doesn't list itself among the apps.
 - URLs may be relative to the feed's own URL (test feeds use `"Awake.zip"`).
 - Release notes come from the `## <version>` section of `apps/<Name>/CHANGELOG.md` when it

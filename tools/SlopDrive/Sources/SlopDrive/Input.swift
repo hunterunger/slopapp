@@ -42,31 +42,179 @@ enum Keys {
         return (key, flags)
     }
 
-    /// Posts a key press. To a pid by default, so it can't land in another app.
-    static func press(_ code: CGKeyCode, flags: CGEventFlags, pid: pid_t?) {
-        let src = CGEventSource(stateID: .hidSystemState)
-        for down in [true, false] {
-            guard let e = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: down) else { continue }
-            e.flags = flags
-            if let pid { e.postToPid(pid) } else { e.post(tap: .cghidEventTap) }
-            usleep(8_000)
+    /// The modifier keys, in the order a stroke presses them (US ANSI, left-hand keys).
+    static let modifierKeys: [(flag: CGEventFlags, code: CGKeyCode)] = [
+        (.maskControl, 59), (.maskAlternate, 58), (.maskShift, 56), (.maskCommand, 55), (.maskSecondaryFn, 63),
+    ]
+    static let allModifiers = CGEventFlags(modifierKeys.map(\.flag))
+
+    static func name(of flag: CGEventFlags) -> String {
+        switch flag {
+        case .maskControl: "ctrl"
+        case .maskAlternate: "opt"
+        case .maskShift: "shift"
+        case .maskCommand: "cmd"
+        case .maskSecondaryFn: "fn"
+        default: "?"
         }
     }
 
-    static func type(_ text: String, pid: pid_t) {
+    /// One event of a stroke: a key going down or up, with the modifier flags held right after it.
+    struct Event: Equatable {
+        let code: CGKeyCode
+        let down: Bool
+        let flags: CGEventFlags
+        /// A modifier key: posted as a flagsChanged event, like the hardware does.
+        let isModifier: Bool
+    }
+
+    /// The events of one press of `code` with `flags`: each modifier goes down on its own
+    /// (flags building up), then the key goes down and up with every flag set, then the
+    /// modifiers come up in reverse until no flag is left. A key event that only carries
+    /// flags, with no modifier events around it, can leave the window server thinking
+    /// ⌘/⌥/⌃ are still held after a system-wide press.
+    static func stroke(_ code: CGKeyCode, flags: CGEventFlags) -> [Event] {
+        let mods = modifierKeys.filter { flags.contains($0.flag) }
+        var held: CGEventFlags = []
+        var events: [Event] = []
+        for m in mods {
+            held.insert(m.flag)
+            events.append(Event(code: m.code, down: true, flags: held, isModifier: true))
+        }
+        events.append(Event(code: code, down: true, flags: held, isModifier: false))
+        events.append(Event(code: code, down: false, flags: held, isModifier: false))
+        for m in mods.reversed() {
+            held.remove(m.flag)
+            events.append(Event(code: m.code, down: false, flags: held, isModifier: true))
+        }
+        return events
+    }
+
+    /// Posts a key press. To a pid by default, so it can't land in another app; `pid: nil`
+    /// posts system-wide. Every modifier is released before this returns, also when the
+    /// process is interrupted mid-stroke (see `KeyStrokes`). Returns the modifiers a
+    /// system-wide press found still registered as held afterwards (and released again),
+    /// which should never happen.
+    @discardableResult
+    static func press(_ code: CGKeyCode, flags: CGEventFlags, pid: pid_t?) throws -> CGEventFlags {
+        let src = CGEventSource(stateID: .hidSystemState)
+        // Build every event first, so a stroke is posted whole or not at all.
+        let events = try stroke(code, flags: flags).map { step -> (Event, CGEvent) in
+            guard let e = CGEvent(keyboardEventSource: src, virtualKey: step.code, keyDown: step.down) else {
+                throw DriveError("couldn't create a key event (code \(step.code)); nothing was pressed")
+            }
+            if step.isModifier { e.type = .flagsChanged }
+            e.flags = step.flags
+            return (step, e)
+        }
+        KeyStrokes.run(global: pid == nil) { posted in
+            for (step, e) in events {
+                if let pid { e.postToPid(pid) } else { e.post(tap: .cghidEventTap) }
+                if step.isModifier { posted(step) }
+                usleep(8_000)
+            }
+        }
+        guard pid == nil, !flags.intersection(allModifiers).isEmpty else { return [] }
+        return KeyStrokes.selfCheck(used: flags)
+    }
+
+    static func type(_ text: String, pid: pid_t) throws {
         let src = CGEventSource(stateID: .hidSystemState)
         for ch in text {
-            if ch == "\n" { press(36, flags: [], pid: pid); continue }
-            if ch == "\t" { press(48, flags: [], pid: pid); continue }
+            if ch == "\n" { try press(36, flags: [], pid: pid); continue }
+            if ch == "\t" { try press(48, flags: [], pid: pid); continue }
             let units = Array(String(ch).utf16)
             for down in [true, false] {
                 guard let e = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: down) else { continue }
                 e.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+                e.flags = []
                 e.postToPid(pid)
                 usleep(4_000)
             }
         }
     }
+}
+
+/// Makes sure a system-wide stroke never leaves a modifier held.
+///
+/// A stroke runs under a lock and tracks which modifier keys it has put down. SIGINT,
+/// SIGTERM, SIGHUP and SIGQUIT are caught (from the first stroke on): the handler waits for
+/// the lock, so a stroke always finishes (modifiers back up) before the process exits, and
+/// releases anything still marked held. SIGKILL can't be caught: `release-modifiers` is the
+/// way back from that.
+enum KeyStrokes {
+    private final class State: @unchecked Sendable {
+        let lock = NSLock()
+        var held: [CGKeyCode] = []      // global modifier keys down right now
+        var installed = false
+    }
+    private static let state = State()
+
+    static func run(global: Bool, _ body: (_ posted: (Keys.Event) -> Void) -> Void) {
+        installSignalHandlers()
+        state.lock.lock()
+        defer {
+            releaseHeld()
+            state.lock.unlock()
+        }
+        body { step in
+            guard global else { return }
+            if step.down { state.held.append(step.code) } else { state.held.removeAll { $0 == step.code } }
+        }
+    }
+
+    /// Posts an up for every modifier still marked held. Call with the lock taken.
+    private static func releaseHeld() {
+        guard !state.held.isEmpty else { return }
+        release(Keys.modifierKeys.filter { state.held.contains($0.code) }.map(\.code))
+        state.held = []
+    }
+
+    /// System-wide flagsChanged ups for these modifier keys, ending with no flags set.
+    static func release(_ codes: [CGKeyCode]) {
+        let src = CGEventSource(stateID: .hidSystemState)
+        var remaining = CGEventFlags(Keys.modifierKeys.filter { codes.contains($0.code) }.map(\.flag))
+        for m in Keys.modifierKeys.reversed() where codes.contains(m.code) {
+            remaining.remove(m.flag)
+            guard let e = CGEvent(keyboardEventSource: src, virtualKey: m.code, keyDown: false) else { continue }
+            e.type = .flagsChanged
+            e.flags = remaining
+            e.post(tap: .cghidEventTap)
+            usleep(8_000)
+        }
+    }
+
+    /// After a system-wide stroke: if the session still reports any of its modifiers as
+    /// held, release them again. Returns what was stuck.
+    static func selfCheck(used flags: CGEventFlags) -> CGEventFlags {
+        usleep(20_000)
+        let stuck = CGEventSource.flagsState(.combinedSessionState).intersection(flags).intersection(Keys.allModifiers)
+        guard !stuck.isEmpty else { return [] }
+        release(Keys.modifierKeys.filter { stuck.contains($0.flag) }.map(\.code))
+        return stuck
+    }
+
+    private static func installSignalHandlers() {
+        state.lock.lock()
+        defer { state.lock.unlock() }
+        guard !state.installed else { return }
+        state.installed = true
+        for sig in [SIGINT, SIGTERM, SIGHUP, SIGQUIT] {
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .global(qos: .userInitiated))
+            source.setEventHandler {
+                // Waits for a stroke in progress to finish, so its modifiers come back up first.
+                state.lock.lock()
+                releaseHeld()
+                exit(128 + sig)
+            }
+            source.resume()
+            signalSources.append(source)
+        }
+    }
+
+    /// Kept alive for the life of the process. Only touched under `state.lock`.
+    nonisolated(unsafe) private static var signalSources: [any DispatchSourceSignal] = []
 }
 
 enum Mouse {
