@@ -1,5 +1,6 @@
 import AppKit
 import PaperCore
+import SlopKit
 
 /// The whole menu bar, built in code. Every document action lives in a menu with its shortcut.
 @MainActor
@@ -241,7 +242,11 @@ enum MainMenu {
 
     private static func helpMenu() -> NSMenu {
         let menu = NSMenu(title: "Help")
-        add(menu, "Paper Help", #selector(PaperAppDelegate.showHelp(_:)), "?", target: NSApp.delegate as AnyObject?)
+        let delegate = NSApp.delegate as AnyObject?
+        add(menu, "Paper Help", #selector(PaperAppDelegate.showHelp(_:)), "?", target: delegate)
+        menu.addItem(.separator())
+        add(menu, IssueReport.Kind.problem.title, #selector(PaperAppDelegate.reportProblem(_:)), target: delegate)
+        add(menu, IssueReport.Kind.improvement.title, #selector(PaperAppDelegate.suggestImprovement(_:)), target: delegate)
         return menu
     }
 }

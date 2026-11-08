@@ -33,6 +33,9 @@ struct HubAboutView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Link("View source on GitHub", destination: Brand.repoURL)
                 .font(.callout)
+            // Opens the pre-filled issue form in the browser; nothing is sent from the app.
+            Link(IssueReport.Kind.problem.title, destination: IssueReport.url(.problem, info: info))
+                .font(.callout)
         }
         .padding(Spacing.xxl)
         .frame(width: 320)
@@ -62,7 +65,7 @@ enum HubAboutWindow {
     }
 }
 
-/// SlopKit's MenuFooter (Settings…, About, Quit) with the hub's About.
+/// SlopKit's MenuFooter (Settings…, About, Report a Problem…, Quit) with the hub's About.
 struct HubMenuFooter: View {
     let info: AppInfo
     @Environment(\.openSettings) private var openSettings
@@ -76,6 +79,7 @@ struct HubMenuFooter: View {
         }
         .keyboardShortcut(",")
         Button("About \(info.name)") { HubAboutWindow.show(info: info) }
+        Button(IssueReport.Kind.problem.title) { IssueReport.open(.problem, info: info) }
         Divider()
         Button("Quit \(info.name)") { NSApp.terminate(nil) }
             .keyboardShortcut("q")

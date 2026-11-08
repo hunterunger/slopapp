@@ -26,7 +26,10 @@ struct ShorthandApp: App {
         }
         .defaultSize(width: 920, height: 580)
         .windowToolbarStyle(.unified)
-        .commands { LibraryCommands(model: model) }
+        .commands {
+            LibraryCommands(model: model)
+            HelpCommands(info: info)
+        }
 
         Settings {
             SettingsView(model: model, info: info)
@@ -80,7 +83,7 @@ extension Notification.Name {
     static let libraryRequest = Notification.Name("app.slopapp.shorthand.libraryRequest")
 }
 
-/// Status line → main actions → options → footer (Settings…, About, Quit).
+/// Status line → main actions → options → footer (Settings…, About, Report a Problem…, Quit).
 struct ShorthandMenu: View {
     @Bindable var model: AppModel
     let info: AppInfo

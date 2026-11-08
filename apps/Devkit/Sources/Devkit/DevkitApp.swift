@@ -155,7 +155,7 @@ struct DevkitCommands: Commands {
                 Button("Show \(model.hiddenTools.count) Hidden \(model.hiddenTools.count == 1 ? "Tool" : "Tools")") { model.hiddenTools = [] }
             }
         }
-        CommandGroup(replacing: .help) {
+        HelpCommands(info: info) {
             Button("\(info.name) Help") {
                 NSWorkspace.shared.open(Brand.repoURL.appendingPathComponent("tree/main/apps/Devkit"))
             }

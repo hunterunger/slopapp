@@ -19,6 +19,8 @@ struct __NAME__App: App {
             CommandGroup(replacing: .appInfo) {
                 Button("About __NAME__") { AboutWindow.show(info: info) }
             }
+            // Help ▸ Report a Problem…, Suggest an Improvement… (put the app's own help first).
+            HelpCommands(info: info)
         }
 
         Settings {

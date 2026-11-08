@@ -26,7 +26,10 @@ struct TriggersApp: App {
         }
         .defaultSize(width: 760, height: 480)
         .windowToolbarStyle(.unified(showsTitle: true))
-        .commands { TriggersCommands(model: model) }
+        .commands {
+            TriggersCommands(model: model)
+            HelpCommands(info: info)
+        }
 
         Settings {
             SettingsView(model: model, info: info)
@@ -39,7 +42,7 @@ struct TriggersApp: App {
     }
 }
 
-/// Status line → main actions → options → footer (Settings…, About, Quit).
+/// Status line → main actions → options → footer (Settings…, About, Report a Problem…, Quit).
 struct TriggersMenu: View {
     @Bindable var model: AppModel
     let info: AppInfo

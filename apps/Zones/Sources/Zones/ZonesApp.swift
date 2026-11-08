@@ -37,5 +37,6 @@ struct ZonesApp: App {
         Settings {
             ZonesSettingsView(model: controller.model, panel: controller.panel, info: controller.info)
         }
+        .commands { HelpCommands(info: controller.info) }
     }
 }

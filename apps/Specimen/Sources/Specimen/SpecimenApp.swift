@@ -172,7 +172,7 @@ struct SpecimenCommands: Commands {
                 .keyboardShortcut(";", modifiers: [.command, .shift])
                 .disabled(!model.canDeactivate || model.isChangingFonts)
         }
-        CommandGroup(replacing: .help) {
+        HelpCommands(info: info) {
             Button("Specimen Help") {
                 NSWorkspace.shared.open(Brand.repoURL.appendingPathComponent("tree/main/apps/Specimen"))
             }

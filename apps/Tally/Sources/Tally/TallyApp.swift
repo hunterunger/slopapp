@@ -121,7 +121,7 @@ struct TallyCommands: Commands {
             Toggle("Float on Top", isOn: Binding(get: { WindowFloat.isOn }, set: { _ in WindowFloat.toggle() }))
             Divider()
         }
-        CommandGroup(replacing: .help) {
+        HelpCommands(info: info) {
             // No shortcut: ⇧⌘/ belongs to the system's Help search.
             Button("Tally Syntax Guide") { openWindow(id: WindowID.guide) }
         }

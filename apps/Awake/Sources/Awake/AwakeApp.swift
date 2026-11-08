@@ -29,6 +29,7 @@ struct AwakeApp: App {
             AwakeSettingsView(app: app, controller: app.controller, preferences: app.preferences)
                 .onOpenSettingsAvailable()
         }
+        .commands { HelpCommands(info: app.info) }
     }
 }
 

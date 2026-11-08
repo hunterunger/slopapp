@@ -123,7 +123,7 @@ struct ConvertCommands: Commands {
             Divider()
             Menu("Presets") { PresetMenuItems(model: model) }
         }
-        CommandGroup(replacing: .help) {
+        HelpCommands(info: info) {
             Button("Convert Help") {
                 NSWorkspace.shared.open(Brand.repoURL.appending(path: "tree/main/apps/Convert"))
             }

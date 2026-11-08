@@ -24,10 +24,11 @@ struct SwitchboardApp: App {
         Settings {
             SettingsView(model: model, info: info)
         }
+        .commands { HelpCommands(info: info) }
     }
 }
 
-/// Status line → main actions → options → footer (Settings…, About, Quit).
+/// Status line → main actions → options → footer (Settings…, About, Report a Problem…, Quit).
 struct SwitchboardMenu: View {
     @Bindable var model: AppModel
     let info: AppInfo

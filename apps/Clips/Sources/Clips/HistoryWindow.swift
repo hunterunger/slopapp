@@ -357,6 +357,7 @@ extension FocusedValues {
 
 struct HistoryCommands: Commands {
     let model: AppModel
+    let info: AppInfo
     @FocusedValue(\.historyActions) private var actions
     @Environment(\.openWindow) private var openWindow
 
@@ -369,7 +370,7 @@ struct HistoryCommands: Commands {
             .keyboardShortcut("y")
             Divider()
         }
-        CommandGroup(replacing: .help) {
+        HelpCommands(info: info) {
             Button("Clips Help") {
                 NSWorkspace.shared.open(Brand.repoURL.appending(path: "tree/main/apps/Clips"))
             }

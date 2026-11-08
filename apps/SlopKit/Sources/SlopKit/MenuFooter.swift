@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The standard bottom of a Slopapp menu bar menu: Settings…, About, Quit.
+/// The standard bottom of a Slopapp menu bar menu: Settings…, About, Report a Problem…, Quit.
 /// Use inside a `MenuBarExtra` with `.menu` style.
 public struct MenuFooter: View {
     let info: AppInfo
@@ -21,6 +21,9 @@ public struct MenuFooter: View {
         .keyboardShortcut(",")
         Button("About \(info.name)") {
             AboutWindow.show(info: info)
+        }
+        Button(IssueReport.Kind.problem.title) {
+            IssueReport.open(.problem, info: info)
         }
         Divider()
         Button("Quit \(info.name)") {

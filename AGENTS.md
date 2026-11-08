@@ -49,7 +49,8 @@ Logs: `build/logs/<Name>-{build,test,sign,smoke,herbarium,icon}.log`.
 1. Research first (`docs/research/<slug>.md`), then `scripts/new-app.sh <slug>` (slug from `catalog/roadmap.json`).
 2. Build the logic in `Sources/<Name>Core` with tests in `Tests/<Name>CoreTests`. Put system
    calls behind protocols and fake them in tests, as Awake does (`PowerAssertion`, `Scheduler`).
-3. Build the UI in `Sources/<Name>`. Menu bar apps end their menu with `MenuFooter(info:)`.
+3. Build the UI in `Sources/<Name>`. Menu bar apps end their menu with `MenuFooter(info:)`;
+   every app adds `HelpCommands(info:)` to its `.commands` (Report a Problem…, Suggest an Improvement…).
 4. Draw the icon: `new-app.sh` starts `apps/<Name>/Icon.py` on a free tile colour; follow
    `brand/ICONS.md` ("Drawing a new icon"), fetch its plate, then `herbarium.py check` and `render`.
    Commit `Icon.py`, the generated `AppIcon.icon` and the print in `brand/plates/prints/`.
@@ -62,7 +63,8 @@ Logs: `build/logs/<Name>-{build,test,sign,smoke,herbarium,icon}.log`.
   `Radius`, even insets, alignment, hairlines, full-size window buttons). Pick an archetype (menu bar utility, drop-in window, library
   window, overlay) before writing UI, and grade against its review checklist.
 - Use SlopKit instead of rolling your own: `SlopSettings` for every Settings window, `MenuFooter`
-  in menu bar menus, `FloatingPanel`/`HUD` for overlays, `DropZone`, `PermissionGate`, `ShortcutRow`.
+  in menu bar menus, `HelpCommands` for the Help menu, `IssueReport` for "Report a Problem…"
+  anywhere else, `FloatingPanel`/`HUD` for overlays, `DropZone`, `PermissionGate`, `ShortcutRow`.
   Every app adds `@NSApplicationDelegateAdaptor(SlopAppDelegate.self)`.
 - No hardcoded colors or fonts in apps: the user's accent color and system text styles only.
 - Our apps must show no `[unlabeled]` controls in `scripts/drive tree`.

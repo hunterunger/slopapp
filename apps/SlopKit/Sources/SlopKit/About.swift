@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The standard Slopapp About view: icon, name, tagline, version, and where it comes from.
+/// The standard Slopapp About view: icon, name, tagline, version, where it comes from, and
+/// Report a Problem… (`IssueReport`).
 /// The only place besides the app icon where the brand appears.
 public struct AboutView: View {
     let info: AppInfo
@@ -43,6 +44,9 @@ public struct AboutView: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             Link("View source on GitHub", destination: Brand.repoURL)
+                .font(.callout)
+            // Opens the pre-filled issue form in the browser; nothing is sent from the app.
+            Link(IssueReport.Kind.problem.title, destination: IssueReport.url(.problem, info: info))
                 .font(.callout)
         }
         .padding([.horizontal, .bottom], Spacing.xxl)

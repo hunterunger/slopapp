@@ -156,7 +156,7 @@ func sourceURL(_ item: CatalogItem) -> URL? {
 }
 
 /// The big state button with an arrow for everything else (Reveal in Finder, Reinstall,
-/// Favorites, Move to Trash…). While something runs it shows progress instead.
+/// Favorites, Report a Problem…, Move to Trash…). While something runs it shows progress instead.
 struct PrimaryActionButton: View {
     let item: CatalogItem
     @Bindable var store: Store
@@ -210,6 +210,12 @@ struct PrimaryActionButton: View {
             items.append(.init("Reinstall") { store.reinstall(item) })
         }
         items.append(.init(store.isFavorite(item) ? "Remove from Favorites" : "Add to Favorites") { store.toggleFavorite(item) })
+        items.append(.separator)
+        // The form names this app and, when it's on this Mac, the version found here.
+        items.append(.init(IssueReport.Kind.problem.title) {
+            IssueReport.open(.problem, app: item.app.name,
+                             version: item.primary.map { IssueReport.versionText(version: $0.info.version, build: $0.info.build) })
+        })
         if item.primary?.location.canModify == true {
             items.append(.separator)
             items.append(.init("Move to Trash…") { store.requestUninstall(item) })

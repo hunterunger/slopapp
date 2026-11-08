@@ -97,6 +97,7 @@ final class AppController {
         case .setUpTriggers: showSettings(tab: .triggers)
         case .settings: showSettings(tab: .general)
         case .about: AboutWindow.show(info: info)
+        case .reportProblem: IssueReport.open(.problem, info: info)
         case .quit: NSApp.terminate(nil)
         }
     }

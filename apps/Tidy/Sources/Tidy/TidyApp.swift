@@ -149,7 +149,7 @@ struct TidyCommands: Commands {
                 .keyboardShortcut("0")
             Divider()
         }
-        CommandGroup(replacing: .help) {
+        HelpCommands(info: info) {
             Button("Tidy Help") {
                 NSWorkspace.shared.open(Brand.repoURL.appendingPathComponent("tree/main/apps/Tidy"))
             }

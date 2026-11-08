@@ -30,6 +30,7 @@ struct RulerApp: App {
         Settings {
             SettingsView(model: model, info: info)
         }
+        .commands { HelpCommands(info: info) }
     }
 }
 

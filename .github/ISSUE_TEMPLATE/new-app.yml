@@ -1,0 +1,27 @@
+name: Suggest an app
+description: A Mac app you'd like to see in the collection.
+title: "App idea: "
+labels: ["app idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Slopapp builds small, focused, native utilities that need no account, no server and
+        no subscription. Ideas that fit that work best.
+  - type: textarea
+    id: job
+    attributes:
+      label: What should it do?
+      placeholder: Show my calendar's next meeting in the menu bar, with a join button.
+    validations:
+      required: true
+  - type: input
+    id: today
+    attributes:
+      label: What do you use for it now?
+      description: An app you pay for, or one you've stopped using.
+  - type: textarea
+    id: why
+    attributes:
+      label: Why does it matter to you?
+      description: How often you'd use it, and what's missing from what's out there.

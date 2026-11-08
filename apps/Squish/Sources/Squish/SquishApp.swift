@@ -108,7 +108,7 @@ struct SquishCommands: Commands {
             Button("Close") { WindowCloser.closeFrontmost() }
                 .keyboardShortcut("w")
         }
-        CommandGroup(replacing: .help) {
+        HelpCommands(info: info) {
             Button("Squish Help") {
                 NSWorkspace.shared.open(Brand.repoURL.appending(path: "tree/main/apps/Squish"))
             }

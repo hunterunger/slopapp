@@ -384,6 +384,11 @@ final class AppController: NSObject, NSPopoverDelegate {
         CreditedAboutWindow.show(info: info)
     }
 
+    func reportProblem() {
+        closePanel()
+        IssueReport.open(.problem, info: info)
+    }
+
     /// Adds a search result, or, when that place is already listed, shows the existing row.
     func addPlace(_ result: SearchResult) {
         if let existing = model.existingID(for: result.place) {
@@ -477,6 +482,7 @@ final class AppController: NSObject, NSPopoverDelegate {
         menu.addItem(stylesItem)
         item("Settings…", ",") { [weak self] in self?.openSettings() }
         item("About Zones") { [weak self] in self?.showAbout() }
+        item(IssueReport.Kind.problem.title) { [weak self] in self?.reportProblem() }
         menu.addItem(.separator())
         item("Quit Zones", "q") { NSApp.terminate(nil) }
 

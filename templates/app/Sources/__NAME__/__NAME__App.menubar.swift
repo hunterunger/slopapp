@@ -22,10 +22,13 @@ struct __NAME__App: App {
         Settings {
             SlopSettings(info: info, isMenuBarApp: true)
         }
+        // The Help menu while Settings is open: Report a Problem…, Suggest an Improvement….
+        .commands { HelpCommands(info: info) }
     }
 }
 
-/// Menu order: status line, main actions, options. MenuFooter adds Settings, About, Quit.
+/// Menu order: status line, main actions, options. MenuFooter adds Settings, About,
+/// Report a Problem…, Quit.
 struct __NAME__Menu: View {
     var body: some View {
         Text("__NAME__ is under construction.")

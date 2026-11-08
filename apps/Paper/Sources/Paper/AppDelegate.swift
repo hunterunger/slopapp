@@ -49,6 +49,10 @@ final class PaperAppDelegate: NSObject, NSApplicationDelegate {
     @objc func showHelp(_ sender: Any?) {
         NSWorkspace.shared.open(Brand.repoURL.appendingPathComponent("tree/main/apps/Paper#readme"))
     }
+
+    @objc func reportProblem(_ sender: Any?) { IssueReport.open(.problem, info: info) }
+
+    @objc func suggestImprovement(_ sender: Any?) { IssueReport.open(.improvement, info: info) }
 }
 
 /// The Open panel shown when Paper launches with nothing to open. Same as File > Open, but it

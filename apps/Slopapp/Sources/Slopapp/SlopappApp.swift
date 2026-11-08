@@ -218,9 +218,9 @@ struct SlopappCommands: Commands {
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 .disabled(store.updates.isEmpty)
         }
-        CommandGroup(replacing: .help) {
+        // Report a Problem… here is about the launcher; each app's page has its own.
+        HelpCommands(info: info) {
             Link("Slopapp on GitHub", destination: Brand.repoURL)
-            Link("Report an Issue", destination: Brand.repoURL.appendingPathComponent("issues"))
         }
     }
 

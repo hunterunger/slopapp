@@ -21,6 +21,7 @@ struct CommitApp: App {
         .defaultPosition(.center)
         .commands {
             CommitCommands(app: app, info: info)
+            HelpCommands(info: info)
         }
 
         WindowGroup("Repository", id: "repository", for: URL.self) { $url in

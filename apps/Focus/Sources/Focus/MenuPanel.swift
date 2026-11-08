@@ -191,8 +191,8 @@ struct PanelRow: View {
     }
 }
 
-/// The end of a `.window`-style menu bar panel: the app's own rows, then Settings…, About and
-/// Quit, like SlopKit's `MenuFooter` for `.menu` menus (candidate for SlopKit).
+/// The end of a `.window`-style menu bar panel: the app's own rows, then Settings…, About,
+/// Report a Problem… and Quit, like SlopKit's `MenuFooter` for `.menu` menus (candidate for SlopKit).
 struct PanelFooter<Rows: View>: View {
     let info: AppInfo
     @ViewBuilder let rows: Rows
@@ -203,6 +203,7 @@ struct PanelFooter<Rows: View>: View {
             // Text only, like Golden Gate's menus (no decorative icons beside commands).
             PanelRow(title: "Settings…", shortcut: ",") { FocusSettingsOpener.open(nil) }
             PanelRow(title: "About \(info.name)") { AboutWindow.show(info: info) }
+            PanelRow(title: IssueReport.Kind.problem.title) { IssueReport.open(.problem, info: info) }
             PanelRow(title: "Quit \(info.name)", shortcut: "q") { NSApp.terminate(nil) }
         }
         .padding(.horizontal, -Spacing.xs)

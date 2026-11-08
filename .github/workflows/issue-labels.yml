@@ -1,0 +1,42 @@
+name: Issue labels
+
+# Labels each issue with the app picked in its form ("app: clips"), so every app's issues
+# can be filtered. Missing labels are created on first use.
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || "";
+            // Issue forms render each field as "### <label>" then the answer.
+            const match = body.match(/^### App\s*\n+([^\n]+)/m);
+            if (!match) return;
+            const app = match[1].trim();
+            if (!app || app === "_No response_" || app === "Not sure") return;
+            const name = `app: ${app.toLowerCase()}`;
+            const { owner, repo } = context.repo;
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.issues.createLabel({
+                owner, repo, name, color: "8EA58B", description: `Issues about ${app}`,
+              });
+            }
+            const current = context.payload.issue.labels.map((l) => l.name);
+            // An edit that changes the app moves the issue to the new app's label.
+            for (const old of current.filter((l) => l.startsWith("app: ") && l !== name)) {
+              await github.rest.issues.removeLabel({ owner, repo, issue_number: context.issue.number, name: old });
+            }
+            if (!current.includes(name)) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: context.issue.number, labels: [name] });
+            }

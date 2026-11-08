@@ -45,6 +45,7 @@ struct DictateApp: App {
         Settings {
             SettingsView(model: model)
         }
+        .commands { HelpCommands(info: model.info) }
     }
 }
 
@@ -117,7 +118,7 @@ struct MenuBarLabel: View {
     }
 }
 
-/// Status line → main actions → options → footer (Settings…, About, Quit).
+/// Status line → main actions → options → footer (Settings…, About, Report a Problem…, Quit).
 struct DictateMenu: View {
     let model: AppModel
     @Environment(\.openWindow) private var openWindow

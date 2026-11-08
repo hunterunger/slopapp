@@ -38,5 +38,6 @@ struct GaugeApp: App {
         Settings {
             GaugeSettingsView(store: controller.store, info: controller.info, hasBattery: controller.hasBattery)
         }
+        .commands { HelpCommands(info: controller.info) }
     }
 }

@@ -102,6 +102,11 @@ final class AppController {
         AboutWindow.show(info: info)
     }
 
+    func reportProblem() {
+        panel.close()
+        IssueReport.open(.problem, info: info)
+    }
+
     func openActivityMonitor() {
         panel.close()
         let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.ActivityMonitor")

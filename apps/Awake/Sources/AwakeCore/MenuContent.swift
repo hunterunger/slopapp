@@ -14,6 +14,7 @@ public enum MenuCommand: Hashable, Sendable {
     case setUpTriggers
     case settings
     case about
+    case reportProblem
     case quit
 }
 
@@ -82,6 +83,7 @@ public enum MenuContent {
         entries.append(.separator)
         entries.append(.item("Settings…", .settings, key: ","))
         entries.append(.item("About \(appName)", .about))
+        entries.append(.item("Report a Problem…", .reportProblem))
         entries.append(.separator)
         entries.append(.item("Quit \(appName)", .quit, key: "q"))
         return entries

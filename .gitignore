@@ -25,3 +25,6 @@ web/public/feed.json
 docs/build-log.md
 .claude/settings.local.json
 
+
+# Agent worktrees
+.claude/worktrees/

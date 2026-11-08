@@ -48,6 +48,7 @@ import Testing
             ----
               Settings…  ⌘,
               About Awake
+              Report a Problem…
             ----
               Quit Awake  ⌘Q
             """)

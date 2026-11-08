@@ -50,6 +50,7 @@ struct PanelView: View {
                 PanelMenuRow(title: "Open Activity Monitor", shortcut: "↩", radius: rowRadius, action: actions.openActivityMonitor)
                 PanelMenuRow(title: "Settings…", shortcut: "⌘,", radius: rowRadius, action: actions.openSettings)
                 PanelMenuRow(title: "About \(AppController.shared.info.name)", radius: rowRadius, action: actions.showAbout)
+                PanelMenuRow(title: IssueReport.Kind.problem.title, radius: rowRadius, action: actions.reportProblem)
                 PanelMenuRow(title: "Quit \(AppController.shared.info.name)", shortcut: "⌘Q", radius: rowRadius, action: actions.quit)
             }
             .padding(PanelMetrics.rowInset)

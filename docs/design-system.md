@@ -33,7 +33,7 @@ Pick one per app (an app can add a second, e.g. a menu bar app with a library wi
 - `.menuBarExtraStyle(.menu)` for lists of actions and toggles. `.window` only for rich
   content (a calendar, a chart). Fixed width 320 pt, no scrolling below 480 pt tall.
 - Menu order: status line (if any) → main actions → options → `MenuFooter`
-  (Settings…, About, Quit).
+  (Settings…, About, Report a Problem…, Quit). A custom panel or `NSMenu` ends the same way.
 - `LSUIElement` (no Dock icon). The icon can be hidden in Settings; launching the app again
   brings it back and opens Settings (`SlopAppDelegate` does both), because macOS can hide the
   icon where the app can't see it (a full menu bar, System Settings › Menu Bar). An app whose
@@ -95,9 +95,18 @@ Pick one per app (an app can add a second, e.g. a menu bar app with a library wi
   General (Launch at login; menu bar apps: Show in menu bar), Shortcuts (only if the app
   has global shortcuts), Advanced (only if needed), About. Forms use `.formStyle(.grouped)`
   at 480 pt wide.
-- **About**: `AboutView` (icon, name, tagline, version, "Part of Slopapp", source link).
-  Menu bar apps open it from the menu; window apps from the app menu; all apps in the
-  About tab.
+- **About**: `AboutView` (icon, name, tagline, version, "Part of Slopapp", source link,
+  Report a Problem…). Menu bar apps open it from the menu; window apps from the app menu;
+  all apps in the About tab.
+- **Help menu**: `HelpCommands(info:)` in every app's `.commands` (menu bar apps attach it to
+  the Settings scene). It replaces SwiftUI's empty default Help item with the app's own help
+  items, if any (passed in the trailing closure), a divider, then Report a Problem… and
+  Suggest an Improvement….
+- **Report a Problem…** (`IssueReport`): opens the GitHub issue form in the browser with the
+  app, version (`0.1.0 (12)`) and macOS (`macOS 15.2 on Apple silicon`) filled in. Nothing is
+  sent from the app; the person reviews the form and submits it themselves. It's in
+  `MenuFooter`, `AboutView` and `HelpCommands`; anything custom (a panel footer, an AppKit
+  menu) calls `IssueReport.open(.problem, info:)`. Never open it on its own, only from a click.
 - **Global shortcuts**: `KeyboardShortcuts` (re-exported by SlopKit) with `ShortcutRow` (an
   optional `subtitle:` explains it, like every Settings explanation) in
   the Shortcuts tab. Ship sensible defaults only when they won't collide with macOS

@@ -183,7 +183,7 @@ struct IconsmithCommands: Commands {
                     .disabled(model.index >= model.sources.count - 1)
             }
         }
-        CommandGroup(replacing: .help) {
+        HelpCommands(info: info) {
             Button("Iconsmith Help") {
                 NSWorkspace.shared.open(Brand.repoURL.appending(path: "tree/main/apps/Iconsmith"))
             }

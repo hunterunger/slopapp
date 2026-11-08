@@ -98,7 +98,7 @@ struct CrateCommands: Commands {
                 .keyboardShortcut(.delete, modifiers: [.command, .shift])
                 .disabled(model.queue.items.isEmpty || model.queue.isBusy)
         }
-        CommandGroup(replacing: .help) {
+        HelpCommands(info: info) {
             Button("Crate Help") {
                 NSWorkspace.shared.open(Brand.repoURL.appending(path: "tree/main/apps/Crate"))
             }

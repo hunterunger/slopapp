@@ -32,7 +32,7 @@ struct ClipsApp: App {
         }
         .defaultSize(width: 860, height: 560)
         .windowToolbarStyle(.unified)
-        .commands { HistoryCommands(model: model) }
+        .commands { HistoryCommands(model: model, info: info) }
 
         Settings {
             SettingsView(model: model, info: info)
@@ -79,7 +79,7 @@ enum HistoryOpener {
     }
 }
 
-/// Status line → main actions → options → footer (Settings…, About, Quit).
+/// Status line → main actions → options → footer (Settings…, About, Report a Problem…, Quit).
 struct ClipsMenu: View {
     @Bindable var model: AppModel
     let info: AppInfo

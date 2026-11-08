@@ -85,7 +85,10 @@ struct FocusApp: App {
         Settings {
             FocusSettingsView(controller: controller, info: info)
         }
-        .commands { FocusCommands(controller: controller) }
+        .commands {
+            FocusCommands(controller: controller)
+            HelpCommands(info: info)
+        }
     }
 }
 

@@ -28,7 +28,7 @@ struct DropperCommands: Commands {
             Button(controller.settings.showDock ? "Hide Color Dock" : "Show Color Dock") { controller.dock.toggle() }
             Divider()
         }
-        CommandGroup(replacing: .help) {
+        HelpCommands(info: controller.info) {
             Button("Dropper Help") {
                 NSWorkspace.shared.open(Brand.repoURL.appending(path: "tree/main/apps/Dropper"))
             }

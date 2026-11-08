@@ -161,6 +161,7 @@ struct PanelActions {
     func openActivityMonitor() { controller.openActivityMonitor() }
     func openSettings() { controller.openSettings() }
     func showAbout() { controller.showAbout() }
+    func reportProblem() { controller.reportProblem() }
     func quit() { NSApp.terminate(nil) }
     func copy(_ group: ProcessGroup, sort: ProcessSort) { controller.copy(AppGrouping.copyText(group, sort: sort)) }
 }

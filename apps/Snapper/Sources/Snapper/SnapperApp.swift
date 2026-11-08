@@ -57,7 +57,7 @@ struct SnapperApp: App {
         }
         .menuBarExtraStyle(.menu)
         .commands {
-            CaptureCommands(model: model)
+            CaptureCommands(model: model, info: info)
             EditorCommands()
         }
 
@@ -71,6 +71,7 @@ struct SnapperApp: App {
 /// by the notch, or simply quicker from the menu bar).
 struct CaptureCommands: Commands {
     let model: AppModel
+    let info: AppInfo
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -87,7 +88,7 @@ struct CaptureCommands: Commands {
             Button("Reopen Last Capture") { model.reopenLastCapture() }
             historyButton
         }
-        CommandGroup(replacing: .help) {
+        HelpCommands(info: info) {
             Button("Snapper Help") {
                 NSWorkspace.shared.open(Brand.repoURL.appendingPathComponent("tree/main/apps/Snapper"))
             }
