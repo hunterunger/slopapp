@@ -5,8 +5,8 @@
 # The version must match apps/<Name>/app.json. The zip (and its icon) is attached to a
 # GitHub Release under that tag, which is where the website's download links point.
 #
-# Then the update feed is regenerated from the latest release of every app
-# (scripts/feed.mjs) and published to the gh-pages branch as feed.json, which is what the
+# Then the update feed is regenerated from the latest release of every app (feed.yml,
+# scripts/feed.mjs) and published to the gh-pages branch as feed.json, which is what the
 # Slopapp launcher reads (brand.json feedUrl). Turn on GitHub Pages for the repo with
 # "Deploy from a branch: gh-pages / (root)". See docs/pipeline.md, "Releases and the feed".
 #
@@ -119,50 +119,9 @@ jobs:
             --notes "$NOTE" \
             --generate-notes
 
-      # The feed lists the newest release of every app, so fetch the other apps' zips (the
-      # one just built is already in build/), hash them all, and publish feed.json.
-      - name: Collect the latest release of every other app
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NAME: ${{ steps.app.outputs.name }}
-        run: |
-          TAGS="$(gh release list --limit 1000 --json tagName --jq '.[].tagName')"
-          for m in apps/*/app.json; do
-            slug="$(jq -r .slug "$m")"; name="$(jq -r .name "$m")"
-            [ "$name" = "$NAME" ] && continue
-            tag="$(printf '%s\n' "$TAGS" | grep "^$slug-v" | head -n 1 || true)"
-            [ -n "$tag" ] || { echo "$name: not released yet (coming soon in the feed)"; continue; }
-            gh release download "$tag" --pattern "$name.zip" --dir build --clobber
-            gh release download "$tag" --pattern "$name-icon.png" --dir build --clobber || true
-          done
-
-      - name: Generate feed.json
-        run: node scripts/feed.mjs
-
-      - name: Publish feed.json to gh-pages
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          PAGES="$RUNNER_TEMP/pages"
-          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
-            git fetch --depth 1 origin gh-pages
-            git worktree add -B gh-pages "$PAGES" FETCH_HEAD
-          else
-            git worktree add --detach "$PAGES"
-            git -C "$PAGES" checkout --orphan gh-pages
-            git -C "$PAGES" rm -rf --quiet .
-          fi
-          cp build/feed.json "$PAGES/feed.json"
-          touch "$PAGES/.nojekyll"
-          git -C "$PAGES" add feed.json .nojekyll
-          if git -C "$PAGES" diff --cached --quiet; then echo "feed unchanged"; exit 0; fi
-          git -C "$PAGES" -c user.name="github-actions[bot]" \
-            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit --quiet -m "feed: $TAG"
-          git -C "$PAGES" push origin gh-pages
-
-      - name: Upload feed
-        uses: actions/upload-artifact@v4
-        with:
-          name: feed
-          path: build/feed.json
+  # Then the launcher's feed, with this release in it.
+  feed:
+    needs: release
+    uses: ./.github/workflows/feed.yml
+    permissions:
+      contents: write

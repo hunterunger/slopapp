@@ -1,0 +1,81 @@
+name: Feed
+
+# Publishes feed.json, the list the Slopapp launcher reads (brand.json feedUrl), to the
+# gh-pages branch: the newest release of every app, plus built and planned apps that have no
+# release yet ("coming soon", or "installed" when they're already on the Mac).
+#
+# Runs after every release (release.yml calls it), whenever the app list changes on main,
+# and by hand: gh workflow run Feed
+on:
+  push:
+    branches: [main]
+    paths:
+      - "catalog/roadmap.json"
+      - "apps/*/app.json"
+      - "apps/*/showcase.json"
+      - "web/public/shots/**"
+      - "brand/brand.json"
+      - "scripts/feed.mjs"
+      - "scripts/shots-feed.mjs"
+      - ".github/workflows/feed.yml"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  feed:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    # One at a time, so a release and a catalog change can't race on gh-pages.
+    concurrency:
+      group: feed
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      # The feed lists the newest release of every app: fetch each app's zip and icon from its
+      # latest release (feed.mjs hashes them and reads their Info.plist).
+      - name: Collect the latest release of every app
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build
+          TAGS="$(gh release list --limit 1000 --json tagName --jq '.[].tagName')"
+          for m in apps/*/app.json; do
+            slug="$(jq -r .slug "$m")"; name="$(jq -r .name "$m")"
+            tag="$(printf '%s\n' "$TAGS" | grep "^$slug-v" | head -n 1 || true)"
+            [ -n "$tag" ] || { echo "$name: not released yet (coming soon in the feed)"; continue; }
+            gh release download "$tag" --pattern "$name.zip" --dir build --clobber
+            gh release download "$tag" --pattern "$name-icon.png" --dir build --clobber || true
+          done
+
+      - name: Generate feed.json
+        run: node scripts/feed.mjs
+
+      - name: Publish feed.json to gh-pages
+        run: |
+          PAGES="$RUNNER_TEMP/pages"
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git fetch --depth 1 origin gh-pages
+            git worktree add -B gh-pages "$PAGES" FETCH_HEAD
+          else
+            git worktree add --detach "$PAGES"
+            git -C "$PAGES" checkout --orphan gh-pages
+            git -C "$PAGES" rm -rf --quiet .
+          fi
+          cp build/feed.json "$PAGES/feed.json"
+          touch "$PAGES/.nojekyll"
+          git -C "$PAGES" add feed.json .nojekyll
+          if git -C "$PAGES" diff --cached --quiet; then echo "feed unchanged"; exit 0; fi
+          git -C "$PAGES" -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -m "feed: ${GITHUB_REF_NAME} ${GITHUB_SHA::7}"
+          git -C "$PAGES" push origin gh-pages
+
+      - name: Upload feed
+        uses: actions/upload-artifact@v4
+        with:
+          name: feed
+          path: build/feed.json
