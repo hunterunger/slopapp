@@ -55,19 +55,21 @@ final class Navigation {
     /// categories, Updates last.
     typealias Section = SidebarItem
 
-    var section: Section? = .discover {
-        didSet { if oldValue != section { history.reset(); selection = nil } }
-    }
-    /// Pushed app pages, with Back/Forward.
+    /// Every page visited, with Back/Forward (sidebar pages and app pages alike).
     private(set) var history = PageHistory()
-    /// Slugs of pushed detail pages (bound to the navigation stack).
-    var path: [String] {
-        get { history.path }
-        set { history.sync(newValue) }
-    }
+    /// The sidebar page showing.
+    var section: Section { history.current.section }
+    /// The open app page, if any (it sits on top of the sidebar page).
+    var detail: String? { history.current.app }
     var search = "" {
-        // Typing shows the results, even from an app page.
-        didSet { if oldValue != search { selection = nil; history.reset() } }
+        // Typing shows the results, even from an app page (Back returns to it).
+        didSet {
+            guard oldValue != search else { return }
+            selection = nil
+            if detail != nil, !search.trimmingCharacters(in: .whitespaces).isEmpty {
+                history.go(to: Page(section))
+            }
+        }
     }
     /// The highlighted app in a grid (keyboard selection). Menu commands act on the open
     /// app page first, then on this.
@@ -77,20 +79,29 @@ final class Navigation {
     var sort: CatalogSort = .featured
 
     /// The app that Apps-menu commands act on.
-    var current: String? { path.last ?? selection }
+    var current: String? { detail ?? selection }
 
     func show(_ section: Section) {
-        self.section = section
-        history.reset()
         search = ""
-        selection = nil
+        visit(Page(section))
     }
 
-    func goBack() { history.back() }
-    func goForward() { history.forward() }
+    func goBack() { move { $0.back() } }
+    func goForward() { move { $0.forward() } }
 
     func showDetail(_ slug: String) {
-        history.open(slug)
+        visit(Page(section, app: slug))
+    }
+
+    private func visit(_ page: Page) {
+        move { $0.go(to: page) }
+    }
+
+    /// A grid's highlight belongs to its page: moving to another sidebar page drops it.
+    private func move(_ change: (inout PageHistory) -> Void) {
+        let before = history.current.section
+        change(&history)
+        if history.current.section != before { selection = nil }
     }
 
     /// Bumped by ⌘F; the content header's search field takes focus when it changes.
@@ -104,9 +115,9 @@ final class Navigation {
 
     /// The window title (Window menu, VoiceOver): the open app page, else the page.
     func windowTitle(appName: (String) -> String?) -> String {
-        if let slug = path.last, let name = appName(slug) { return name }
+        if let slug = detail, let name = appName(slug) { return name }
         if !search.trimmingCharacters(in: .whitespaces).isEmpty { return "Search" }
-        return (section ?? .discover).title
+        return section.title
     }
 
     /// Opens the library window (it may be closed while the menu bar item lives on).
@@ -187,7 +198,7 @@ struct SlopappCommands: Commands {
             .disabled(current == nil || current?.state == .comingSoon || current.map { store.operations[$0.id] != nil } ?? true)
             Button("Show Details") { if let current { navigation.showDetail(current.id) } }
                 .keyboardShortcut(.downArrow)
-                .disabled(current == nil || navigation.path.last == current?.id)
+                .disabled(current == nil || navigation.detail == current?.id)
             Button("Reveal in Finder") { if let current { store.reveal(current) } }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(current?.primary == nil)

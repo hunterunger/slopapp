@@ -26,7 +26,11 @@ import Testing
         // .installed is what puts Open on the card, the app page and the menus.
         #expect(item.state == .installed)
         #expect(!item.hasUpdate(for: item.primary!))
-        #expect(IconSource.of(item, allows: { _ in true }) == .installed(URL(fileURLWithPath: "/Applications/Slopapp/Squish.app")))
+        // By path: whether the URL ends in "/" depends on the folder existing on this Mac.
+        guard case .installed(let url) = IconSource.of(item, allows: { _ in true }) else {
+            Issue.record("expected the installed copy's icon"); return
+        }
+        #expect(url.standardizedFileURL.path == "/Applications/Slopapp/Squish.app")
     }
 
     @Test func notOnThisMacStaysComingSoon() {

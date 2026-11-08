@@ -70,7 +70,7 @@ struct SectionContent: View {
         if !navigation.search.trimmingCharacters(in: .whitespaces).isEmpty {
             SearchResultsView(store: store, navigation: navigation)
         } else {
-            switch navigation.section ?? .discover {
+            switch navigation.section {
             case .discover: DiscoverView(store: store, navigation: navigation)
             case .installed: InstalledView(store: store, navigation: navigation)
             case .updates: UpdatesView(store: store, navigation: navigation)

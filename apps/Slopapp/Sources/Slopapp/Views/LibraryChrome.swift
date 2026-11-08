@@ -46,7 +46,7 @@ struct PageStack: View {
     @State private var scrolled = false
 
     var body: some View {
-        let detail = navigation.path.last
+        let detail = navigation.detail
         ZStack {
             SectionContent(store: store, navigation: navigation)
                 .opacity(detail == nil ? 1 : 0)
@@ -82,7 +82,9 @@ struct Sidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Spacing.xs) {
-                Spacer(minLength: 0)
+                // Drags the window from the empty part of the row only, never from under the
+                // buttons, so a click on Back or Forward is always theirs.
+                WindowDragArea().frame(maxWidth: .infinity, maxHeight: .infinity)
                 HistoryButton(symbol: "chevron.left", label: "Back", help: "Back (⌘[)",
                               enabled: navigation.history.canGoBack) { navigation.goBack() }
                 HistoryButton(symbol: "chevron.right", label: "Forward", help: "Forward (⌘])",
@@ -91,7 +93,6 @@ struct Sidebar: View {
             // Forward's chevron ends on the rows' trailing content edge (where the count ends).
             .padding(.trailing, Sidebar.inset)
             .frame(height: WindowChrome.buttonRowHeight)
-            .background(WindowDragArea())
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {

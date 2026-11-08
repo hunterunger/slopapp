@@ -93,45 +93,66 @@ private func installed(_ app: FeedApp, version: String = "1.0.0") -> CatalogItem
 }
 
 @Suite struct PageHistoryTests {
-    @Test func backThenForwardReturnsToThePage() {
-        var history = PageHistory()
-        history.open("a")
-        history.open("b")
-        history.open("b")
-        #expect(history.path == ["a", "b"])
-        history.back()
-        #expect(history.path == ["a"] && history.canGoForward)
-        history.forward()
-        #expect(history.path == ["a", "b"] && !history.canGoForward)
-        history.forward()
-        #expect(history.path == ["a", "b"])
-    }
+    let discover = Page(.discover)
+    let installed = Page(.installed)
 
-    @Test func openingAnotherPageForgetsWhatWasAhead() {
-        var history = PageHistory()
-        history.open("a")
-        history.open("b")
-        history.back()
-        history.back()
-        #expect(history.ahead == ["b", "a"])
-        history.open("a")          // the same page that was next: keep the rest
-        #expect(history.ahead == ["b"])
-        history.open("c")
-        #expect(history.ahead.isEmpty && history.path == ["a", "c"])
-    }
-
-    @Test func followsTheStacksOwnBackButton() {
-        var history = PageHistory()
-        history.open("a")
-        history.open("b")
-        history.open("c")
-        history.sync(["a"])
-        #expect(history.ahead == ["c", "b"])
-        history.forward()
-        #expect(history.path == ["a", "b"])
-        history.sync(["x"])
-        #expect(history.ahead.isEmpty)
-        history.reset()
+    @Test func startsOnDiscoverWithNothingToGoBackTo() {
+        let history = PageHistory()
+        #expect(history.current == discover)
         #expect(!history.canGoBack && !history.canGoForward)
+    }
+
+    @Test func backReturnsToTheSidebarPageBefore() {
+        var history = PageHistory()
+        history.go(to: installed)
+        history.go(to: Page(.category("Utilities")))
+        #expect(history.canGoBack)
+        history.back()
+        #expect(history.current == installed)
+        history.back()
+        #expect(history.current == discover && !history.canGoBack)
+        history.back()
+        #expect(history.current == discover)
+    }
+
+    @Test func appPagesAndSidebarPagesShareOneHistory() {
+        var history = PageHistory()
+        history.go(to: Page(.discover, app: "clips"))
+        history.go(to: Page(.discover, app: "tidy"))     // a related app, from Clips's page
+        history.go(to: installed)
+        history.back()
+        #expect(history.current == Page(.discover, app: "tidy"))
+        history.back()
+        #expect(history.current == Page(.discover, app: "clips"))
+        history.forward()
+        history.forward()
+        #expect(history.current == installed && !history.canGoForward)
+    }
+
+    @Test func theSamePageTwiceIsOneStep() {
+        var history = PageHistory()
+        history.go(to: installed)
+        history.go(to: installed)
+        history.back()
+        #expect(history.current == discover && !history.canGoBack)
+    }
+
+    @Test func goingSomewhereNewForgetsWhatWasAhead() {
+        var history = PageHistory()
+        history.go(to: installed)
+        history.go(to: Page(.updates))
+        history.back()
+        history.back()
+        #expect(history.ahead == [Page(.updates), installed])
+        history.go(to: installed)                        // the page that was next: keep the rest
+        #expect(history.ahead == [Page(.updates)])
+        history.go(to: Page(.favorites))
+        #expect(history.ahead.isEmpty && history.behind == [discover, installed])
+    }
+
+    @Test func remembersALimitedNumberOfPages() {
+        var history = PageHistory()
+        for i in 0..<(PageHistory.limit + 50) { history.go(to: Page(.discover, app: "app\(i)")) }
+        #expect(history.behind.count == PageHistory.limit)
     }
 }

@@ -148,47 +148,51 @@ public struct FavoriteList: Sendable, Equatable {
     }
 }
 
-/// Back and Forward through app pages (like a browser): Back pops a page and remembers it,
-/// Forward pushes it again, opening a different page forgets what was ahead.
+/// A place in the launcher: a sidebar page, with an app page open on top of it or not.
+public struct Page: Hashable, Sendable {
+    public var section: SidebarItem
+    public var app: String?
+
+    public init(_ section: SidebarItem, app: String? = nil) {
+        self.section = section
+        self.app = app
+    }
+}
+
+/// Back and Forward through every page you visited, like a browser: sidebar pages and app
+/// pages alike. Going somewhere new forgets what was ahead, unless it's the page that was next.
 public struct PageHistory: Sendable, Equatable {
-    public private(set) var path: [String] = []
-    public private(set) var ahead: [String] = []
+    public private(set) var current: Page
+    public private(set) var behind: [Page] = []
+    public private(set) var ahead: [Page] = []
 
-    public init() {}
+    /// Pages remembered behind the current one; the oldest go first.
+    public static let limit = 200
 
-    public var canGoBack: Bool { !path.isEmpty }
+    public init(_ start: Page = Page(.discover)) {
+        current = start
+    }
+
+    public var canGoBack: Bool { !behind.isEmpty }
     public var canGoForward: Bool { !ahead.isEmpty }
 
-    public mutating func open(_ slug: String) {
-        guard path.last != slug else { return }
-        path.append(slug)
-        if ahead.last == slug { ahead.removeLast() } else { ahead = [] }
+    public mutating func go(to page: Page) {
+        guard page != current else { return }
+        behind.append(current)
+        if behind.count > Self.limit { behind.removeFirst(behind.count - Self.limit) }
+        if ahead.last == page { ahead.removeLast() } else { ahead = [] }
+        current = page
     }
 
     public mutating func back() {
-        guard let last = path.popLast() else { return }
-        ahead.append(last)
+        guard let previous = behind.popLast() else { return }
+        ahead.append(current)
+        current = previous
     }
 
     public mutating func forward() {
         guard let next = ahead.popLast() else { return }
-        path.append(next)
-    }
-
-    /// The navigation stack changed the path itself (its own back button, a swipe).
-    public mutating func sync(_ newPath: [String]) {
-        guard newPath != path else { return }
-        if newPath.count < path.count, Array(path.prefix(newPath.count)) == newPath {
-            ahead.append(contentsOf: path.suffix(from: newPath.count).reversed())
-        } else {
-            ahead = []
-        }
-        path = newPath
-    }
-
-    /// A new sidebar section: no pages, nothing ahead.
-    public mutating func reset() {
-        path = []
-        ahead = []
+        behind.append(current)
+        current = next
     }
 }
