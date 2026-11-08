@@ -75,20 +75,21 @@ Cheaper once phase 3's shared components exist.
 
 ## Owner's picks (2026-11-07)
 
-The owner trimmed the later list. In order:
+Built on 2026-11-07 (alpha, installed on the owner's Mac, Developer ID signed):
+**Commit** (Gitfox), **Dictate** (the owner's Better Transcriber, moved in), **Gauge** (iStat Menus,
+public APIs only), **Triggers** (BetterTouchTool), **Shorthand** (TextExpander) and a real **disk map
+in Tidy** (DaisyDisk). Also: herbarium icons for every app, the Nordic launcher and website, store
+screenshots (Snapper, Switchboard).
 
-1. **Commit** (Gitfox): the one they're most excited about. v1 with a simple branch graph,
-   unified diff only. Research: [`research/commit.md`](research/commit.md).
-2. **Dictate**: the owner's own Better Transcriber, moved into Slopapp (old repo archived
-   after the switch-over).
-3. Next: **Gauge** (iStat Menus, public APIs only, building) and **Triggers** (BetterTouchTool).
-   **Tuck** (Bartender) is skipped: hiding icons on macOS 27 needs private, fragile behaviour.
-4. Lower priority: a **disk map in Tidy** (DaisyDisk / GrandPerspective: a visual map of
-   what fills the disk, reusing Tidy's scan) and **Shorthand** (TextExpander / Rocket Typist).
+Still owed for each new app: the on-screen walkthrough (needs an unlocked Mac with the owner away),
+the owner's hand tests (listed in each research doc), blind test rounds, then beta and a release.
 
-Skipped: video downloaders (owner wants no legal risk), Safari extensions and proxies.
-The remaining P3 apps (Snip, Tiles, Switches, Quit, Shelf, Margin, Hours, Twins, Glance,
-Seek, Dual) are on hold; most can be skipped.
+Skipped: **Tuck** (Bartender; hiding icons on macOS 27 needs private, fragile behaviour), video
+downloaders (no legal risk wanted), Safari extensions and proxies. The remaining P3 apps (Snip,
+Tiles, Switches, Quit, Shelf, Margin, Hours, Twins, Glance, Seek, Dual) are on hold.
+
+Open owner decisions: Developer ID signing and notarization in CI (needs the certificate and a
+notary login as GitHub secrets), archiving Better Transcriber's repo after the switch-over.
 
 ## Running alongside every phase
 
