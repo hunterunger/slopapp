@@ -18,6 +18,14 @@ on:
       - "catalog/**"
       - "brand/**"
       - ".github/workflows/apps.yml"
+  # Run by hand on any branch, for some apps only:
+  #   gh workflow run Apps --ref <branch> -f apps="Dictate Commit"
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: "App folders to check, space-separated (empty: all)"
+        required: false
+        default: ""
 
 concurrency:
   group: apps-${{ github.ref }}
@@ -33,8 +41,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: apps
+        env:
+          ONLY: ${{ inputs.apps }}
         run: |
-          apps=$(for f in apps/*/app.json; do basename "$(dirname "$f")"; done | jq -R . | jq -sc .)
+          if [ -n "$ONLY" ]; then
+            apps=$(for a in $ONLY; do [ -f "apps/$a/app.json" ] && echo "$a"; done | jq -R . | jq -sc .)
+          else
+            apps=$(for f in apps/*/app.json; do basename "$(dirname "$f")"; done | jq -R . | jq -sc .)
+          fi
           echo "apps=$apps" >> "$GITHUB_OUTPUT"
 
   check:
