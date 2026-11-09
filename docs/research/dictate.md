@@ -44,7 +44,7 @@ Status: **done** (in Dictate and walked through), **done+** (done and improved),
 | 6 | Transcription engines: Parakeet (FluidAudio), Whisper (WhisperKit) | `TranscriptionEngine` protocol | done | `SpeechEngine` protocol in the core, fake in tests |
 | 7 | Model catalog: 5 Parakeet + 6 Whisper | `ModelCatalog` | done+ | Same list. Parakeet Mandarin was broken there (a CTC-only model loaded through the TDT path throws); Dictate uses FluidAudio's Mandarin manager in 15 s windows. Sizes corrected from the model repositories (the large Whisper models were shown as 600–950 MB; they're 1.5–3.1 GB) |
 | 8 | Model download | Implicit: selecting a model or launching downloads it | done+ | **Explicit**: nothing downloads until you press Download. Progress per model, errors on the row, Move to Trash per model. Whisper's tokenizer comes with the download, so loading never touches the network |
-| 9 | Model loading | Loads at launch, kept forever (≈330 MB footprint measured) | done+ | Loaded on demand **while you speak** (≈100 ms from cache), unloaded after 10 min idle by default; "Always" keeps the old behaviour. First use compiles for the Neural Engine once (≈15 s), done during setup |
+| 9 | Model loading | Loads at launch, kept forever (≈330 MB footprint measured) | done+ | Kept loaded by default, as before ("1 hour" and "10 min" free it when idle). The Neural Engine compile (≈15 s) isn't a one-off: macOS drops its cache some time after the model was last used, so a model freed when idle stalled the next dictation 15–30 s (fixed 2026-11-08) |
 | 10 | "Model isn't ready" failure | Recording refused until loaded | done+ | Never refused: recording starts at once, the model loads alongside |
 | 11 | Live preview | Re-transcribes the whole buffer every 0.9 s | done+ | Last 20 s only (constant cost on long dictations); never triggers a load; can be turned off |
 | 12 | Silence / annotations ignored | `[BLANK_AUDIO]`, `(silence)` dropped | done+ | Also `<|nospeech|>`, `*cough*`, leading tags; tested |
@@ -128,7 +128,7 @@ Files run one after another; select one to read, copy or save its transcript.
 | Command Mode shortcut | none | | |
 | Paste last transcript shortcut | none | | new |
 | Model | Parakeet TDT v3 | 11 models | download explicit |
-| Keep the model in memory | 10 min after use | Always, 1 hour, 10 min | new |
+| Keep the model in memory | Always | Always, 1 hour, 10 min | new (Better Transcriber always kept it) |
 | Remove filler words | off | | |
 | Lowercase start, no final period | off | | |
 | Word replacements | none | | |
@@ -224,7 +224,7 @@ Not testable here without a human: real speech through a real microphone, the Fn
 
 | Question | Decision | Why |
 |---|---|---|
-| Keep the model loaded all the time? | No: load while you speak, unload after 10 min idle (setting offers Always) | Warm load is ≈100 ms and overlaps speech; the always-loaded model cost ≈330 MB all day and fails the 50 MB menu bar budget |
+| Keep the model loaded all the time? | Yes, by default (2026-11-08; was: unload after 10 min idle) | The ≈100 ms reload was measured warm. Once macOS drops its cache of the compiled model, a reload took 16 s here and ≈30 s for the owner, so the first dictation after a break stalled. Better Transcriber kept it loaded and never did. The ≈330 MB is the model, not the app; the 50 MB menu bar budget is measured without a model (CI has none) |
 | Point at FluidAudio's shared model folder or clone? | Clone | FluidAudio deletes and re-downloads a folder whose load fails; a clone keeps the old app's files safe at no disk cost |
 | When does the import run? | On "Bring Them Over" in setup | Explicit, and a test/perf launch never imports a stale snapshot |
 | Default shortcuts | None (Fn is the trigger) | ⌥Space types a no-break space; ⌥⌘Space is Finder search |
@@ -283,7 +283,9 @@ audio (`AudioSink`), WhisperKit (`WhisperPipe`) and `Diagnostics` are explicitly
 Transcripts were exact ("Hello, this is a test of the new dictation app, um, the quick brown fox
 jumps over the lazy dog."); with filler removal on: "…app, the quick brown fox…" (Parakeet) and
 "…app. The quick brown fox…" (Whisper). The old app kept v3 loaded at ≈330 MB footprint all
-day; Dictate idles at 23 MB and reloads in ≈100 ms while you speak.
+day; Dictate idles at 23 MB without a model. The ≈100 ms warm load only holds while macOS still has
+the compiled model cached: a cold reload measured 16 s on 2026-11-08, so Dictate now keeps the model
+loaded by default too.
 
 **Import** (setup assistant, test mode, synthetic legacy prefs and history, the owner's real
 FluidAudio model folder as a read-only source): 10 settings, 4 dictations, Parakeet v3 + v2

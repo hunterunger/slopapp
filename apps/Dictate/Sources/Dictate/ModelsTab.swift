@@ -36,7 +36,7 @@ struct ModelsTab: View {
                     ForEach(ModelRetention.allCases) { Text($0.displayName).tag($0) }
                 } label: {
                     Text("Keep the model in memory")
-                    Text("A loaded model uses a few hundred MB of memory. Reloading takes a fraction of a second and happens while you speak.")
+                    Text("Always means dictation starts instantly, for a few hundred MB of memory. Otherwise, the first dictation after a break can take up to 30 seconds while the model reloads.")
                 }
                 LabeledContent("Now") {
                     Text(stateText)

@@ -20,7 +20,7 @@ struct SettingsTests {
         #expect(!s.aiCleanup)
         #expect(s.aiFixCorrections && s.aiFormatLists && s.aiGrammar && s.aiUseVocabulary)
         #expect(!s.hasCompletedOnboarding)
-        #expect(s.modelRetention == .tenMinutes)
+        #expect(s.modelRetention == .always)
     }
 
     @Test func changesPersistAndReload() {
@@ -29,7 +29,7 @@ struct SettingsTests {
         s.select(ModelCatalog.option(for: .whisper, id: "openai_whisper-small")!)
         s.hotkeyMode = .holdOrTap
         s.insertionMethod = .type
-        s.modelRetention = .always
+        s.modelRetention = .tenMinutes
         s.replacements = [Replacement(from: "a", to: "b")]
         s.appCleanupRules = [AppCleanupRule(bundleID: "com.apple.dt.Xcode", name: "Xcode", aiCleanup: .off)]
 
@@ -39,7 +39,7 @@ struct SettingsTests {
         #expect(again.parakeetModel == "v3")
         #expect(again.hotkeyMode == .holdOrTap)
         #expect(again.insertionMethod == .type)
-        #expect(again.modelRetention == .always)
+        #expect(again.modelRetention == .tenMinutes)
         #expect(again.replacements.map(\.to) == ["b"])
         #expect(again.appCleanupRules.first?.aiCleanup == .off)
     }

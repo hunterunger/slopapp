@@ -98,7 +98,9 @@ public enum InsertionMethod: String, CaseIterable, Identifiable, Codable, Sendab
 
 /// How long a speech model stays in memory after use.
 public enum ModelRetention: String, CaseIterable, Identifiable, Codable, Sendable {
-    /// Loaded at launch and kept: the first dictation is as fast as every other one.
+    /// Loaded at launch and kept: the first dictation is as fast as every other one. The
+    /// default: once macOS drops its cache of the compiled model (some time after it was last
+    /// used), a reload takes 15 to 30 seconds instead of a tenth of one.
     case always
     /// Unloaded an hour after the last use.
     case oneHour
@@ -312,7 +314,7 @@ public final class DictateSettings {
         insertionMethod = InsertionMethod(rawValue: string(SettingsKey.insertionMethod) ?? "") ?? .paste
         playSounds = bool(SettingsKey.playSounds, true)
         showLivePreview = bool(SettingsKey.showLivePreview, true)
-        modelRetention = ModelRetention(rawValue: string(SettingsKey.modelRetention) ?? "") ?? .tenMinutes
+        modelRetention = ModelRetention(rawValue: string(SettingsKey.modelRetention) ?? "") ?? .always
         hasCompletedOnboarding = bool(SettingsKey.hasCompletedOnboarding, false)
         removeFillers = bool(SettingsKey.removeFillers, false)
         lowercaseStyle = bool(SettingsKey.lowercaseStyle, false)

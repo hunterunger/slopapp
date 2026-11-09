@@ -220,7 +220,8 @@ public final class DictationController {
                 return
             }
             guard generation == self.generation, !cancelled else { return }
-            // The model loads while you talk, so a cold start costs nothing you'd notice.
+            // When the model isn't in memory (retention isn't "Always"), it loads while you talk.
+            // That's quick if macOS still has it cached, and up to 30 s when it doesn't.
             models.warmUp()
             if mode == .dictation { processor.prepare(for: settings.cleanupConfig(forBundleID: target?.bundleID)) }
             do {
