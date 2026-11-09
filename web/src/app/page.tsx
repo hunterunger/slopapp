@@ -166,9 +166,8 @@ export default function Home() {
                   </p>
                   {isBuilt(launcher) && (
                     <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted">
-                      Open the disk image and drag {brand.name} to Applications. It isn&apos;t notarized yet, so the
-                      first time you open it, macOS stops it: open System Settings &gt; Privacy &amp; Security,
-                      scroll down and click Open Anyway. You only need to do this once.
+                      Open the disk image and drag {brand.name} to Applications. It&apos;s signed and notarized by
+                      Apple, so it opens like any other app.
                     </p>
                   )}
                 </div>

@@ -176,9 +176,10 @@ Needs macOS 14 Sonoma or later (Dictate needs macOS 26.4). Each app can also be 
 its own from [Releases](https://github.com/hunterunger/slopapp/releases).
 
 > [!NOTE]
-> The apps aren't notarized by Apple yet, so the first time you open one, macOS stops it.
-> Open **System Settings > Privacy & Security**, scroll down, and click **Open Anyway**. You only
-> need to do this once per app.
+> The launcher is signed and notarized by Apple. Apps downloaded on their own from Releases
+> aren't all notarized yet: if macOS stops one the first time you open it, open **System
+> Settings > Privacy & Security**, scroll down, and click **Open Anyway**. You only need to do
+> this once per app.
 
 ## Feedback
 
