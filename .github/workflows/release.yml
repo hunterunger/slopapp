@@ -23,13 +23,14 @@
 #   DEVELOPER_ID_CERT_P12        base64 of your "Developer ID Application" .p12
 #   DEVELOPER_ID_CERT_PASSWORD   password for that .p12
 #   DEVELOPER_ID_IDENTITY        e.g. "Developer ID Application: Jane Doe (TEAMID1234)"
-#   NOTARY_APPLE_ID              Apple ID email used for notarization
-#   NOTARY_TEAM_ID               10-character team ID
-#   NOTARY_PASSWORD              app-specific password for that Apple ID
+#   NOTARY_API_KEY_P8            contents of an App Store Connect API key (AuthKey_XXXX.p8)
+#   NOTARY_API_KEY_ID            that key's ID (the XXXX)
+#   NOTARY_API_ISSUER            the issuer ID from App Store Connect > Users and Access > Integrations
 #
 # Secrets only reach this job, which runs on tag pushes (write access only), never on pull
 # requests. GitHub masks them in logs. The .p12 is decoded into the runner's temp folder,
-# imported into a throwaway keychain and deleted; the keychain is deleted at the end. Third-
+# imported into a throwaway keychain and deleted; the keychain and the notary key file are
+# deleted at the end. Third-
 # party actions are pinned to a commit, so a moved tag can't run new code next to the key.
 name: Release app
 
@@ -51,7 +52,7 @@ jobs:
     timeout-minutes: 30
     env:
       HAS_SIGNING: ${{ secrets.DEVELOPER_ID_CERT_P12 != '' }}
-      HAS_NOTARY: ${{ secrets.NOTARY_PASSWORD != '' }}
+      HAS_NOTARY: ${{ secrets.NOTARY_API_KEY_P8 != '' }}
     steps:
       # No git credentials on disk: nothing in this job pushes, and gh uses GH_TOKEN.
       - uses: actions/checkout@v4
@@ -98,6 +99,13 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/cert.p12"
 
+      - name: Write notary API key
+        if: env.HAS_SIGNING == 'true' && env.HAS_NOTARY == 'true'
+        env:
+          P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: |
+          (umask 077; printf '%s\n' "$P8" > "$RUNNER_TEMP/notary.p8")
+
       - name: Test
         run: scripts/test.sh SlopKit "${{ steps.app.outputs.name }}"
 
@@ -112,12 +120,11 @@ jobs:
         if: env.HAS_SIGNING == 'true' && env.HAS_NOTARY == 'true'
         env:
           NAME: ${{ steps.app.outputs.name }}
-          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
-          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_API_ISSUER }}
         run: |
           xcrun notarytool submit "build/$NAME.zip" \
-            --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD" --wait
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait
           xcrun stapler staple "build/$NAME.app"
           rm "build/$NAME.zip"
           ditto -c -k --keepParent "build/$NAME.app" "build/$NAME.zip"
@@ -133,12 +140,11 @@ jobs:
         if: steps.app.outputs.dmg == 'true' && env.HAS_SIGNING == 'true' && env.HAS_NOTARY == 'true'
         env:
           NAME: ${{ steps.app.outputs.name }}
-          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
-          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_API_ISSUER }}
         run: |
           xcrun notarytool submit "build/$NAME.dmg" \
-            --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD" --wait
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait
           xcrun stapler staple "build/$NAME.dmg"
 
       - name: Publish release
@@ -161,9 +167,11 @@ jobs:
             --generate-notes \
             "$LATEST"
 
-      - name: Remove signing keychain
-        if: always() && env.HAS_SIGNING == 'true'
-        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+      - name: Remove signing keychain and notary key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8"
 
   # Then the launcher's feed, with this release in it.
   feed:
