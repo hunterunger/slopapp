@@ -26,6 +26,11 @@
 #   NOTARY_APPLE_ID              Apple ID email used for notarization
 #   NOTARY_TEAM_ID               10-character team ID
 #   NOTARY_PASSWORD              app-specific password for that Apple ID
+#
+# Secrets only reach this job, which runs on tag pushes (write access only), never on pull
+# requests. GitHub masks them in logs. The .p12 is decoded into the runner's temp folder,
+# imported into a throwaway keychain and deleted; the keychain is deleted at the end. Third-
+# party actions are pinned to a commit, so a moved tag can't run new code next to the key.
 name: Release app
 
 on:
@@ -48,9 +53,12 @@ jobs:
       HAS_SIGNING: ${{ secrets.DEVELOPER_ID_CERT_P12 != '' }}
       HAS_NOTARY: ${{ secrets.NOTARY_PASSWORD != '' }}
     steps:
+      # No git credentials on disk: nothing in this job pushes, and gh uses GH_TOKEN.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - uses: maxim-lobanov/setup-xcode@v1
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: latest-stable
 
@@ -152,6 +160,10 @@ jobs:
             --notes "$NOTE" \
             --generate-notes \
             "$LATEST"
+
+      - name: Remove signing keychain
+        if: always() && env.HAS_SIGNING == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
 
   # Then the launcher's feed, with this release in it.
   feed:

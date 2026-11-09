@@ -28,3 +28,13 @@ docs/build-log.md
 
 # Agent worktrees
 .claude/worktrees/
+
+# Signing material never belongs in the repo (it lives in GitHub secrets)
+*.p12
+*.pfx
+*.keychain
+*.keychain-db
+*.mobileprovision
+*.provisionprofile
+.env
+.env.*
