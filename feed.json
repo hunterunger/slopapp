@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-09T23:18:56.991Z",
+  "generatedAt": "2026-11-09T23:34:52.332Z",
   "name": "Slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "apps": [
@@ -14,15 +14,15 @@
       "menuBarOnly": false,
       "hub": true,
       "status": "beta",
-      "version": "0.2.1",
-      "build": 3,
+      "version": "0.2.2",
+      "build": 4,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.slopapp",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.1/Slopapp.zip",
-      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.1/Slopapp-icon.png",
-      "sha256": "eae10e8b07667508c4c2181a3af383a3ecfbfe092c292a76c4329bcc5c9e4138",
-      "size": 6484645,
-      "installedSize": 15680571,
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.2/Slopapp.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.2/Slopapp-icon.png",
+      "sha256": "d99ab353b3f30ec8398522a492df08badf62ef5bc3a8fc21b58420fcd41e9d7f",
+      "size": 6486752,
+      "installedSize": 15682505,
       "releaseNotes": "",
       "shots": [
         {
