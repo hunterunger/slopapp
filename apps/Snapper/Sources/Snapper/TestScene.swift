@@ -1,6 +1,7 @@
 import SlopKit
 import AppKit
 import SnapperCore
+import CoreImage.CIFilterBuiltins
 
 /// A generated test pattern for scripted and blind tests (`SNAPPER_TEST_SCENE`), so test
 /// captures only ever record this window, never the owner's screen.
@@ -85,6 +86,14 @@ enum TestScene {
 final class TestPatternView: NSView {
     override var isFlipped: Bool { true }
 
+    static let qrPayload = "https://example.com/slopapp-test"
+    private static let qrCode: CGImage? = {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(qrPayload.utf8)
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 8, y: 8)) else { return nil }
+        return CIContext().createCGImage(output, from: output.extent)
+    }()
+
     override func draw(_ dirtyRect: NSRect) {
         NSColor(srgbRed: 0.96, green: 0.96, blue: 0.94, alpha: 1).setFill()
         bounds.fill()
@@ -134,6 +143,12 @@ final class TestPatternView: NSView {
                 NSColor.black.setFill()
                 CGRect(x: 680 + CGFloat(col) * 4, y: 340 + CGFloat(row) * 4, width: 4, height: 4).fill()
             }
+        }
+        // A QR code, for the thumbnail's QR row.
+        if let code = Self.qrCode {
+            NSImage(cgImage: code, size: CGSize(width: 120, height: 120)).draw(
+                in: CGRect(x: 790, y: 340, width: 120, height: 120), from: .zero, operation: .sourceOver,
+                fraction: 1, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.none.rawValue])
         }
         ("fake@example.com  ·  555-0100  ·  4111 1111 1111 1111" as NSString).draw(
             at: CGPoint(x: 42, y: 500),

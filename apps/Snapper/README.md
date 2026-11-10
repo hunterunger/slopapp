@@ -34,6 +34,10 @@ An open alternative to CleanShot X.
   (⌥-click Save: Save As…). Drag it straight into another app; right-click for more (Copy
   Text, Show in Finder, Export as GIF…). Thumbnails stack up from the corner, can close by
   themselves, and their size is adjustable. Closed one too soon? **Reopen Last Capture**.
+- **QR codes**: when a capture contains a QR code, its text appears under the thumbnail
+  with Copy, and Open for a web link (http and https only; anything else is copy-only).
+  Read on this Mac, after the thumbnail appears, so captures never wait for it. Up to three
+  codes per capture; Settings → Quick Access turns it off.
 - **Annotate**: every tool in the title bar: crop, background, select, rectangle, filled
   rectangle, ellipse, line, arrow, text, pencil, highlighter, blur/pixelate, spotlight and
   numbered steps, with colors and line widths. The **Background** tool puts the capture on a

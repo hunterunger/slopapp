@@ -6,10 +6,12 @@ import SwiftUI
 /// One capture card, laid out like the quick-access thumbnails people know: the capture
 /// fills the card; on hover it dims and shows Copy and Save in the middle, Close and Pin in
 /// the top corners, Annotate and Share in the bottom ones. Drag it out, double-click to
-/// annotate. The controls are always in the accessibility tree.
+/// annotate. The controls are always in the accessibility tree. QR codes found in the
+/// capture are listed underneath, each with Copy (and Open for a web link).
 struct CardView: View {
     let item: CaptureItem
     let thumbnailSize: CGSize
+    let codes: [ScannedCode]
     let model: AppModel
     let controller: CardController
     @State private var hoveringNow = false
@@ -19,6 +21,27 @@ struct CardView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            thumbnail
+            if !codes.isEmpty { Divider() }
+            ForEach(Array(codes.enumerated()), id: \.element.id) { index, code in
+                if index > 0 {
+                    Divider().padding(.horizontal, CardController.controlInset)
+                }
+                CodeRow(code: code, compact: thumbnailSize.width < 200, model: model)
+            }
+        }
+        .frame(width: thumbnailSize.width)
+        .clipShape(RoundedRectangle(cornerRadius: CardController.cornerRadius, style: .continuous))
+        // A one-pixel edge so a white or black capture still reads as a card on any backdrop.
+        .hairlineBorder(RoundedRectangle(cornerRadius: CardController.cornerRadius, style: .continuous))
+        // Anywhere on the card holds its auto-close; only the capture itself dims and shows
+        // its buttons, so reaching for a QR code's Copy doesn't cover the picture.
+        .onHover { inside in controller.setHovering(item, inside) }
+        .contextMenu { menu }
+    }
+
+    private var thumbnail: some View {
         ZStack {
             ThumbnailDragView(item: item, model: model, controller: controller)
             Rectangle()
@@ -36,14 +59,9 @@ struct CardView: View {
                 .opacity(hovering ? 1 : 0.001)
         }
         .frame(width: thumbnailSize.width, height: thumbnailSize.height)
-        .clipShape(RoundedRectangle(cornerRadius: CardController.cornerRadius, style: .continuous))
-        // A one-pixel edge so a white or black capture still reads as a card on any backdrop.
-        .hairlineBorder(RoundedRectangle(cornerRadius: CardController.cornerRadius, style: .continuous))
         .onHover { inside in
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) { hoveringNow = inside }
-            controller.setHovering(item, inside)
         }
-        .contextMenu { menu }
     }
 
     private var controls: some View {
@@ -105,6 +123,12 @@ struct CardView: View {
         if !item.isMedia {
             Button("Copy Text") { model.copyText(item) }
         }
+        ForEach(codes) { code in
+            if let host = code.link?.host {
+                Button("Open \(host)") { model.openCode(code) }
+            }
+            Button("Copy QR Code “\(TextLayout.preview(code.displayText, limit: 24))”") { model.copyCode(code) }
+        }
         Button("Save") { model.save(item) }
         Button("Save As…") { model.saveAs(item) }
         Button("Share…") { controller.share(item) }
@@ -114,6 +138,45 @@ struct CardView: View {
         Divider()
         Button("Close") { controller.close(item) }
         Button("Close All") { controller.closeAll() }
+    }
+}
+
+/// One QR code under a card: its text (a link on one line, other text on two at most, the
+/// full text on hover) with Copy, and Open for a web link. The buttons sit `controlInset`
+/// from the card's edge, like the corner buttons above, so the bottom ones stay concentric
+/// with the card's corners.
+struct CodeRow: View {
+    let code: ScannedCode
+    /// A narrow card: no QR glyph, so the text keeps some room beside the buttons.
+    let compact: Bool
+    let model: AppModel
+
+    var body: some View {
+        HStack(spacing: Spacing.xs) {
+            if compact {
+                Spacer().frame(width: Spacing.xs)
+            } else {
+                Image(systemName: "qrcode")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(width: CardController.controlSide, height: CardController.controlSide)
+                    .accessibilityHidden(true)
+            }
+            Text(code.displayText)
+                .font(.subheadline)
+                // A link stays on one line so it never wraps inside the site's name.
+                .lineLimit(code.link == nil ? 2 : 1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(code.payload)
+                .accessibilityLabel("QR code: \(code.displayText)")
+            if code.link != nil {
+                CornerButton("Open Link", systemImage: "arrow.up.right") { model.openCode(code) }
+            }
+            CornerButton("Copy QR Code", systemImage: "doc.on.doc") { model.copyCode(code) }
+        }
+        .padding(CardController.controlInset)
+        .accessibilityElement(children: .contain)
     }
 }
 

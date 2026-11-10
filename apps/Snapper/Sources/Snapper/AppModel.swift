@@ -55,6 +55,10 @@ final class AppModel {
     var ocrKeepLineBreaks: Bool {
         didSet { defaults.set(ocrKeepLineBreaks, forKey: Keys.ocrKeepLineBreaks) }
     }
+    /// Thumbnails show the text of any QR code in the capture, read on this Mac.
+    var showsCodes: Bool {
+        didSet { defaults.set(showsCodes, forKey: Keys.showsCodes); cards.showsCodesChanged() }
+    }
     var fileNameTemplate: String {
         didSet { defaults.set(fileNameTemplate, forKey: Keys.fileNameTemplate) }
     }
@@ -150,6 +154,7 @@ final class AppModel {
     /// The app a capture in progress comes from (set when it starts; window picks refine it).
     @ObservationIgnored var pendingSource: SourceApp?
     @ObservationIgnored let textRecognizer: TextRecognizing = VisionTextRecognizer()
+    @ObservationIgnored let codeReader: CodeReading = VisionCodeReader()
     @ObservationIgnored private let defaults = UserDefaults.standard
 
     private enum Keys {
@@ -168,6 +173,7 @@ final class AppModel {
         static let lastArea = "lastArea"
         static let selfTimerInterval = "selfTimerInterval"
         static let ocrKeepLineBreaks = "ocrKeepLineBreaks"
+        static let showsCodes = "showsCodes"
         static let fileNameTemplate = "fileNameTemplate"
         static let windowBackground = "windowBackground"
         static let windowPadding = "windowPadding"
@@ -206,6 +212,7 @@ final class AppModel {
         lastArea = d.data(forKey: Keys.lastArea).flatMap { try? JSONDecoder().decode(RememberedArea.self, from: $0) }
         selfTimerInterval = (d.object(forKey: Keys.selfTimerInterval) as? Int) ?? SelfTimer.defaultInterval
         ocrKeepLineBreaks = d.object(forKey: Keys.ocrKeepLineBreaks) as? Bool ?? true
+        showsCodes = d.object(forKey: Keys.showsCodes) as? Bool ?? true
         fileNameTemplate = d.string(forKey: Keys.fileNameTemplate) ?? FileNaming.defaultTemplate
         windowBackground = d.string(forKey: Keys.windowBackground).flatMap(GradientPreset.init)
         windowPadding = d.object(forKey: Keys.windowPadding) as? Double ?? 56
@@ -698,6 +705,27 @@ final class AppModel {
     func copyText(_ item: CaptureItem) {
         let image = item.image
         Task { await recognizeAndCopy(image) }
+    }
+
+    // MARK: QR codes
+
+    func copyCode(_ code: ScannedCode) {
+        pasteboard.write(text: code.payload)
+        HUD.show("Copied: \(TextLayout.preview(code.displayText))", systemImage: "qrcode", duration: .seconds(2.5))
+        Diagnostics.record("code copied characters=\(code.payload.count)")
+    }
+
+    /// Opens a code's web link in the default browser. Only http(s) links get here
+    /// (`ScannedCode.link`); anything else is copy-only.
+    func openCode(_ code: ScannedCode) {
+        guard let url = code.link else { return }
+        if Diagnostics.testScene != nil {
+            // Test runs never open a browser.
+            Diagnostics.record("code open refused in test mode host=\(url.host ?? "")")
+            return
+        }
+        NSWorkspace.shared.open(url)
+        Diagnostics.record("code opened")
     }
 
     // MARK: Self-timer

@@ -368,6 +368,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     try? rep.representation(using: .png, properties: [:])?.write(to: folder.appendingPathComponent("\(name).png"))
                 }
             },
+            "snapshotCardCodes": {
+                // The card's QR row drawn into PNGs without any window (no window server): the
+                // test pattern goes through the real code reader, then one and two codes at
+                // two widths, light and dark. Offscreen drawing leaves out the panel's glass
+                // and the thumbnail's layer, so this checks the row's layout and text only.
+                Task { @MainActor in
+                    let folder = URL(fileURLWithPath: Diagnostics.snapshotDirectory ?? "/tmp/snapper-test/snapshots", isDirectory: true)
+                    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    let pattern = TestPatternView(frame: CGRect(x: 0, y: 0, width: 1000, height: 680))
+                    guard let rep = pattern.bitmapImageRepForCachingDisplay(in: pattern.bounds) else { return }
+                    pattern.cacheDisplay(in: pattern.bounds, to: rep)
+                    guard let image = rep.cgImage else { return }
+                    let item = CaptureItem(image: image, scale: CGFloat(image.width) / 1000, displayID: nil)
+                    let found = (try? await model.codeReader.codes(in: image)) ?? []
+                    Diagnostics.record("offscreen codes found=\(found.map(\.payload))")
+                    let two = found + [ScannedCode(payload: "WIFI:T:WPA;S:Slopapp Test Network;P:not-a-real-password;;")]
+                    for (label, codes) in [("one", found), ("two", two)] {
+                        for width in [CGFloat(160), 240] {
+                            for (mode, name) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                                let card = CardView(item: item, thumbnailSize: CardController.thumbnailSize(for: item.size, width: width),
+                                                    codes: codes, model: model, controller: model.cards)
+                                let host = NSHostingView(rootView: card.background(Color(nsColor: .windowBackgroundColor)))
+                                host.appearance = NSAppearance(named: name)
+                                host.frame = CGRect(origin: .zero, size: host.fittingSize)
+                                host.layoutSubtreeIfNeeded()
+                                guard let shot = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { continue }
+                                host.cacheDisplay(in: host.bounds, to: shot)
+                                try? shot.representation(using: .png, properties: [:])?
+                                    .write(to: folder.appendingPathComponent("card-\(label)-\(Int(width))-\(mode).png"))
+                            }
+                        }
+                    }
+                    Diagnostics.record("offscreen cards written")
+                }
+            },
             "historyOff": { model.history.retention = .off },
             "historyMonth": { model.history.retention = .month },
             "editorSelect": { EditorWindowController.front?.tool = .select },

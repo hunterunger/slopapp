@@ -247,6 +247,10 @@ struct QuickAccessPane: View {
                     .labelsHidden()
                     .frame(width: 220)
                 }
+                Toggle(isOn: $model.showsCodes) {
+                    Text("Show QR code contents")
+                    Text("Reads any QR code in a capture, on this Mac, and shows it under the thumbnail.")
+                }
             }
             Section("Behavior") {
                 Picker("Auto-close", selection: $model.autoClose) {

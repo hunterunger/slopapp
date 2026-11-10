@@ -15,6 +15,8 @@ final class CardController {
     /// The screen each card shows on (the pointer's screen when it appeared, or the capture's).
     private var screens: [UUID: CGDirectDisplayID] = [:]
     private var builtWidth: [UUID: CGFloat] = [:]
+    /// The QR codes each card shows (read after it appears).
+    private var shownCodes: [UUID: [ScannedCode]] = [:]
     private var timer: Timer?
     static let gap: CGFloat = Spacing.m
     /// The card's corners. The round corner buttons sit `controlInset` in, and their radius
@@ -49,10 +51,7 @@ final class CardController {
         for id in evicted {
             if let card = cards[id] { close(card.item) }
         }
-        let size = Self.thumbnailSize(for: item.size, width: width)
-        let panel = FloatingPanel(cornerRadius: Self.cornerRadius) {
-            CardView(item: item, thumbnailSize: size, model: self.model, controller: self)
-        }
+        let panel = FloatingPanel(cornerRadius: Self.cornerRadius) { self.content(for: item) }
         panel.dismissesOnResignKey = false
         panel.level = .statusBar
         panel.setAccessibilityLabel("Capture")
@@ -75,6 +74,51 @@ final class CardController {
         model.openCards = cards.count
         relayout(appearing: item.id)
         scheduleTimer()
+        scanCodes(item)
+    }
+
+    private func content(for item: CaptureItem) -> CardView {
+        CardView(item: item, thumbnailSize: Self.thumbnailSize(for: item.size, width: width),
+                 codes: shownCodes[item.id] ?? [], model: model, controller: self)
+    }
+
+    // MARK: QR codes
+
+    /// Reads the QR codes in a card's capture once it's on screen (so the card never waits
+    /// for it), then grows the card to show them underneath.
+    private func scanCodes(_ item: CaptureItem) {
+        guard model.showsCodes, !item.isMedia, cards[item.id] != nil, item.codesScanned !== item.image else { return }
+        let image = item.image
+        item.codesScanned = image
+        let reader = model.codeReader
+        let started = Diagnostics.now()
+        Task { [weak self, weak item] in
+            let codes = (try? await reader.codes(in: image)) ?? []
+            guard let self, let item, item.image === image else { return }
+            Diagnostics.record("codes scanned found=\(codes.count) ms=\(Diagnostics.milliseconds(since: started))")
+            item.codes = codes
+            self.show(codes, on: item)
+        }
+    }
+
+    private func show(_ codes: [ScannedCode], on item: CaptureItem) {
+        guard let card = cards[item.id] else { return }
+        let codes = model.showsCodes ? codes : []
+        guard codes != (shownCodes[item.id] ?? []) else { return }
+        shownCodes[item.id] = codes
+        card.panel.setContent { content(for: item) }
+        relayout()
+    }
+
+    /// Settings → Quick Access → "Show QR code contents" changed.
+    func showsCodesChanged() {
+        for item in items {
+            if model.showsCodes {
+                if item.codesScanned === item.image { show(item.codes, on: item) } else { scanCodes(item) }
+            } else {
+                show([], on: item)
+            }
+        }
     }
 
     /// Closes a card. `remember` keeps it for "Reopen Last Capture".
@@ -82,6 +126,7 @@ final class CardController {
         guard let card = cards.removeValue(forKey: item.id) else { return }
         screens[item.id] = nil
         builtWidth[item.id] = nil
+        shownCodes[item.id] = nil
         queue.remove(item.id)
         model.openCards = cards.count
         card.panel.onDismiss = nil
@@ -131,8 +176,7 @@ final class CardController {
             guard let card = cards[id] else { continue }
             if builtWidth[id] != width {
                 // Size changes (Settings) apply to every card.
-                let size = Self.thumbnailSize(for: card.item.size, width: width)
-                card.panel.setContent { CardView(item: card.item, thumbnailSize: size, model: self.model, controller: self) }
+                card.panel.setContent { content(for: card.item) }
                 builtWidth[id] = width
             }
             let screen = NSScreen.screens.first { $0.displayID == (screens[id] ?? card.item.displayID) } ?? NSScreen.underPointer ?? NSScreen.main

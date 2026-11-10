@@ -790,3 +790,43 @@ a real drag from a card / the editor / History into Finder (owner-presence gate)
 the menu bar menu's new item, and active-window (accent) selection in History. The ready
 script is `/tmp/slopapp-polish/snapper/tools/histui.sh` (latency, both modes, tree, menu).
 "Hide from screen sharing" doesn't exist in Snapper, so there was nothing to keep unchanged.
+
+## QR codes on the thumbnail (2026-11-09)
+
+Owner request: when a capture contains a QR code, show its content under the floating
+thumbnail.
+
+### What was built
+
+- `SnapperCore/Text/CodeReader.swift`: `VisionCodeReader` (Vision `VNDetectBarcodesRequest`,
+  QR and Micro QR, on-device) behind `CodeReading`; `ScannedCodes.unique` (reading order, no
+  duplicates or blanks, at most 3); `ScannedCode.link` (only a single http(s) URL with a host
+  is a link) and `displayText` (whitespace collapsed; a link without `https://`, so the site
+  leads and survives truncation). Captures over 60 MP aren't scanned.
+- The card scans its capture after it appears (the card never waits), then grows by one row
+  per code under the thumbnail: QR glyph, the text (a link on one line, other text on two;
+  the full text on hover), Open for a link, Copy. Buttons are the card's corner buttons, at
+  the same inset, so the bottom ones stay concentric with the card's corners. The right-click
+  menu also gets "Open <host>" and "Copy QR Code “…”". Hovering the row holds auto-close but
+  doesn't dim the capture or show its buttons.
+- A scan of an older version of the capture is dropped, and edits clear the codes (a blurred
+  code mustn't keep showing its content). Settings → Quick Access → "Show QR code contents"
+  (on) turns it off for open cards too.
+
+### Decisions
+
+- **Open is http(s) only.** A code on screen is untrusted; `tel:`, `x-apple…:`, `file:` and
+  custom schemes can launch apps or act without a browser in between. They're copy-only.
+  Test mode never opens a browser.
+- The link is shown without its scheme but otherwise in full (no shortening services, no
+  fetch), so the host is what people read first.
+
+### Verified
+
+- Unit tests: link rules (10 non-links incl. `javascript:`, `file:`, bare domains), display
+  text, dedupe/cap, and Vision reading two generated codes top to bottom.
+- Offscreen render (`snapshotCardCodes` hook, no window on screen): the test pattern (now with
+  a QR code) through the real reader found `https://example.com/slopapp-test`; one and two
+  codes at 160 and 240 pt, light and dark. Fixed from them: links wrapped inside the domain
+  at 160 pt (now one line, and the glyph is dropped below 200 pt).
+- Not yet looked at on screen with the real glass (the owner was at the Mac).

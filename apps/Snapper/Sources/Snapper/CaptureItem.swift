@@ -28,6 +28,10 @@ final class CaptureItem: Identifiable {
     /// A screen recording (MP4 or GIF). `image` is then its first frame (the poster).
     var media: MediaFile?
     var isMedia: Bool { media != nil }
+    /// QR codes found in `image` (filled in after the card appears).
+    var codes: [ScannedCode] = []
+    /// The image `codes` were read from, so a scan of an older version is dropped.
+    var codesScanned: CGImage?
     /// Its Capture History entry, once recorded.
     var historyID: UUID?
     /// The entry's current file in history: what drags hand over when history is on (a
@@ -64,6 +68,9 @@ final class CaptureItem: Identifiable {
         self.document = document.isEdited ? document : nil
         image = rendered
         savedURL = nil
+        // Edits can cover or blur a code: read the new version again.
+        codes = []
+        codesScanned = nil
         invalidateTemporaryFile()
     }
 
