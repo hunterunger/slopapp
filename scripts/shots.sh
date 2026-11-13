@@ -4,7 +4,7 @@
 #   scripts/shots.sh <Name> [--force] [--only id,id] [--appearance light|dark] [--no-bundle] [--compose-only]
 #
 # Reads apps/<Name>/showcase.json, and for each shot, in light and then dark:
-#   1. shows a full-screen backdrop window of our own on the primary screen (category colour),
+#   1. shows a full-screen backdrop window of our own on the primary screen (the icon's tile colour),
 #   2. launches a private copy of build/<Name>.app (bundle id <id>.showcase, so it never meets
 #      the owner's installed copy, its settings or its links) with SLOP_SHOWCASE=<scene>,
 #      SLOP_APPEARANCE and the app's test-data environment from showcase.json,

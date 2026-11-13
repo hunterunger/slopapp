@@ -22,14 +22,14 @@ people there are working and dimmed at night, so you can tell at a glance who yo
   stays the same.
 - **Working hours.** 9–5, Monday to Friday by default; set your own in Settings → Places, and
   give any place its own hours and workdays (a Sunday–Thursday office, a night shift).
-- **Row styles** (Settings → General, or ⋯ → Row Style): Standard, Compact (one line per
+- **Row styles** (Settings → General, or ⚙ → Row Style): Standard, Compact (one line per
   place, for long lists) and Timeline, which adds a strip of each place's day (working
   hours, evening, night, and where its date changes) under every row.
 - **Planner** (**Open Planner**, **⌘0**): a window with every place as a clock card (analog
   or digital) and a grid of one whole day, hour by hour, shaded by working hours, with the
   hours when everyone is working marked and listed. Click an hour (or **← →**, **⌥← ⌥→** for
   days) to read it everywhere; **⌘C** copies it.
-- **Add to Calendar…** (⋯ menu, or the planner) makes an hour-long event at the shown time,
+- **Add to Calendar…** (⚙ menu, or the planner) makes an hour-long event at the shown time,
   with the time in every place in its notes, and opens it in your calendar app, which asks
   where to add it. Zones never reads your calendars and needs no calendar access.
 - **Share** (the share button) sends the shown time in every place to Messages, Mail, Notes…
@@ -116,6 +116,9 @@ Logic lives in `Sources/ZonesCore` (tested); views and wiring in `Sources/Zones`
 | `ZONES_APPEARANCE=light\|dark` | Force an appearance (screenshots) |
 | `ZONES_EXPORT_DIR=/tmp/x` | Add to Calendar writes `Meeting.ics` there instead of opening it |
 | `ZONES_SNAPSHOT_DIR=/tmp/x` | Render the panel, planner and Settings (light and dark) to PNGs offscreen, then quit |
+
+Quit any running Zones first: while a copy with the same bundle id is running, `drive launch`
+attaches to it and ignores `--env`.
 
 ```sh
 scripts/drive launch build/Zones.app --env ZONES_DEFAULTS_SUITE=zones-test --env ZONES_RESET=1 \

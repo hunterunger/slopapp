@@ -33,7 +33,7 @@ Never "SlopApp" or "Slop App".
 | File | Use |
 |---|---|
 | [`apps/Slopapp/AppIcon.icon`](../apps/Slopapp/AppIcon.icon) | The source: the launcher's Icon Composer document. Built from `apps/Slopapp/Icon.py` in the herbarium finish ([`ICONS.md`](ICONS.md)): the owner's two stacked rounded diamonds (the collection), a birch sheet over an ochre one, on a moss tile with a linden print. Render sizes and the Dark/Clear/Tinted looks with `ictool`. |
-| [`logo.svg`](logo.svg) | Full-color tile for the web: favicon, site header, social. A flat SVG take on the icon: the same gradient, the top layer white, the lower layer white at 80%. |
+| [`logo.svg`](logo.svg) | Full-color tile: the launcher icon drawn flat, without its print: a birch sheet over an ochre one on a moss tile (copied to `web/public/logo.svg`). The site's favicon is a separate file, `web/src/app/icon.svg`. |
 | [`mark-mono.svg`](mark-mono.svg) | One-color mark (`currentColor`): just the glyph, both layers. The website uses it in charcoal (birch in dark mode) as its logo. |
 
 Keep the glyph as drawn: two layers, no third, no outline, no tilt. On the tile, the glyph spans

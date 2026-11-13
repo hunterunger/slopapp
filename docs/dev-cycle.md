@@ -27,8 +27,10 @@ Tools used throughout:
   everything. Keys and clicks go to the target app's process, not to whatever the person at
   the Mac is using; mouse commands are opt-in (`--allow-mouse`) because they move the real
   cursor, and they refuse to act over any window that isn't the target app's.
-- `scripts/perf.sh <Name>`: launch time, idle CPU and memory against the budgets.
-- `scripts/check.sh <Name>`: unit tests, universal release bundle, smoke test, catalog.
+- `scripts/perf.sh <Name>`: launch time, idle CPU and memory against the budgets. It stops if
+  another copy of the app is running (e.g. the owner's installed one) rather than measure that copy.
+- `scripts/check.sh <Name>`: lint, icon check, unit tests, universal release bundle, smoke
+  test, catalog.
 
 ## 1. Pick
 
@@ -85,12 +87,13 @@ the owner before building.
 1. `scripts/new-app.sh <slug>` scaffolds `apps/<Name>/` from the roadmap entry. It builds and
    passes tests immediately.
 2. Follow [`docs/design-system.md`](design-system.md): pick the archetype (menu bar
-   utility, drop-in window, browser window, overlay), use the SlopKit pieces, use system
-   controls and the user's accent color, keep copy plain.
+   utility, drop-in window, browser/library window, overlay, document app), use the SlopKit
+   pieces, use system controls and the user's accent color, keep copy plain.
 3. Core logic in `Sources/<Name>Core` with tests from day one. System calls (pasteboard,
    IOKit, file system, NSWorkspace...) go behind protocols so tests can fake them.
 4. Build the v1 must-haves from the research doc in order of the main flow first.
-5. `scripts/run.sh <Name>` to use it yourself as you go.
+5. `scripts/run.sh <Name>` to use it yourself as you go. It quits any running copy first,
+   including the owner's installed one in `/Applications`.
 
 **Exit rule:** every v1 must-have works when used by hand, including the real system
 effect (the link really opens in the chosen browser; the file really shrinks).
@@ -119,6 +122,11 @@ Run all of these. Fix what fails, then run them again.
    scripts/drive quit Awake
    ```
    Check light and dark mode, and the empty, busy and error states.
+
+   If a copy with the same bundle id is already running (the owner's installed app),
+   `launch` doesn't start the build: LaunchServices hands back the running copy and `--env`
+   is ignored. `scripts/drive apps --paths` shows which copy is running; `launch --direct`
+   runs the build's binary as a separate copy.
 4. **Accessibility pass:** `scripts/drive tree <Name>` marks controls with no accessible
    name as `[unlabeled]`. Our apps must have none.
 5. **Gap review:** go down the research doc's feature inventory and v1 checklist. Each

@@ -1,6 +1,6 @@
 """Slopapp (the launcher): the owner's stacked-layers mark, the collection's front sheet over the
 one behind it, drawn in the herbarium finish. The brand mark, so its artwork is the owner's own SVG
-(isometric, off the 32 grid) rather than grid construction. Print: linden on the front sheet;
+(isometric, off the 32 grid) rather than grid construction. Print: linden on the ground;
 Linnaeus took his name from the linden tree."""
 from herbarium import *
 

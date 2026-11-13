@@ -96,7 +96,9 @@ apps/Tidy/Scripts/make-fixtures.sh   # a fake Mac in /tmp/tidy-test to try it on
 ```
 
 **Test mode.** Setting any `TIDY_*` variable makes every scan and every move stay inside
-the given folders (see `Sources/TidyCore/TidyEnvironment.swift`):
+the given folders (see `Sources/TidyCore/TidyEnvironment.swift`). Quit any running Tidy
+first: while a copy with the same bundle id is running, `drive launch` attaches to it and
+ignores `--env`, so you'd be in your real home folder.
 
 ```sh
 scripts/drive launch build/Tidy.app \

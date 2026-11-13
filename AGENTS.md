@@ -21,21 +21,25 @@ Brand: `brand/` (name lives in `brand/brand.json`). Research: `docs/setapp-inven
 | `docs/dev-cycle.md` | The 5-step cycle per app: pick, research, build, test, blind test |
 | `docs/research/<slug>.md` | Per-app research: feature inventory, flows, blind test log |
 | `tools/SlopDrive/` | Accessibility driver CLI, used via `scripts/drive` |
-| `.claude/agents/` | `app-researcher`, `blind-tester` |
+| `tools/Measure/`, `tools/Shots/` | Pixel checks behind `scripts/measure`; store screenshot composer behind `scripts/shots.sh` (`docs/screenshots.md`) |
+| `.claude/agents/` | `app-builder`, `app-researcher`, `blind-tester` |
 
 ## Commands
 
 ```sh
 scripts/new-app.sh <slug>        # scaffold apps/<Name> from catalog/roadmap.json (builds + tests it)
 scripts/test.sh [Name...]        # unit tests (default: SlopKit + all apps)
-scripts/run.sh <Name>            # debug .app, open it
+scripts/run.sh <Name>            # debug .app, open it. Quits any running copy first, installed ones too
 scripts/bundle.sh <Name>         # release .app (universal, ad-hoc signed) + zip in build/
 scripts/smoke.sh <Name>          # launch the .app, fail if it crashes
-scripts/check.sh [Name...] [--perf]  # full gate: lint + test + bundle + smoke + catalog (+ perf). CI runs this.
+scripts/check.sh [Name...] [--perf]  # full gate: lint + icon check + test + bundle + smoke + catalog (+ perf). CI runs this.
 scripts/lint.sh <Name>           # design-system detail rules grep can catch (radius literals, hex colours)
 scripts/measure corners <png>    # pixel checks on a window shot: corners, spacing (line), contrast
 scripts/perf.sh <Name>           # launch time, idle CPU, memory footprint vs budgets
+                                 # stops if another copy (e.g. the installed one) is running; --direct measures beside it
 scripts/drive help               # drive a running app: tree/click/menubar/type/key/shot
+                                 # `launch` hands back an already-running copy with the same bundle id
+                                 # (e.g. the installed one; --env is then ignored). --direct starts a separate copy
 python3 scripts/icons/herbarium.py check|build|render [Name...]  # app icons (brand/ICONS.md)
 python3 scripts/icons/export_web.py [Name...]  # the website's app icons and prints
 node scripts/catalog.mjs         # regenerate the website catalog
@@ -61,7 +65,7 @@ Logs: `build/logs/<Name>-{build,test,sign,smoke,herbarium,icon}.log`.
 
 - Follow `docs/design-system.md`, including the §4 detail rules (concentric corners from
   `Radius`, even insets, alignment, hairlines, full-size window buttons). Pick an archetype (menu bar utility, drop-in window, library
-  window, overlay) before writing UI, and grade against its review checklist.
+  window, overlay, document app) before writing UI, and grade against its review checklist.
 - Use SlopKit instead of rolling your own: `SlopSettings` for every Settings window, `MenuFooter`
   in menu bar menus, `HelpCommands` for the Help menu, `IssueReport` for "Report a Problem…"
   anywhere else, `FloatingPanel`/`HUD` for overlays, `DropZone`, `PermissionGate`, `ShortcutRow`.

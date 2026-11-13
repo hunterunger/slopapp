@@ -192,12 +192,12 @@ its own from [Releases](https://github.com/hunterunger/slopapp/releases).
 
 ## Build from source
 
-Needs macOS 14+ and Xcode 16+. No Xcode project: everything builds with SwiftPM and a few scripts.
+Needs macOS 14+ and Xcode 26+. No Xcode project: everything builds with SwiftPM and a few scripts.
 
 ```sh
-scripts/run.sh Clips          # build and open an app
+scripts/run.sh Clips          # build and open an app (quits any copy already running)
 scripts/test.sh Clips         # its tests
-scripts/check.sh              # lint, test, bundle and smoke-test every app (what CI runs)
+scripts/check.sh              # lint, icon check, test, bundle and smoke-test every app (what CI runs)
 cd web && pnpm i && pnpm dev  # the website
 ```
 
