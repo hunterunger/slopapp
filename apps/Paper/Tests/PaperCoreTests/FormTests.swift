@@ -342,3 +342,44 @@ struct FieldAccessibilityTests {
         #expect(FormFields.widgets(in: reopened).first.map { FormFieldFactory.tooltip(of: $0.annotation) } == "Agree to terms")
     }
 }
+
+@Suite("Form fields from other writers")
+struct ForeignFormTests {
+    /// A radio group whose parent field has no radio flag (as macOS 26's PDFKit writes one).
+    static func flaglessRadioGroup() -> Data {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R] >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R 5 0 R] >>",
+            "<< /Type /Annot /Subtype /Widget /Parent 6 0 R /Rect [72 580 88 596] /AS /Off /F 4 /AP << /N << /A 7 0 R /Off 7 0 R >> >> >>",
+            "<< /Type /Annot /Subtype /Widget /Parent 6 0 R /Rect [100 580 116 596] /AS /B /F 4 /AP << /N << /B 7 0 R /Off 7 0 R >> >> >>",
+            "<< /FT /Btn /T (plan) /Ff 0 /V /B /Kids [4 0 R 5 0 R] >>",
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 16 16] /Length 0 >>\nstream\n\nendstream",
+        ]
+        var out = "%PDF-1.7\n"
+        var offsets: [Int] = []
+        for (index, body) in objects.enumerated() {
+            offsets.append(out.utf8.count)
+            out += "\(index + 1) 0 obj\n\(body)\nendobj\n"
+        }
+        let xref = out.utf8.count
+        out += "xref\n0 \(objects.count + 1)\n0000000000 65535 f \n"
+        for offset in offsets { out += String(format: "%010d 00000 n \n", offset) }
+        out += "trailer\n<< /Size \(objects.count + 1) /Root 1 0 R >>\nstartxref\n\(xref)\n%%EOF\n"
+        return Data(out.utf8)
+    }
+
+    @Test func radioGroupsGetTheRadioFlag() throws {
+        let data = Self.flaglessRadioGroup()
+        let states = [
+            WidgetState(pageIndex: 0, rect: CGRect(x: 72, y: 580, width: 16, height: 16), kind: .radio, onState: "A", isOn: false),
+            WidgetState(pageIndex: 0, rect: CGRect(x: 100, y: 580, width: 16, height: 16), kind: .radio, onState: "B", isOn: true),
+        ]
+        let fixed = AcroFormWriter.finalize(data, widgets: states)
+        let file = try PDFFile(data: fixed)
+        let parent = try #require(file.dict(.ref(6, 0)))
+        #expect((parent["Ff"]?.intValue ?? 0) & AcroFormWriter.radioFlag != 0)
+        #expect(parent["V"] == .name("B"))
+        #expect(AcroFormWriter.finalize(fixed, widgets: states) == fixed)
+    }
+}
