@@ -738,6 +738,16 @@ final class AppModel {
         return history.isOn ? history.reopenCandidate != nil : lastClosed != nil
     }
 
+    /// Edited images on screen that exist nowhere else: not in History, never saved or
+    /// copied out (an opened file's edits, or any edits with History off).
+    var unsavedEdits: [CaptureItem] {
+        var seen = Set<UUID>()
+        return (cards.items + pins.items + EditorWindowController.openItems).filter { item in
+            guard seen.insert(item.id).inserted else { return false }
+            return !item.isMedia && item.document != nil && item.historyID == nil && item.savedURL == nil
+        }
+    }
+
     /// History ids of every capture on screen (cards, editors, pins): never pruned or deleted.
     var openHistoryIDs: Set<UUID> {
         Set((cards.items + pins.items + EditorWindowController.openItems).compactMap(\.historyID))
@@ -950,8 +960,13 @@ final class AppModel {
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
         NSApp.activate()
-        guard panel.runModal() == .OK, let url = panel.url,
-              let image = NSImage(contentsOf: url), let item = Self.item(from: image) else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let image = NSImage(contentsOf: url), let item = Self.item(from: image) else {
+            // A damaged file, or one only named like an image: say so instead of doing nothing.
+            HUD.show("Not a readable image: \(url.lastPathComponent)", systemImage: "exclamationmark.triangle", duration: .seconds(2.5))
+            Diagnostics.record("image file unreadable")
+            return
+        }
         item.sourceName = url.deletingPathExtension().lastPathComponent
         action(item)
     }

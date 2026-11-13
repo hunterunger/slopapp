@@ -256,7 +256,7 @@ struct HistoryView: View {
                 .help("Show one kind of capture")
             }
         }
-        .searchable(text: $state.search, placement: .toolbar, prompt: "Search Apps")
+        .searchable(text: $state.search, placement: .toolbar, prompt: "App or Kind")
         .quickLookPreview($state.quickLookURL, in: state.quickLookURLs)
     }
 

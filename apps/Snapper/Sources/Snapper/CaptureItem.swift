@@ -30,6 +30,9 @@ final class CaptureItem: Identifiable {
     var isMedia: Bool { media != nil }
     /// A trimmed video's whole recording, while it isn't in history (history keeps its own).
     var untrimmed: MediaFile?
+    /// Goes up whenever the capture's picture or recording changes, so a card redraws (its
+    /// view sees the same item object otherwise and keeps the old poster and length).
+    private(set) var revision = 0
     /// QR codes found in `image` (filled in after the card appears).
     var codes: [ScannedCode] = []
     /// The image `codes` were read from, so a scan of an older version is dropped.
@@ -70,6 +73,7 @@ final class CaptureItem: Identifiable {
         self.document = document.isEdited ? document : nil
         image = rendered
         savedURL = nil
+        revision += 1
         // Edits can cover or blur a code: read the new version again.
         codes = []
         codesScanned = nil
@@ -81,6 +85,7 @@ final class CaptureItem: Identifiable {
         self.media = media
         image = poster
         savedURL = nil
+        revision += 1
     }
 
     // MARK: Temporary file

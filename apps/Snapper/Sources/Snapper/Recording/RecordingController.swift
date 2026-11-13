@@ -461,6 +461,7 @@ struct RecordingBar: View {
                         .frame(width: ControlBar.controlHeight, height: ControlBar.controlHeight)
                         .help("Microphone level")
                         .accessibilityElement()
+                        .accessibilityAddTraits(.isImage)
                         .accessibilityLabel("Microphone")
                         .accessibilityValue(clock.phase == .paused ? "Paused" : "Recording")
                 }
@@ -539,19 +540,22 @@ struct MicrophoneGlyph: View {
 
     var body: some View {
         if isOn {
-            ZStack {
-                Image(systemName: "mic.fill").foregroundStyle(.secondary)
-                Image(systemName: "mic.fill")
-                    .foregroundStyle(Color.accentColor)
-                    .mask(alignment: .bottom) {
-                        GeometryReader { proxy in
-                            Rectangle()
-                                .frame(height: proxy.size.height * max(0.18, level))
-                                .frame(maxHeight: .infinity, alignment: .bottom)
+            // One image (one accessibility element); the level is an overlay drawn over it.
+            Image(systemName: "mic.fill")
+                .foregroundStyle(.secondary)
+                .overlay {
+                    Image(systemName: "mic.fill")
+                        .foregroundStyle(Color.accentColor)
+                        .mask(alignment: .bottom) {
+                            GeometryReader { proxy in
+                                Rectangle()
+                                    .frame(height: proxy.size.height * max(0.18, level))
+                                    .frame(maxHeight: .infinity, alignment: .bottom)
+                            }
                         }
-                    }
-            }
-            .font(.body.weight(.semibold))
+                        .accessibilityHidden(true)
+                }
+                .font(.body.weight(.semibold))
         } else {
             Image(systemName: "mic.slash")
                 .font(.body.weight(.semibold))

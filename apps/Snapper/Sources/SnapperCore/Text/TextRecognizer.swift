@@ -19,16 +19,27 @@ public struct RecognizedLine: Equatable, Sendable {
 }
 
 public enum TextLayout {
-    /// Lines top to bottom (left to right on the same line), joined with line breaks or
-    /// spaces. Hyphenated line ends are kept as they are.
+    /// Lines top to bottom, joined with line breaks or spaces. Pieces Vision reads apart on
+    /// the same visual line ("a   ·   b" with wide gaps) stay on one line, left to right,
+    /// separated by a space. Hyphenated line ends are kept as they are.
     public static func join(_ lines: [RecognizedLine], keepLineBreaks: Bool) -> String {
-        let sorted = lines.sorted { a, b in
-            // Same visual line if their vertical centers are within half a line height.
-            let tolerance = min(a.box.height, b.box.height) / 2
-            if abs(a.box.midY - b.box.midY) > tolerance { return a.box.midY > b.box.midY }
-            return a.box.minX < b.box.minX
+        let pieces = lines.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+            .sorted { $0.box.midY > $1.box.midY }
+        var rows: [[RecognizedLine]] = []
+        for piece in pieces {
+            // Same visual line if its vertical center is within half a line height of the row's.
+            if let row = rows.last, let first = row.first,
+               abs(first.box.midY - piece.box.midY) <= min(first.box.height, piece.box.height) / 2 {
+                rows[rows.count - 1].append(piece)
+            } else {
+                rows.append([piece])
+            }
         }
-        let texts = sorted.map { $0.text.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let texts = rows.map { row in
+            row.sorted { $0.box.minX < $1.box.minX }
+                .map { $0.text.trimmingCharacters(in: .whitespaces) }
+                .joined(separator: " ")
+        }
         return texts.joined(separator: keepLineBreaks ? "\n" : " ")
     }
 

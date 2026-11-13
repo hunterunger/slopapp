@@ -24,7 +24,8 @@ An open alternative to CleanShot X.
 - **Scrolling capture**: pick the scrolling part of a window, press Start, scroll down at
   your own pace, press Done. One tall image, stitched as you go, with a live preview.
 - **Capture text** (⌥⇧⌘2): pick an area and its text is copied (on-device text recognition,
-  line breaks kept or not). Also "Copy Text" on any thumbnail and in the editor.
+  line breaks kept or not; words spread along one line stay on one line). Also "Copy Text"
+  on any thumbnail and in the editor.
 - **Record the screen** (⌥⇧⌘6): pick an area or window, then Record Video (Return) or
   Record GIF (⌥Return). A small bar shows the time with Stop, Pause and Discard; the rest of
   the screen dims (optional), and the record shortcut or the menu bar icon stops it. Videos
@@ -36,8 +37,8 @@ An open alternative to CleanShot X.
   pinch or scroll to resize it, right-click for sizes and the shape. **Show clicks** draws a
   ring where you click; **Show keystrokes** puts the shortcuts you press (or, if you choose,
   all keys) in a caption at the bottom. All off until you turn them on; GIFs are silent.
-- **Trim a video**: Trim on its thumbnail (or ⌘E) opens it with the Mac's own trimming bar.
-  Drag the handles, press Trim: the part you keep is copied without re-encoding, and the
+- **Trim a video**: Trim on its thumbnail (or ⌘E) opens it with the Mac's own trimming bar
+  under the picture. Drag the handles, press Trim (or Return): the part you keep is copied without re-encoding, and the
   thumbnail and history get the shorter video. "Restore Untrimmed Recording" in the
   thumbnail's menu undoes it.
 - After each capture a **thumbnail** appears in a bottom corner. Hover it: Copy and Save in
@@ -72,7 +73,11 @@ An open alternative to CleanShot X.
 - **File names** follow a template ("{type} {date} at {time}" by default; Settings →
   Advanced).
 - Every command is also in the app's own menus whenever a Snapper window is open, for when
-  the menu bar icon is hidden behind the notch.
+  the menu bar icon is hidden behind the notch or a full menu bar: open Snapper again
+  (Finder, Spotlight) and Settings opens with those menus. Snapper says so once if macOS
+  had no room for its icon.
+- Edited images are never lost on quit: with History on they're kept there (edits
+  included, even for an opened file); with History off, Snapper asks first.
 
 ## Keyboard
 
@@ -151,7 +156,7 @@ every capture is filtered to the scene window *and* masked to its frame minus th
 so nothing else on screen can end up in a test capture),
 `SNAPPER_TEST_HOOKS=1`, `SNAPPER_LOG`, `SNAPPER_APPEARANCE`, `SNAPPER_SILENT`,
 `SNAPPER_PASTEBOARD=<name>` (Copy goes to a private pasteboard, never the real clipboard),
-`SNAPPER_DEFAULTS_SUITE=<name>` (settings in their own suite), `SNAPPER_TEMP_DIR`,
+`SNAPPER_DEFAULTS_SUITE=<name>` (settings in their own suite, and Snapper's default shortcuts shown instead of the installed copy's), `SNAPPER_TEMP_DIR`,
 `SNAPPER_NO_SHORTCUTS=1` (a test copy never touches an installed copy's settings, temporary
 folder or hotkeys), `SNAPPER_FAKE_MEDIA=granted|denied|undetermined` (a generated test
 camera and a tone as the microphone; always on in test mode, so a test recording never

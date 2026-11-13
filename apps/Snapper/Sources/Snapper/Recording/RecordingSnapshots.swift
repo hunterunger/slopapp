@@ -42,9 +42,7 @@ enum RecordingSnapshots {
         for (name, permission) in [("microphone", RecordingPermission.media(.microphone)), ("camera", .media(.camera)), ("accessibility", .accessibility)] {
             render("permission-\(name)", MediaPermissionView(permission: permission) {})
         }
-        let caption = CaptionModel()
-        caption.text = "⌘⇧4"
-        render("caption", CaptionView(model: caption))
+        render("caption", CaptionView(text: "⇧⌘4"))
         render("settings-recording", width: 560, height: 1180, RecordingPane(model: model))
         (model.recordMicrophone, model.recordComputerAudio, model.recordCamera, model.recordShowClicks, model.recordShowKeys) = saved
         Diagnostics.record("offscreen recording ui written")

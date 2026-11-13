@@ -37,11 +37,13 @@ final class TrimWindowController: NSObject, NSWindowDelegate {
         self.item = item
         self.model = model
         let size = Self.windowSize(for: item.size)
-        window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+        // A plain titled window: the video sits under the title bar, never behind it (a
+        // recording of a window has its own title bar, which mustn't read as ours).
+        window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
         super.init()
         window.title = "Trim \(item.fileBaseName)"
-        window.titlebarAppearsTransparent = true
+        window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
         window.contentMinSize = CGSize(width: 480, height: 300)
         window.delegate = self
@@ -49,17 +51,39 @@ final class TrimWindowController: NSObject, NSWindowDelegate {
         playerView.showsFrameSteppingButtons = true
         playerView.showsSharingServiceButton = false
         playerView.allowsPictureInPicturePlayback = false
-        playerView.player = AVPlayer(url: url)
+        // No Live Text over the frames: it adds unlabeled text areas and nothing to trim.
+        playerView.allowsVideoFrameAnalysis = false
+        let player = AVPlayer(url: url)
+        playerView.player = player
         playerView.setAccessibilityLabel("Recording")
-        window.contentView = playerView
+        // The picture on its own above, the system's trimming bar in a strip below it, so the
+        // bar never covers the video. (The player view's own small picture behind the bar is
+        // hidden by its overlay.)
+        let picture = PlayerLayerView(player: player)
+        let shade = WindowBackgroundView()
+        playerView.contentOverlayView?.addSubview(shade)
+        shade.frame = playerView.contentOverlayView?.bounds ?? .zero
+        shade.autoresizingMask = [.width, .height]
+        let content = NSView(frame: CGRect(origin: .zero, size: size))
+        picture.frame = CGRect(x: 0, y: Self.barHeight, width: size.width, height: size.height - Self.barHeight)
+        picture.autoresizingMask = [.width, .height]
+        playerView.frame = CGRect(x: 0, y: 0, width: size.width, height: Self.barHeight)
+        playerView.autoresizingMask = [.width, .maxYMargin]
+        content.addSubview(picture)
+        content.addSubview(playerView)
+        window.contentView = content
         window.center()
     }
 
-    /// The video at up to 960 × 640 points, never smaller than the trimming bar needs.
+    /// The strip under the picture for the trimming bar.
+    static let barHeight: CGFloat = 76
+
+    /// The video at up to 960 × 600 points plus the trimming bar's strip, never smaller than
+    /// the bar needs.
     static func windowSize(for video: CGSize) -> CGSize {
-        let limit = CGSize(width: 960, height: 640)
+        let limit = CGSize(width: 960, height: 600)
         let scale = min(1, limit.width / max(video.width, 1), limit.height / max(video.height, 1))
-        return CGSize(width: max(480, (video.width * scale).rounded()), height: max(300, (video.height * scale).rounded()))
+        return CGSize(width: max(560, (video.width * scale).rounded()), height: max(240, (video.height * scale).rounded()) + barHeight)
     }
 
     private func present() {
@@ -119,4 +143,44 @@ final class TrimWindowController: NSObject, NSWindowDelegate {
         playerView.player?.pause()
         Self.open[item.id] = nil
     }
+}
+
+/// The window's background colour as a layer, following appearance changes.
+private final class WindowBackgroundView: NSView {
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    }
+}
+
+/// The video, aspect-fit on the window's background (the trim window's picture).
+private final class PlayerLayerView: NSView {
+    private let playerLayer: AVPlayerLayer
+
+    init(player: AVPlayer) {
+        playerLayer = AVPlayerLayer(player: player)
+        super.init(frame: .zero)
+        wantsLayer = true
+        playerLayer.videoGravity = .resizeAspect
+        layer?.addSublayer(playerLayer)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.image)
+        setAccessibilityLabel("Video")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer.frame = bounds
+        CATransaction.commit()
+    }
+
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    }
+
+    override var wantsUpdateLayer: Bool { true }
 }
