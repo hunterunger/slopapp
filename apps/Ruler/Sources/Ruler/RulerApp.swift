@@ -201,7 +201,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         guard MeasureOverlay.current == nil else { return }
-        standard.applicationDidBecomeActive(notification)
         AppModel.shared.refreshPermission()
     }
 

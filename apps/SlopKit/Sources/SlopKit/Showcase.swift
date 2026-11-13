@@ -17,7 +17,7 @@ import AppKit
 ///
 ///     if let scene = Showcase.scene {
 ///         switch scene {
-///         case "hero": openEditor(fixture); Showcase.ready { EditorWindowController.front?.window }
+///         case "hero": openEditor(fixture); Showcase.ready { [EditorWindowController.front?.window] }
 ///         default: Showcase.fail("unknown scene \(scene)")
 ///         }
 ///     }

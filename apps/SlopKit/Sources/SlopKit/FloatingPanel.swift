@@ -170,7 +170,7 @@ public final class FloatingPanel: NSPanel {
 }
 
 extension EnvironmentValues {
-    /// The corner radius of the `FloatingPanel` (or `HUD`) this view is in; `Radius.xl`
+    /// The corner radius of the `FloatingPanel` this view is in (a `HUD` doesn't set it); `Radius.xl`
     /// outside one. Use it for concentric inner shapes: `Radius.nested(in: radius, padding: p)`.
     @Entry public var floatingPanelCornerRadius: CGFloat = Radius.xl
 }

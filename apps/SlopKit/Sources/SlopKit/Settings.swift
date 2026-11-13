@@ -80,13 +80,19 @@ public struct GeneralSettingsTab<Content: View>: View {
         self.content = content()
     }
 
+    private static var isMenuBarOnly: Bool {
+        Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool ?? false
+    }
+
     public var body: some View {
         SettingsForm {
             Section {
                 LaunchAtLoginToggle()
                 if isMenuBarApp {
                     Toggle("Show in menu bar", isOn: $showMenuBarIcon)
-                    if !showMenuBarIcon {
+                    // Only a menu-bar-only app needs the way back spelled out; an app with a
+                    // window (the launcher) reaches Settings from that window.
+                    if !showMenuBarIcon, Self.isMenuBarOnly {
                         Text("To bring the icon back, open \(appName) again.")
                             .font(.caption)
                             .foregroundStyle(.secondary)

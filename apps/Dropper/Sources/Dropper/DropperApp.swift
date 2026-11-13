@@ -87,10 +87,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         standard.applicationShouldHandleReopen(sender, hasVisibleWindows: flag)
     }
 
-    func applicationDidBecomeActive(_ notification: Notification) {
-        standard.applicationDidBecomeActive(notification)
-    }
-
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
