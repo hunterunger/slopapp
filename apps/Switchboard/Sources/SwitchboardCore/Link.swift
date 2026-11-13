@@ -9,12 +9,17 @@ public struct IncomingLink: Equatable, Sendable {
     public var modifiers: Modifiers
     /// Forces the picker regardless of rules (e.g. `switchboard://open?pick=1`).
     public var forcePicker: Bool
+    /// The link as it arrived, before tracking removal and rewrites (nil = same as `url`).
+    /// Where a failed app link falls back to, and what Reopen brings back.
+    public var originalURL: URL?
 
-    public init(url: URL, sourceBundleID: String? = nil, modifiers: Modifiers = [], forcePicker: Bool = false) {
+    public init(url: URL, sourceBundleID: String? = nil, modifiers: Modifiers = [], forcePicker: Bool = false,
+                originalURL: URL? = nil) {
         self.url = url
         self.sourceBundleID = sourceBundleID
         self.modifiers = modifiers
         self.forcePicker = forcePicker
+        self.originalURL = originalURL
     }
 }
 
@@ -70,7 +75,7 @@ public enum LinkParser {
             }
             return .reject(reason: "Switchboard only opens web and email links from switchboard: links.")
         default:
-            return .reject(reason: "Switchboard doesn't handle \(scheme.isEmpty ? "this kind of" : scheme + ":") links.")
+            return .reject(reason: scheme.isEmpty ? "Switchboard doesn't handle this kind of link." : "Switchboard doesn't handle \(scheme): links.")
         }
     }
 

@@ -52,14 +52,52 @@ public enum Punycode {
     }
 
     /// Converts each `xn--` label of a host to Unicode; leaves other labels alone.
+    /// The host as people should read it: Unicode, unless that could pass for another site.
+    /// Like browsers, a name that mixes scripts ("аpple.com" with a Cyrillic а), or is made
+    /// only of Cyrillic or Greek letters under a Latin top-level domain, stays in its
+    /// `xn--` form, so a look-alike can't pose as the real site in the picker.
     public static func displayHost(_ host: String) -> String {
-        host.split(separator: ".", omittingEmptySubsequences: false).map { label -> String in
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        let decoded = labels.map { label -> String in
             let lower = label.lowercased()
-            guard lower.hasPrefix("xn--"), let decoded = decode(String(lower.dropFirst(4))) else {
-                return String(label)
+            guard lower.hasPrefix("xn--"), let unicode = decode(String(lower.dropFirst(4))) else { return label }
+            return unicode
+        }
+        guard decoded != labels else { return host }
+        let topLevel = scripts(of: decoded.last ?? "")
+        for label in decoded {
+            let found = scripts(of: label)
+            if found.count > 1 {
+                // Latin with Chinese, Japanese or Korean is normal ("東京tokyo"); any other mix isn't.
+                guard found.isSubset(of: [.latin, .cjk]) else { return host }
+            } else if let only = found.first, only == .cyrillic || only == .greek, !topLevel.contains(only) {
+                return host
             }
-            return decoded
-        }.joined(separator: ".")
+        }
+        return decoded.joined(separator: ".")
+    }
+
+    enum Script: Hashable {
+        case latin, greek, cyrillic, cjk
+        /// Any other script, by its 128-character block (enough to tell scripts apart).
+        case other(UInt32)
+    }
+
+    /// The scripts of a label's letters (digits and hyphens don't count).
+    static func scripts(of label: String) -> Set<Script> {
+        var result = Set<Script>()
+        for scalar in label.unicodeScalars where scalar.properties.isAlphabetic {
+            let v = scalar.value
+            switch v {
+            case 0x41...0x5A, 0x61...0x7A, 0xC0...0x24F, 0x1E00...0x1EFF: result.insert(.latin)
+            case 0x370...0x3FF, 0x1F00...0x1FFF: result.insert(.greek)
+            case 0x400...0x52F, 0x2DE0...0x2DFF, 0xA640...0xA69F: result.insert(.cyrillic)
+            case 0x3040...0x30FF, 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xAC00...0xD7AF, 0x1100...0x11FF, 0xF900...0xFAFF:
+                result.insert(.cjk)
+            default: result.insert(.other(v >> 7))
+            }
+        }
+        return result
     }
 
     private static func digitValue(_ scalar: UnicodeScalar) -> Int? {

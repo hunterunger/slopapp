@@ -73,6 +73,12 @@ enum Opener {
         }
     }
 
+    /// Whether some app other than Switchboard opens this app link (`zoommtg:`, `vscode:`).
+    static func canOpen(_ url: URL) -> Bool {
+        guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else { return false }
+        return Bundle(url: app)?.bundleIdentifier != Bundle.main.bundleIdentifier
+    }
+
     /// Opens an app's own link (a handoff or a rewrite's result) in that app.
     static func open(_ app: AppLink) async throws {
         let scheme = app.url.scheme ?? ""

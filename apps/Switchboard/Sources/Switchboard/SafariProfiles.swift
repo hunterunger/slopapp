@@ -68,7 +68,7 @@ struct SafariProfileSheet: View {
                 Grid(alignment: .leading, horizontalSpacing: Spacing.m, verticalSpacing: Spacing.s) {
                     GridRow {
                         Text("Profile").gridColumnAlignment(.trailing)
-                        TextField("Profile", text: $name, prompt: Text("Work"))
+                        TextField("Profile", text: $name, prompt: Text(verbatim: "Work"))
                             .labelsHidden()
                             .textFieldStyle(.roundedBorder)
                             .accessibilityLabel("Profile")

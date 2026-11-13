@@ -47,7 +47,8 @@ confirm; Give Back To hands it to Mail or another app again). Email links then g
 app or to webmail in the browser and profile you choose: Gmail (pick the account), Outlook
 (work or school, or Outlook.com), Fastmail, Yahoo Mail, Proton Mail, or any webmail with a
 compose address like `https://mail.example.com/compose?to={to}&subject={subject}`. They get
-their own picker (number keys follow the Email list), rules and "when no rule matches".
+their own picker (number keys follow the Email list), rules and "when no rule matches". The
+list starts with the mail apps installed, Mail first.
 
 **Files** (Settings → Files): Switchboard can open PDF documents, web locations (`.webloc`,
 `.url`) and any type you add, so rules decide where they go (say, PDFs from Slack in your work
@@ -59,10 +60,12 @@ rule says otherwise. For a web location, the link inside goes through your rules
 - Remove tracking from links (off by default): drops tags such as `utm_source`, `fbclid` and
   `gclid` using a fixed offline list; other parameters are kept.
 - Rewrite links: find and replace, plain or a regular expression with `$1`-style groups, on
-  one website or all. A rewrite that produces another app's link (`vscode://…`) opens that app.
+  one website or all (`example.com` also covers `www.`; `*.example.com` covers every
+  subdomain). A rewrite that produces another app's link (`vscode://…`) opens that app; if no
+  app on the Mac opens those links, the rewrite is skipped and the link opens as it was.
 - Open in apps (off until you turn each on): Zoom meetings, Microsoft Teams, Apple Music,
   Podcasts, App Store pages, Spotify, Figma, Slack channels, Notion, Linear and Discord links
-  open in their app when it's installed. A link an app sends out is never sent back to it, and
+  open in their app when it's installed, and in your browser when it isn't. A link an app sends out is never sent back to it, and
   holding the picker key (⌥) shows the browsers instead.
 
 **Settings file** (General): Export… writes everything as one readable JSON file; Import…
@@ -97,7 +100,8 @@ would make Chrome create a new, empty profile.
   Proton's haven't been tried with a signed-in account yet.
 - Becoming the default email app or a file type's app goes through macOS's own settings; it
   hasn't been tried on a Mac that isn't a test machine yet.
-- No `tel:` links, link history, Shortcuts actions or Share menu yet.
+- No `tel:` links, recent-links history, Shortcuts actions or Share menu yet. Google Meet has
+  no Mac app to hand links to; Webex isn't in Open in apps yet.
 
 ## Develop
 

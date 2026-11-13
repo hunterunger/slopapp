@@ -874,3 +874,36 @@ identical to the pre-gate backup.
 Light | dark side by side: `/tmp/slopapp-polish/switchboard/gg/sbs/` (picker, general,
 browsers, browsers-inactive, rules, about, empty-browsers, empty-rules, toast). Singles,
 flip shots, menus: `/tmp/slopapp-polish/switchboard/gg/`.
+
+### Round 3 (2026-11-12): feature-round build
+
+Fresh blind tester on an isolated copy (bundle id `app.slopapp.switchboard.blindtest`, dry
+run, inbox). One major. No `[unlabeled]` controls found.
+
+| Finding | Severity | Decision | Why / fix |
+|---|---|---|---|
+| F1 A rewrite into an app that isn't installed (`zoommtg:`, no Zoom) threw the link away; Reopen pointed at an older link; the tester said "Opens in the app" | major | Accept | A rewrite whose result no app on the Mac opens (other than Switchboard) is skipped (`LinkStep.skippedAppLink`), so the link goes on through later rewrites and rules as a web link. If an app link still fails to open (app removed since), the link is routed again as it arrived, with app handoffs off. Links keep `originalURL`, which Reopen now brings back. The Rules tester says "Rewrite 1 skipped (no app opens zoommtg: links)"; the rewrite editor's Try it warns too. Verified: the tester's exact rewrite opened Safari with the original link. |
+| F2 Rewrite Website `zoom.us` doesn't cover `us02web.zoom.us`, and the sheet doesn't say so | minor | Accept | Same rule as everywhere (`*.zoom.us` for subdomains), now stated under the fields; Try it says "Doesn't apply: this link isn't on zoom.us. For its subdomains too, use *.zoom.us." |
+| F3 Webmail placeholders looked filled in (dark), orange warning before typing | minor | Accept | Placeholders containing an address or URL were Markdown-autolinked by `Text("…")`; all prompts now use `Text(verbatim:)`. An empty compose address shows a hint, not a warning. |
+| F4 Fresh setup: mailto failed "No email app" while the tab said "Mail opens email links now" | minor | Accept | The email list is seeded once with the installed mail apps (Mail first), like browsers, on the first email link or when Settings opens (no launch cost). Removing them all later stays removed. Verified: first mailto went to Mail. |
+| F5 IDN look-alikes shown as Unicode in the picker (`аpple.com`) | minor | Accept | Hosts that mix scripts, or are all Cyrillic or Greek under a Latin top-level domain, stay in `xn--` form, like browsers do (`bücher.de`, `пример.рф`, `例え.jp` still show Unicode). Learned rules use the same form. |
+| F6 Chrome profile sheet: "blocked, give Full Disk Access" then "Found this profile folder" | minor | Accept (copy) | Both are true (macOS blocks listing, not checking one folder). The message now says so and leads with typing the folder name; Full Disk Access is the optional, smaller button. |
+| F7 Email picker's accessibility title was "Choose a browser" | nit | Accept | "Choose an email app" / "Choose an app" (files) / "Choose a browser". Verified with `drive tree`. |
+| F8a "this kind of links" | nit | Accept | "this kind of link" / "tel: links". |
+| F8b Rules list cut long destinations | nit | Accept | Middle truncation keeps the profile ("Gmail in Go…me (Work)"); the full name is in the tooltip and VoiceOver label. |
+| F8c Files intro read as a heading | nit | Accept | Heading trait removed; still the first text in the tab. |
+| F8d iTerm under Email › Add › Other Apps | nit | Reject | macOS reports it opens mailto links; "Other Apps" is the escape hatch for anything that does, as in Browsers. Known mail apps are listed above it. |
+| F9 One Esc closed both the "…" menu and the picker | nit | Accept (guard) | Couldn't confirm with the real keyboard (owner at the Mac); keys posted to the process may skip the menu's own tracking. The picker now ignores keys while any of its menus is open (NSMenu tracking notifications), so the menu always gets them first. |
+| Missing: meeting presets that fall back when the app is missing | — | Accept (discoverability) | Zoom and Teams already existed but were listed only when installed. Every app is now listed in catalog order (meeting apps first); a missing app's row says its links open in the browser until it's installed. Handoffs never fire for a missing app. Google Meet has no Mac app; Webex deferred (its app's link scheme isn't documented). |
+| Missing: recent-links history | — | Defer | Unchanged from earlier rounds: needs a retention setting and search UI; Reopen covers the last dismissed link. |
+| Untested: import of a broken file | — | Tested | The tester's `broken.json`: refused with "isn't a Switchboard settings file", settings untouched (also a unit test). |
+
+Gates after fixes: 154 unit tests in 33 suites (6 new). Walkthrough on an isolated copy
+(`app.slopapp.switchboard.featuretest`, dry run, inbox): F1, F4, F5, F7, the broken import and
+the reject wording verified from the log and in-process renders; `drive tree` 0
+`[unlabeled]` on Rewrite, Files, Browsers and the webmail sheet. F9 not verified with a real
+keyboard (owner active). `scripts/check.sh Switchboard`: all PASS. `scripts/perf.sh` on this
+build with its own bundle id (so it can't share the installed copy's settings; `--direct`
+would): launch 144 ms, first menu bar icon 331 ms, idle CPU 0.004 % (lowest), footprint
+32.5 MB, all PASS (busy machine, load 8.4).
+

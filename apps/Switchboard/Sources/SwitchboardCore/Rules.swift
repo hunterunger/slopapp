@@ -331,6 +331,8 @@ public struct Config: Codable, Equatable, Sendable {
     public var rewrites: [Rewrite]
     /// Turned-on app handoffs (`Handoffs.all` ids), checked before rules.
     public var handoffs: [String]
+    /// True once the email list has been filled from the mail apps installed.
+    public var didSeedEmailTargets: Bool
 
     public init(
         targets: [Target] = [],
@@ -345,7 +347,8 @@ public struct Config: Codable, Equatable, Sendable {
         emailFallback: Fallback = .ask,
         fileTypes: [FileType] = [],
         rewrites: [Rewrite] = [],
-        handoffs: [String] = []
+        handoffs: [String] = [],
+        didSeedEmailTargets: Bool = false
     ) {
         self.version = Self.currentVersion
         self.targets = targets
@@ -361,12 +364,13 @@ public struct Config: Codable, Equatable, Sendable {
         self.fileTypes = fileTypes
         self.rewrites = rewrites
         self.handoffs = handoffs
+        self.didSeedEmailTargets = didSeedEmailTargets
     }
 
     private enum CodingKeys: String, CodingKey {
         case version, targets, rules, fallback, askModifiers, didSeedTargets, removedTargets
         case pickerSize, stripsTrackingParameters
-        case emailTargets, emailFallback, fileTypes, rewrites, handoffs
+        case emailTargets, emailFallback, fileTypes, rewrites, handoffs, didSeedEmailTargets
     }
 
     /// Fields added after 0.1.0 are optional, so older settings files still load.
@@ -387,6 +391,18 @@ public struct Config: Codable, Equatable, Sendable {
         fileTypes = try c.decodeIfPresent([FileType].self, forKey: .fileTypes) ?? []
         rewrites = try c.decodeIfPresent([Rewrite].self, forKey: .rewrites) ?? []
         handoffs = try c.decodeIfPresent([String].self, forKey: .handoffs) ?? []
+        didSeedEmailTargets = try c.decodeIfPresent(Bool.self, forKey: .didSeedEmailTargets) ?? false
+    }
+
+    /// Fills an empty email list with the mail apps installed (known ones only, in the
+    /// catalog's order, Mail first), once. Returns true if it changed anything.
+    @discardableResult
+    public mutating func seedEmailTargets(from mailApps: [InstalledApp]) -> Bool {
+        guard !didSeedEmailTargets else { return false }
+        didSeedEmailTargets = true
+        guard emailTargets.isEmpty else { return true }
+        emailTargets = mailApps.map { Target(bundleID: $0.bundleID, appPath: $0.path, appName: $0.name) }
+        return true
     }
 
     /// Any target: a browser, an email app or webmail, or a file type's app.

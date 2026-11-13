@@ -120,6 +120,13 @@ final class AppModel {
         let split = MailAppCatalog.classify(apps, excluding: Bundle.main.bundleIdentifier)
         installedMailApps = split.mailApps
         otherMailApps = split.others
+        // Like browsers: start the email list with the mail apps that are here.
+        if !config.didSeedEmailTargets { config.seedEmailTargets(from: split.mailApps) }
+    }
+
+    /// Before the first email link is routed: make sure the list has been seeded.
+    func seedEmailTargetsIfNeeded() {
+        if !config.didSeedEmailTargets { refreshMailApps() }
     }
 
     // MARK: - Default browser, email app, file types

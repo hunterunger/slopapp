@@ -31,6 +31,7 @@ struct FilesTab: View {
                     .foregroundStyle(.secondary)
                     .textCase(nil)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityRemoveTraits(.isHeader)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 

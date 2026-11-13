@@ -16,11 +16,6 @@ struct RewriteTab: View {
         return Handoffs.all.filter { HandoffApps.installed($0) != nil }
     }
 
-    private var missing: [AppHandoff] {
-        _ = model.handoffRefresh
-        return Handoffs.all.filter { HandoffApps.installed($0) == nil }
-    }
-
     var body: some View {
         Form {
             Section {
@@ -61,14 +56,14 @@ struct RewriteTab: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             Section {
-                if installed.isEmpty {
-                    Text("None of the apps Switchboard can hand links to are installed.")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(installed) { handoff in
+                // Catalog order, installed or not, so meeting apps come first either way.
+                ForEach(Handoffs.all) { handoff in
+                    let isInstalled = installed.contains { $0.id == handoff.id }
                     Toggle(isOn: handoffBinding(handoff.id)) {
                         Text(handoff.title)
-                        Text("\(handoff.example) links open in \(handoff.appName)")
+                        Text(isInstalled
+                             ? "\(handoff.example) links open in \(handoff.appName)"
+                             : "\(handoff.appName) isn't installed, so these links open in your browser. Turn this on to use \(handoff.appName) once it's there.")
                     }
                 }
             } header: {
@@ -101,9 +96,7 @@ struct RewriteTab: View {
         var text = "After rewrites, before your rules. A link an app sends out is never sent back to it."
         let keys = model.config.askModifiers
         if !keys.isEmpty { text += " Hold \(keys.symbol) while clicking to choose a browser instead." }
-        if !missing.isEmpty {
-            text += " Also works with \(ListFormatter.localizedString(byJoining: missing.map(\.appName))) once installed."
-        }
+        text += " An app that isn't installed is skipped, so its links still open in your browser."
         return text
     }
 
@@ -187,11 +180,11 @@ struct RewriteEditor: View {
         VStack(alignment: .leading, spacing: 0) {
             Form {
                 Section {
-                    TextField("Website", text: plain(\.host), prompt: Text("Optional, like example.com"))
+                    TextField("Website", text: plain(\.host), prompt: Text(verbatim: "Optional, like example.com"))
                         .autocorrectionDisabled()
-                    TextField("Find", text: plain(\.find), prompt: Text(rewrite.usesRegex ? "^https://example\\.com/(.*)$" : "twitter.com"))
+                    TextField("Find", text: plain(\.find), prompt: Text(verbatim: rewrite.usesRegex ? "^https://example\\.com/(.*)$" : "twitter.com"))
                         .autocorrectionDisabled()
-                    TextField("Replace with", text: plain(\.replacement), prompt: Text(rewrite.usesRegex ? "https://mirror.example/$1" : "Empty removes it"))
+                    TextField("Replace with", text: plain(\.replacement), prompt: Text(verbatim: rewrite.usesRegex ? "https://mirror.example/$1" : "Empty removes it"))
                         .autocorrectionDisabled()
                     Toggle(isOn: $rewrite.usesRegex) {
                         Text("Regular expression")
@@ -199,10 +192,15 @@ struct RewriteEditor: View {
                     }
                 } header: {
                     Text("Rewrite links")
+                } footer: {
+                    Text(verbatim: "example.com also matches www.example.com. *.example.com matches every subdomain, like us02web.example.com.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Section("Try it") {
                     TextField("Test link", text: Binding(get: { sample }, set: { sample = LinkParser.plainText($0) }),
-                              prompt: Text("Paste a link"))
+                              prompt: Text(verbatim: "Paste a link"))
                         .autocorrectionDisabled()
                     Label(result.text, systemImage: result.symbol)
                         .font(.callout)
@@ -250,7 +248,16 @@ struct RewriteEditor: View {
         guard let url = LinkParser.webLink(in: trimmed) else { return ("That doesn't look like a web link.", "questionmark.circle") }
         var probe = rewrite
         probe.isEnabled = true
-        guard let out = probe.apply(to: url) else { return ("Doesn't change this link.", "equal.circle") }
+        let site = rewrite.host.trimmingCharacters(in: .whitespaces)
+        if let pattern = HostPattern(site), !pattern.matches(url) {
+            let hint = site.hasPrefix("*.") ? "" : " For its subdomains too, use *.\(site)."
+            return ("Doesn't apply: this link isn't on \(site).\(hint)", "equal.circle")
+        }
+        guard let out = probe.apply(to: url) else { return ("Doesn't change this link: nothing matches what to find.", "equal.circle") }
+        if LinkKind.of(out) == nil, !Opener.canOpen(out) {
+            return ("Becomes \(out.absoluteString), but no app on this Mac opens \(out.scheme ?? ""): links, so these links will open in a browser as they are.",
+                    "exclamationmark.triangle")
+        }
         return ("Becomes \(out.absoluteString)", "arrow.right.circle")
     }
 }
