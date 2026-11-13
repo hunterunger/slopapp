@@ -205,7 +205,8 @@ case "${1:-}" in
     args=()
     while IFS= read -r line; do args+=(--env "$line"); done < <(env_lines)
     env_lines
-    "$ROOT/scripts/drive" launch "$ROOT/build/Slopapp.app" "${args[@]}" "${@:2}"
+    # --direct: a separate copy, so an installed Slopapp that is running isn't handed the env instead.
+    "$ROOT/scripts/drive" launch "$ROOT/build/Slopapp.app" --direct "${args[@]}" "${@:2}"
     ;;
   clean) clean ;;
   *) sed -n '2,20p' "$0"; exit 1 ;;
