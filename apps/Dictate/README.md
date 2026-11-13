@@ -21,7 +21,11 @@ small ring that drops out of the notch.
 - **Command Mode:** select text, hold your Command Mode shortcut and say an edit ("make this
   friendlier", "translate to Spanish"). Uses Apple Intelligence on the Mac.
 - **Files:** drop audio or video files on the Transcribe window (or Open With › Dictate) to get
-  a transcript to copy or save.
+  a transcript to copy, or save as plain text or subtitles (SRT, WebVTT) timed from the words.
+- **No menu bar icon needed:** while one of Dictate's windows is in front, the **Dictation**
+  menu has everything the icon's menu has. A full menu bar can hide the icon (next to the
+  camera notch above all); Dictate notices, says so in Settings › General, and opening Dictate
+  again (Finder, Spotlight) always brings up Settings.
 - **History** of dictations, searchable, with Undo. **Esc** cancels a dictation.
 - **Moving from Better Transcriber:** the setup assistant offers to bring over its settings,
   shortcuts, history and downloaded models (cloned, so they take no extra space, and the
@@ -53,13 +57,18 @@ the emoji picker.
 | Esc | Cancel the dictation in progress |
 | Command Mode shortcut | Rewrite the selection by voice (set it in Settings › Shortcuts) |
 | Paste last transcript shortcut | Type your last dictation again (optional) |
-| ⌘O, ⌘Y, ⌘, (in the menu) | Transcribe files, history, Settings |
+| ⌘O, ⌘Y, ⌘, (in the menus) | Transcribe files, history, Settings |
+| ⌘S, Delete (Transcribe window) | Save the transcript (text or subtitles), remove files from the list |
+| Esc (setup assistant) | Close it |
 
 ## Not there yet
 
 - A language picker for multilingual models (they detect or default as their libraries do).
 - True streaming recognition (the live preview re-reads the last 20 seconds every 0.9 s).
 - Updating argmax-oss-swift / FluidAudio to their newest majors.
+- Subtitles from the Mandarin model are spread evenly over the audio (it reports no word
+  timings); Whisper's word timings are untested on this build's test Mac.
+- Shortcut recorders read as search fields to VoiceOver (the shared recorder control).
 
 ## Develop
 
@@ -83,6 +92,12 @@ Scripted tests never touch real settings, history, models, the clipboard or othe
 `DICTATE_FAKE_AUDIO` (play a file instead of the microphone), `DICTATE_INSERT_ONLY_INTO`,
 `DICTATE_PASTEBOARD`, `DICTATE_NO_HOTKEY`, `DICTATE_TEST_HOOKS`, `DICTATE_TEST_QUIET`, `DICTATE_TRANSCRIBE`,
 `DICTATE_LEGACY_*` (a fake previous install to import from).
+
+Keyboard shortcuts, window positions and the menu bar icon's place always live in the app's own
+defaults domain, which a copy of `build/Dictate.app` shares with an installed Dictate. When one
+is installed, test with `apps/Dictate/test-copy.sh`: it makes `/tmp/dictate-test/Dictate Test.app`
+with its own bundle id (`app.slopapp.dictate.test`), so nothing is shared. Test copies never
+change login items.
 
 Design follows [`docs/design-system.md`](../../docs/design-system.md). The app icon is the house
 herbarium icon (`Icon.py`, generating `AppIcon.icon`; see `brand/ICONS.md`).

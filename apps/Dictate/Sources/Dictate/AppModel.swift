@@ -22,6 +22,7 @@ final class AppModel {
     @ObservationIgnored let feedback: Feedback
     @ObservationIgnored let hotkeys: Hotkeys
     let files: FileTranscriber
+    let menuBarPresence = MenuBarPresence()
     let supportDirectory: URL
     let modelsDirectory: URL
 
@@ -91,8 +92,10 @@ final class AppModel {
         if !Diagnostics.noHotkey && !Diagnostics.isSmokeTest { hotkeys.start() }
         hotkeys.onPasteLast = { [weak self] in self?.pasteLastTranscript() }
         follow()
-        if settings.modelRetention == .always {
-            // Out of the launch path: menu bar icon first, model second.
+        menuBarPresence.onFirstHidden = { [weak self] in self?.tellIconIsHidden() }
+        if settings.modelRetention == .always && !Diagnostics.isSmokeTest {
+            // Out of the launch path: menu bar icon first, model second. Not in smoke tests,
+            // which run against whatever settings and models the Mac has.
             Task {
                 try? await Task.sleep(for: .seconds(2))
                 models.warmUp()
@@ -129,6 +132,15 @@ final class AppModel {
                 self.follow()
             }
         }
+    }
+
+    /// Once ever: the icon is out of sight, so say how to reach Dictate. Settings keeps a note.
+    private func tellIconIsHidden() {
+        let key = "toldMenuBarIconHidden"
+        guard settings.hasCompletedOnboarding, !store.bool(forKey: key) else { return }
+        store.set(true, forKey: key)
+        HUD.show("Dictate's menu bar icon is hidden: the menu bar is full. Open Dictate again to reach it.",
+                 systemImage: "menubar.rectangle", duration: .seconds(6))
     }
 
     // MARK: Permissions

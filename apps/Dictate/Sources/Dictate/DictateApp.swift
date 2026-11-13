@@ -9,7 +9,7 @@ import SwiftUI
 @main
 struct DictateApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @AppStorage(MenuBarIcon.storageKey) private var showMenuBarIcon = true
+    @AppStorage(MenuBarIcon.storageKey, store: Diagnostics.defaults) private var showMenuBarIcon = true
     @State private var model = AppModel.shared
 
     var body: some Scene {
@@ -24,6 +24,7 @@ struct DictateApp: App {
             HistoryWindow(model: model)
         }
         .defaultSize(width: 620, height: 520)
+        .defaultPosition(.leading)
         .windowToolbarStyle(.unified)
         .defaultLaunchBehavior(.suppressed)
 
@@ -31,6 +32,7 @@ struct DictateApp: App {
             FileTranscriptionWindow(model: model, files: model.files)
         }
         .defaultSize(width: 620, height: 480)
+        .defaultPosition(.center)
         .windowToolbarStyle(.unified)
         .defaultLaunchBehavior(.suppressed)
 
@@ -45,7 +47,10 @@ struct DictateApp: App {
         Settings {
             SettingsView(model: model)
         }
-        .commands { HelpCommands(info: model.info) }
+        .commands {
+            DictationCommands(model: model)
+            HelpCommands(info: model.info)
+        }
     }
 }
 
@@ -54,14 +59,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         slop.applicationWillFinishLaunching(notification)
+        // Edit › Start Dictation… is macOS's own dictation: confusing next to Dictate's
+        // Dictation menu. Registered (in memory only), so nothing is written to settings.
+        UserDefaults.standard.register(defaults: ["NSDisabledDictationMenuItem": true])
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppModel.shared.launch()
     }
 
+    /// Opened again (Finder, Spotlight): bring the icon back and open Settings, the way in
+    /// when the icon is out of sight.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        slop.applicationShouldHandleReopen(sender, hasVisibleWindows: flag)
+        defer { AppModel.shared.menuBarPresence.check(after: .seconds(1)) }
+        guard Diagnostics.isTestMode, Diagnostics.sharesInstalledAppsDomain else {
+            return slop.applicationShouldHandleReopen(sender, hasVisibleWindows: flag)
+        }
+        // A test copy sharing the installed app's domain: same as SlopKit's, but the icon
+        // setting lives in the test domain so the installed copy's is never touched.
+        Diagnostics.defaults.set(true, forKey: MenuBarIcon.storageKey)
+        if !flag {
+            DispatchQueue.main.async {
+                guard !NSApp.windows.contains(where: { $0.isVisible && $0.level == .normal && !($0 is NSPanel) }) else { return }
+                SettingsWindow.open()
+            }
+        }
+        return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -92,6 +115,7 @@ struct MenuBarLabel: View {
             .onAppear {
                 WindowOpener.action = { openWindow(id: $0.rawValue) }
                 SettingsNavigation.openAction = { openSettings() }
+                model.menuBarPresence.check(after: .seconds(3))
             }
     }
 
@@ -122,21 +146,13 @@ struct DictateMenu: View {
     private var controller: DictationController { model.controller }
 
     var body: some View {
-        Text(status)
+        Text(DictationStatus.text(model: model))
         if let fix = controller.problemFix ?? setupFix {
-            Button(fixTitle(fix)) { model.fix(fix) }
+            Button(ProblemFix.menuTitle(fix)) { model.fix(fix) }
         }
         Divider()
 
-        if controller.isRecording {
-            Button("Stop Dictation") { controller.end() }
-        } else {
-            Button("Start Dictation") { controller.begin(.dictation) }
-                .disabled(controller.isBusy)
-        }
-        if controller.isBusy {
-            Button("Cancel Dictation") { controller.cancel() }
-        }
+        StartStopItems(controller: controller)
         Button("Transcribe Audio Files…") {
             WindowOpener.action = { openWindow(id: $0.rawValue) }
             WindowOpener.open(.files)
@@ -167,15 +183,12 @@ struct DictateMenu: View {
         model.models.state == .notInstalled ? .downloadModel : nil
     }
 
-    private func fixTitle(_ fix: ProblemFix) -> String {
-        switch fix {
-        case .downloadModel: "Download a Speech Model…"
-        case .microphoneSettings: "Open Microphone Settings…"
-        case .accessibilitySettings: "Open Accessibility Settings…"
-        }
-    }
+}
 
-    private var status: String {
+/// The status line at the top of the menus.
+enum DictationStatus {
+    static func text(model: AppModel) -> String {
+        let controller = model.controller
         switch controller.phase {
         case .recording: return controller.mode == .command ? "Listening for an edit…" : "Listening…"
         case .transcribing: return "Transcribing…"
@@ -185,16 +198,104 @@ struct DictateMenu: View {
         case .error(let message): return message
         case .idle: break
         }
-        let model = self.model.models
-        switch model.state {
+        let models = model.models
+        switch models.state {
         case .notInstalled: return "No speech model yet"
         case .downloading(let fraction):
             let percent = fraction.map { " \(Int($0 * 100))%" } ?? ""
-            return "Downloading \(model.selected.name)…\(percent)"
-        case .failed: return "\(model.selected.name) didn't load"
+            return "Downloading \(models.selected.name)…\(percent)"
+        case .failed: return "\(models.selected.name) didn't load"
         case .loading, .unloaded, .ready: break
         }
-        return "Ready. \(TriggerHint.text(for: self.model.settings))"
+        return "Ready. \(TriggerHint.text(for: model.settings))"
+    }
+}
+
+/// Start/Stop and Cancel, in the menu bar menu and the Dictation menu.
+struct StartStopItems: View {
+    let controller: DictationController
+
+    var body: some View {
+        if controller.isRecording {
+            Button("Stop Dictation") { controller.end() }
+        } else {
+            Button("Start Dictation") { controller.begin(.dictation) }
+                .disabled(controller.isBusy)
+        }
+        if controller.isBusy {
+            Button("Cancel Dictation") { controller.cancel() }
+        }
+    }
+}
+
+/// The app's own menus, shown while one of its windows is in front: a Dictation menu with
+/// everything the menu bar icon offers (the way in when the icon is hidden), and the
+/// Transcribe window's file commands.
+struct DictationCommands: Commands {
+    let model: AppModel
+    @FocusedValue(\.transcriptActions) private var transcript
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            TranscribeFilesItem(files: model.files)
+        }
+        CommandGroup(after: .newItem) {
+            Button("Save Transcript…") { transcript?.save() }
+                .keyboardShortcut("s")
+                .disabled(transcript?.canSave != true)
+        }
+        CommandMenu("Dictation") {
+            DictationMenuItems(model: model)
+        }
+    }
+}
+
+struct TranscribeFilesItem: View {
+    let files: FileTranscriber
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Transcribe Audio Files…") {
+            WindowOpener.action = { openWindow(id: $0.rawValue) }
+            WindowOpener.open(.files)
+            files.choose()
+        }
+        .keyboardShortcut("o")
+    }
+}
+
+struct DictationMenuItems: View {
+    let model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Text(DictationStatus.text(model: model))
+        if let fix = model.controller.problemFix ?? (model.models.state == .notInstalled ? .downloadModel : nil) {
+            Button(ProblemFix.menuTitle(fix)) { model.fix(fix) }
+        }
+        Divider()
+        StartStopItems(controller: model.controller)
+        Divider()
+        Button("Copy Last Transcript") { model.copyLastTranscript() }
+            .disabled(model.controller.lastTranscript.isEmpty)
+        Button("Open History") { open(.history) }
+            .keyboardShortcut("y")
+        Button("Setup Assistant…") { open(.onboarding) }
+    }
+
+    private func open(_ kind: WindowOpener.Kind) {
+        WindowOpener.action = { openWindow(id: $0.rawValue) }
+        WindowOpener.open(kind)
+    }
+}
+
+extension ProblemFix {
+    static func menuTitle(_ fix: ProblemFix) -> String {
+        switch fix {
+        case .downloadModel: "Download a Speech Model…"
+        case .microphoneSettings: "Open Microphone Settings…"
+        case .accessibilitySettings: "Open Accessibility Settings…"
+        }
     }
 }
 

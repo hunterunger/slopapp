@@ -1,5 +1,6 @@
 import AppKit
 import DictateCore
+import ServiceManagement
 import SlopKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -76,18 +77,34 @@ struct ScrollingSettingsForm<Content: View>: View {
 struct GeneralTab: View {
     let model: AppModel
     @State private var microphones: [MicrophoneDevice] = []
-    @AppStorage(MenuBarIcon.storageKey) private var showMenuBarIcon = true
+    @AppStorage(MenuBarIcon.storageKey, store: Diagnostics.defaults) private var showMenuBarIcon = true
 
     var body: some View {
         @Bindable var settings = model.settings
         SettingsForm {
             Section {
-                LaunchAtLoginToggle()
+                if Diagnostics.protectsLoginItems {
+                    Toggle(isOn: .constant(SMAppService.mainApp.status == .enabled)) {
+                        Text("Launch at login")
+                        Text("Can't be changed in a test copy, so the installed app's login item stays as it is.")
+                    }
+                    .disabled(true)
+                } else {
+                    LaunchAtLoginToggle()
+                }
                 Toggle("Show in menu bar", isOn: $showMenuBarIcon)
                 if !showMenuBarIcon {
-                    Text("To bring the icon back, open \(model.info.name) again.")
+                    Text("To bring the icon back, open \(model.info.name) again. Everything in its menu is also in the Dictation menu while \(model.info.name) is in front.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else if model.menuBarPresence.isHidden {
+                    Label {
+                        Text("The icon is hidden right now: the menu bar is too full to show it. Remove or rearrange some icons (⌘-drag them), or use the Dictation menu while \(model.info.name) is in front. \(TriggerHint.text(for: settings))")
+                    } icon: {
+                        Image(systemName: "menubar.rectangle")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             }
             Section {
@@ -126,7 +143,11 @@ struct GeneralTab: View {
             }
             PermissionsSection(model: model)
         }
-        .onAppear { microphones = AudioDevices.inputDevices() }
+        .onAppear {
+            microphones = AudioDevices.inputDevices()
+            model.menuBarPresence.check()
+        }
+        .onChange(of: showMenuBarIcon) { model.menuBarPresence.check(after: .seconds(1)) }
     }
 }
 
@@ -227,7 +248,8 @@ struct AppsTab: View {
     @Bindable var settings: DictateSettings
 
     var body: some View {
-        ScrollingSettingsForm(height: 440) {
+        // Short while there's nothing to list, taller (and scrolling) once there is.
+        ScrollingSettingsForm(height: settings.appCleanupRules.isEmpty ? 196 : 440) {
             Section {
                 if settings.appCleanupRules.isEmpty {
                     Text("No apps yet. Add one to use different cleanup there, like no AI cleanup in your code editor.")

@@ -12,6 +12,7 @@ struct OnboardingView: View {
     @State private var imported: ImportSummary?
     @State private var legacyRunning = false
     @State private var practice = ""
+    @FocusState private var practiceFocused: Bool
     @Environment(\.dismissWindow) private var dismissWindow
 
     enum Step: Int, CaseIterable {
@@ -20,15 +21,26 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Each step sits in the middle of the space above the footer, so short steps
+            // don't leave the bottom half of the window empty.
             content
                 .padding(.horizontal, Spacing.xxl * 2)
-                .padding(.top, Spacing.xxl * 2)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.vertical, Spacing.xxl)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             Hairline()
             footer
                 .padding(Spacing.xl)
         }
-        .frame(width: 580, height: 560)
+        .frame(width: 580, height: 520)
+        .background {
+            // Esc closes the assistant, like ⌘W (the window has no focusable view to take
+            // an exit command, so a cancel-action key equivalent does it).
+            Button("Close Setup Assistant") { dismissWindow(id: WindowOpener.Kind.onboarding.rawValue) }
+                .keyboardShortcut(.cancelAction)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
         .onAppear {
             legacy = model.legacySources
             imported = LegacyImport.lastSummary(in: model.store)
@@ -156,10 +168,10 @@ struct OnboardingView: View {
         let selected = models.selected
         let installed = models.isInstalled(selected)
         return StepLayout(image: .symbol(installed ? "checkmark.circle.fill" : "waveform", installed ? .green : .accentColor),
-                          title: installed ? "\(selected.name) Is Ready" : "Download a Speech Model",
+                          title: installed ? "Speech Model Is Ready" : "Download a Speech Model",
                           subtitle: installed
-                            ? "It's on this Mac already, so there's nothing to download."
-                            : "Dictate turns speech into text with a model that runs on your Mac. It downloads once (\(selected.sizeText)) from Hugging Face; this is the only time Dictate uses the internet.") {
+                            ? "\(selected.name) is on this Mac already, so there's nothing to download. You can choose another in Settings › Models."
+                            : "Dictate turns speech into text with a model that runs on your Mac (\(selected.name), \(selected.sizeText)). It downloads once from Hugging Face; this is the only time Dictate uses the internet.") {
             if !installed {
                 if let progress = models.downloads[selected.key] {
                     ProgressView(value: progress ?? 0, total: 1)
@@ -167,7 +179,7 @@ struct OnboardingView: View {
                         .accessibilityLabel("Downloading \(selected.name)")
                     Text("Downloading \(selected.name)…").font(.callout).foregroundStyle(.secondary)
                 } else {
-                    Button("Download \(selected.name)") { Task { await models.download(selected) } }
+                    Button("Download Speech Model") { Task { await models.download(selected) } }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
                     if let error = models.downloadErrors[selected.key] {
@@ -208,8 +220,9 @@ struct OnboardingView: View {
     }
 
     private var tryIt: some View {
-        StepLayout(image: .symbol("text.bubble", .accentColor), title: "Try It",
-                   subtitle: "Click in the box, then \(TriggerHint.action(for: model.settings)) and say something.") {
+        let controller = model.controller
+        return StepLayout(image: .symbol("text.bubble", .accentColor), title: "Try It",
+                          subtitle: "Click in the box, then \(TriggerHint.action(for: model.settings)) and say something. Or use the button.") {
             TextEditor(text: $practice)
                 .font(.body)
                 .scrollContentBackground(.hidden)
@@ -217,8 +230,25 @@ struct OnboardingView: View {
                 .background(.background, in: RoundedRectangle(cornerRadius: Radius.m))
                 .hairlineBorder(RoundedRectangle(cornerRadius: Radius.m))
                 .frame(height: 110)
+                .focused($practiceFocused)
                 .accessibilityLabel("Practice text")
-            Text("Everything you need is in the menu bar icon. Press Esc while dictating to cancel.")
+            HStack(spacing: Spacing.m) {
+                if controller.isRecording {
+                    Button("Stop Dictation") { controller.end() }
+                } else {
+                    Button("Start Dictation") {
+                        // The words go into the box: it has to be the focused field.
+                        practiceFocused = true
+                        controller.begin(.dictation)
+                    }
+                    .disabled(controller.isBusy)
+                }
+                Text(controller.isBusy ? DictationStatus.text(model: model) : "Press Esc while dictating to cancel.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Text("Everything else is in the menu bar icon, and in the Dictation menu while Dictate is in front.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

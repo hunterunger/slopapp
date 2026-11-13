@@ -29,6 +29,10 @@ import QuartzCore
 /// - `DICTATE_TEST_QUIET=1`: windows opened by test hooks never activate the app and go behind
 ///   other apps' windows, so a test run can screenshot them without taking anyone's focus.
 /// - `DICTATE_LOG=/path/file.log`: append timings and decisions.
+///
+/// Keyboard shortcuts (KeyboardShortcuts), window positions and status item placement always
+/// live in the app's own defaults domain. A copy of `build/Dictate.app` shares that domain
+/// with an installed Dictate; `apps/Dictate/test-copy.sh` makes one with its own bundle id.
 nonisolated enum Diagnostics {
     static let logger = Logger(subsystem: "app.slopapp.dictate", category: "dictate")
 
@@ -59,9 +63,17 @@ nonisolated enum Diagnostics {
     /// Test mode: data, settings and the import source are all redirected.
     static var isTestMode: Bool { dataDirectory != nil }
 
+    /// The installed app's bundle id. A test copy made by `apps/Dictate/test-copy.sh` has its
+    /// own (`app.slopapp.dictate.test`), so everything it stores is separate by itself.
+    static let sharesInstalledAppsDomain = Bundle.main.bundleIdentifier == "app.slopapp.dictate"
+
     /// Dictate's settings: its own domain, or a throwaway test domain.
-    nonisolated(unsafe) static let defaults: UserDefaults = isTestMode
+    nonisolated(unsafe) static let defaults: UserDefaults = isTestMode && sharesInstalledAppsDomain
         ? UserDefaults(suiteName: "app.slopapp.dictate.test") ?? .standard : .standard
+
+    /// Test copies never change login items: the switch would act on the installed app's
+    /// registration (same bundle id) or add a login item for a throwaway copy.
+    static var protectsLoginItems: Bool { isTestMode || !sharesInstalledAppsDomain }
 
     /// Seconds since boot, monotonic.
     static func now() -> TimeInterval { CACurrentMediaTime() }
