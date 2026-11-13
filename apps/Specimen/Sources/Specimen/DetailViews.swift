@@ -2,8 +2,8 @@ import SlopKit
 import SpecimenCore
 import SwiftUI
 
-/// One family's page: a header with the style picker, then tabs (⌘1–⌘5) for every style,
-/// the characters, text layouts, variable axes and details.
+/// One family's page: a header with the style picker, then tabs (⌘1–⌘6) for every style,
+/// the characters, text layouts, variable axes, OpenType features and details.
 struct FamilyDetailView: View {
     @Bindable var model: AppModel
     let familyName: String
@@ -34,6 +34,7 @@ struct FamilyDetailView: View {
                     case .characters: CharactersTab(face: face)
                     case .text: TextTab(model: model, face: face)
                     case .variables: VariablesTab(model: model, family: family, face: face)
+                    case .features: FeaturesTab(model: model, face: face)
                     case .info: InfoTab(model: model, face: face, family: family)
                     }
                 }
@@ -119,7 +120,8 @@ struct FamilyDetailView: View {
             }
             Picker("Tab", selection: Binding(get: { tab }, set: { model.detailTab = $0 })) {
                 ForEach(DetailTab.allCases.filter { $0 != .variables || family.isVariable }) { tab in
-                    Text(tab.title).tag(tab)
+                    // Features shows how many are changed: they apply on every tab.
+                    Text(tab == .features && !model.detailFeatures.isDefault ? "Features (\(model.detailFeatures.changeCount))" : tab.title).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
@@ -138,9 +140,25 @@ struct FamilyDetailView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(lock.title)
                 .accessibilityHint(lock.explanation)
-        } else if family.state == .active {
+        } else if family.state.isOn, family.faces.contains(where: \.isTemporary) {
+            Menu("Deactivate") {
+                Button("Keep Active After Quitting") { model.request(true, faces: family.faces) }
+            } primaryAction: {
+                model.request(false, faces: family.faces)
+            }
+            .fixedSize()
+            .help("Active until you quit Specimen. Click to turn it off now (⇧⌘;), or keep it active (⌘;).")
+        } else if family.state.isOn {
             Button("Deactivate") { model.request(false, faces: family.faces) }
                 .help("Turn off every style of this family (⇧⌘;)")
+        } else if family.faces.contains(where: model.isInPlace) {
+            Menu("Activate") {
+                Button("Activate Temporarily") { model.request(true, faces: family.faces, temporary: true) }
+            } primaryAction: {
+                model.request(true, faces: family.faces)
+            }
+            .fixedSize()
+            .help("Turn on every style from its folder, without copying it (⌘;). Temporarily: until you quit Specimen (⌥⌘;).")
         } else {
             Button("Activate") { model.request(true, faces: family.faces) }
                 .help("Turn on every style of this family (⌘;)")
@@ -195,7 +213,7 @@ struct StyleRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: Spacing.s) {
-                Image(systemName: face.isEnabled ? "circle.fill" : "circle")
+                Image(systemName: face.isTemporary ? "circle.dashed.inset.filled" : face.isEnabled ? "circle.fill" : "circle")
                     .font(.system(size: 6))
                     .foregroundStyle(face.isEnabled ? Color.windowAccent(activeState) : .secondary)
                     .accessibilityHidden(true)
@@ -206,10 +224,12 @@ struct StyleRow: View {
                 }
                 if !face.isEnabled {
                     Text("Inactive").font(.caption).foregroundStyle(.secondary)
+                } else if face.isTemporary {
+                    Text("Active until you quit").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
-            PreviewLine(face: face, text: model.previewText, size: CGFloat(model.previewSize))
+            PreviewLine(face: face, text: model.previewText, size: CGFloat(model.previewSize), features: model.featureValues(for: face))
         }
         .padding(Spacing.s)
         // Same selection as a grid card: accent tint and a 2 pt ring.
@@ -218,7 +238,7 @@ struct StyleRow: View {
         .contentShape(Rectangle())
         .onTapGesture { model.detailFaceID = face.id }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(face.styleName), \(face.isEnabled ? "Active" : "Inactive")")
+        .accessibilityLabel("\(face.styleName), \(face.isTemporary ? "Active until you quit" : face.isEnabled ? "Active" : "Inactive")")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { model.detailFaceID = face.id }
     }
@@ -491,7 +511,9 @@ struct TextTab: View {
                         }
                         .fixedSize()
                     }
-                    if let title = PreviewRenderer.shared.font(for: face, size: 34), let body = PreviewRenderer.shared.font(for: face, size: bodySize) {
+                    let features = model.featureValues(for: face)
+                    if let title = PreviewRenderer.shared.font(for: face, size: 34, features: features),
+                       let body = PreviewRenderer.shared.font(for: face, size: bodySize, features: features) {
                         Text(headline)
                             .font(Font(title))
                             .lineLimit(2)
@@ -516,7 +538,8 @@ struct TextTab: View {
                                 .foregroundStyle(.secondary)
                                 .frame(width: 24, alignment: .trailing)
                                 .accessibilityHidden(true)
-                            PreviewLine(face: face, text: model.previewText.isEmpty ? PreviewPreset.all[1].text : model.previewText, size: size)
+                            PreviewLine(face: face, text: model.previewText.isEmpty ? PreviewPreset.all[1].text : model.previewText, size: size,
+                                        features: model.featureValues(for: face))
                                 .alignmentGuide(.firstTextBaseline) { _ in PreviewMetrics.baseline(for: size) }
                                 .accessibilityLabel("\(Int(size)) point")
                         }
@@ -537,7 +560,6 @@ struct VariablesTab: View {
     var model: AppModel
     let family: FontFamily
     let face: FontFace
-    @State private var settings = VariationSettings(axes: [])
     @State private var copied = false
 
     /// The variable faces in the same file: its named instances.
@@ -548,6 +570,16 @@ struct VariablesTab: View {
     private var sampleCharacter: String {
         let first = model.previewText.trimmingCharacters(in: .whitespaces).first.map(String.init) ?? ""
         return first.isEmpty ? "A" : first
+    }
+
+    private var instanceSettings: VariationSettings {
+        VariationSettings.from(axes: face.axes, coreText: PreviewRenderer.shared.variation(of: face))
+    }
+
+    /// Kept on the model, so the Features tab previews the same axis positions.
+    private var settings: Binding<VariationSettings> {
+        Binding(get: { model.detailVariation?.faceID == face.id ? model.detailVariation!.settings : instanceSettings },
+                set: { model.detailVariation = (face.id, $0) })
     }
 
     var body: some View {
@@ -566,11 +598,11 @@ struct VariablesTab: View {
                         }
                         Spacer()
                         Button("Reset") { resetToInstance() }
-                            .disabled(settings == VariationSettings.from(axes: face.axes, coreText: PreviewRenderer.shared.variation(of: face)))
+                            .disabled(settings.wrappedValue == instanceSettings)
                             .help("Back to \(face.styleName)’s own axis values")
                         Button {
                             NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(settings.css, forType: .string)
+                            NSPasteboard.general.setString(settings.wrappedValue.css, forType: .string)
                             copied = true
                         } label: {
                             // Both labels share one slot (the wider one's width), so the
@@ -580,14 +612,15 @@ struct VariablesTab: View {
                                 Text("Copied").opacity(copied ? 1 : 0)
                             }
                         }
-                        .help(settings.css)
+                        .help(settings.wrappedValue.css)
                         .accessibilityLabel(copied ? "Copied" : "Copy CSS")
                     }
-                    PreviewLine(face: face, text: model.previewText, size: CGFloat(model.previewSize), variation: settings.coreTextValues)
+                    PreviewLine(face: face, text: model.previewText, size: CGFloat(model.previewSize),
+                                variation: settings.wrappedValue.coreTextValues, features: model.featureValues(for: face))
                         .accessibilityLabel("Preview at these axis values")
                     Hairline()
                     ForEach(face.axes, id: \.tag) { axis in
-                        AxisRow(face: face, axis: axis, settings: $settings, sample: sampleCharacter)
+                        AxisRow(face: face, axis: axis, settings: settings, sample: sampleCharacter)
                         Hairline()
                     }
                 }
@@ -595,13 +628,165 @@ struct VariablesTab: View {
             .padding(Spacing.windowMargin)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onAppear(perform: resetToInstance)
-        .onChange(of: face.id) { resetToInstance() }
-        .onChange(of: settings) { copied = false }
+        .onAppear { if model.detailVariation?.faceID != face.id { resetToInstance() } }
+        .onChange(of: face.id) { if model.detailVariation?.faceID != face.id { resetToInstance() } }
+        .onChange(of: model.detailVariation?.settings) { copied = false }
     }
 
     private func resetToInstance() {
-        settings = VariationSettings.from(axes: face.axes, coreText: PreviewRenderer.shared.variation(of: face))
+        model.detailVariation = (face.id, instanceSettings)
+    }
+}
+
+// MARK: Features
+
+extension AppModel {
+    /// The family page's feature settings, as CoreText values for `face`.
+    func featureValues(for face: FontFace) -> [FeatureValue] {
+        detailFeatures.isDefault ? [] : detailFeatures.values(for: PreviewRenderer.shared.featureTypes(for: face))
+    }
+
+    /// The Variables tab's axis positions, when they're for `face`.
+    func variationValues(for face: FontFace) -> [Int: Double] {
+        guard let variation = detailVariation, variation.faceID == face.id, !variation.settings.isDefault else { return [:] }
+        return variation.settings.coreTextValues
+    }
+}
+
+/// OpenType features the style has (ligatures, figures, small caps, stylistic sets…), grouped,
+/// each with a sample. They apply live to every preview on the family page.
+struct FeaturesTab: View {
+    @Bindable var model: AppModel
+    let face: FontFace
+    @State private var copied = false
+
+    var body: some View {
+        let types = PreviewRenderer.shared.featureTypes(for: face)
+        let values = model.featureValues(for: face)
+        let css = model.detailFeatures.css(for: types)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.l) {
+                if types.isEmpty {
+                    ContentUnavailableView("No features to switch", systemImage: "textformat.abc",
+                                           description: Text("This style has no OpenType features to turn on or off. Try another style above."))
+                } else {
+                    HStack(spacing: Spacing.s) {
+                        Text(types.count == 1 ? "1 feature" : "\(types.count) features")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Text("Changes apply to every tab.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Reset") { model.detailFeatures.reset() }
+                            .disabled(model.detailFeatures.isDefault)
+                            .help("Back to the font’s defaults")
+                        Button {
+                            guard let css else { return }
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(css, forType: .string)
+                            copied = true
+                        } label: {
+                            ZStack {
+                                Text("Copy CSS").opacity(copied ? 0 : 1)
+                                Text("Copied").opacity(copied ? 1 : 0)
+                            }
+                        }
+                        .disabled(css == nil)
+                        .help(css ?? "Turn a feature on or off to copy its CSS")
+                        .accessibilityLabel(copied ? "Copied" : "Copy CSS")
+                    }
+                    PreviewLine(face: face, text: model.previewText, size: CGFloat(model.previewSize),
+                                variation: model.variationValues(for: face), features: values)
+                        .accessibilityLabel("Preview with these features")
+                    ForEach(FeatureGroup.allCases, id: \.self) { group in
+                        let members = types.filter { $0.group == group }
+                        if !members.isEmpty {
+                            VStack(alignment: .leading, spacing: Spacing.s) {
+                                Text(group.title).font(.headline)
+                                Hairline()
+                                ForEach(members) { type in
+                                    FeatureRow(model: model, face: face, type: type, values: values)
+                                    Hairline()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(Spacing.windowMargin)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onChange(of: model.detailFeatures) { copied = false }
+    }
+}
+
+struct FeatureRow: View {
+    @Bindable var model: AppModel
+    let face: FontFace
+    let type: FontFeatureType
+    let values: [FeatureValue]
+
+    static let sampleSize: CGFloat = 26
+
+    /// The OpenType tags behind the controls ("liga, dlig"), for people who write CSS.
+    private var tags: String {
+        var seen = Set<String>()
+        return type.selectors.compactMap { selector in
+            selector.openTypeTag ?? FeatureCatalog.openType(for: FeatureValue(typeID: type.typeID, selectorID: selector.id, tag: nil, value: 1))?.0
+        }.filter { seen.insert($0).inserted }.joined(separator: ", ")
+    }
+
+    /// An exclusive type with a default and one alternative reads better as a checkbox.
+    private var onOffChoice: (off: FeatureSelector, on: FeatureSelector)? {
+        guard type.isExclusive, type.selectors.count == 2, let off = type.defaultSelector,
+              let on = type.selectors.first(where: { $0.id != off.id }) else { return nil }
+        return (off, on)
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.l) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                controls
+                if !tags.isEmpty {
+                    Text(tags).font(.caption).monospaced().foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 230, alignment: .leading)
+            PreviewLine(face: face, text: FeatureCatalog.sample(for: type, previewText: model.previewText), size: Self.sampleSize,
+                        allowSample: false, variation: model.variationValues(for: face), features: values)
+                .frame(height: PreviewMetrics.height(for: Self.sampleSize))
+                // The sample sits on the first control's baseline.
+                .alignmentGuide(.firstTextBaseline) { _ in PreviewMetrics.baseline(for: Self.sampleSize) }
+                .accessibilityLabel("Sample of \(type.title)")
+        }
+    }
+
+    @ViewBuilder private var controls: some View {
+        if let choice = onOffChoice {
+            Toggle(isOn: Binding(get: { model.detailFeatures.isOn(choice.on, in: type) },
+                                 set: { model.detailFeatures.set(choice.on, in: type, on: $0) })) {
+                Text(FeatureCatalog.label(for: choice.on, in: type))
+            }
+        } else if type.isExclusive {
+            Text(type.title).font(.callout.weight(.semibold))
+            Picker(type.title, selection: Binding(get: { model.detailFeatures.chosen(in: type)?.id ?? -1 },
+                                                  set: { id in model.detailFeatures.choose(type.selectors.first { $0.id == id }, in: type) })) {
+                ForEach(type.selectors, id: \.id) { Text($0.name).tag($0.id) }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityLabel(type.title)
+        } else {
+            // A heading for several switches, unless the group heading above already says it.
+            if type.selectors.count > 1, type.title != type.group.title { Text(type.title).font(.callout.weight(.semibold)) }
+            ForEach(type.selectors, id: \.id) { selector in
+                Toggle(isOn: Binding(get: { model.detailFeatures.isOn(selector, in: type) },
+                                     set: { model.detailFeatures.set(selector, in: type, on: $0) })) {
+                    Text(type.selectors.count == 1 ? FeatureCatalog.label(for: selector, in: type) : selector.name)
+                }
+            }
+        }
     }
 }
 
@@ -708,7 +893,7 @@ struct InfoTab: View {
                                 Text(option.styleName)
                                 Text(option.postScriptName).textSelection(.enabled)
                                 Text("\(option.cssWeight)").monospacedDigit()
-                                Text(option.isEnabled ? "Active" : "Inactive").foregroundStyle(.secondary)
+                                Text(option.isTemporary ? "Until you quit" : option.isEnabled ? "Active" : "Inactive").foregroundStyle(.secondary)
                             }
                             .font(.callout)
                             .fontWeight(option.id == face.id ? .semibold : .regular)
@@ -751,6 +936,11 @@ struct InfoSection: View {
                     Text("Location").foregroundStyle(.secondary).gridColumnAlignment(.trailing)
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         Text(face.path ?? "Built in").textSelection(.enabled)
+                        if let folder = model.libraryFolder(of: face) {
+                            Text("In your library folder “\(folder.name)”: activated where it is, never copied.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         if face.path != nil {
                             Button("Show in Finder") { model.revealInFinder() }
                                 .help("Show the font file in Finder (⇧⌘R)")
@@ -764,7 +954,7 @@ struct InfoSection: View {
     }
 
     private var stateText: String {
-        let state = face.isEnabled ? "Active" : "Inactive"
+        let state = face.isTemporary ? "Active until you quit Specimen" : face.isEnabled ? "Active" : "Inactive"
         guard let lock = model.lockReason(for: face) else { return state }
         return "\(state). \(lock.explanation)"
     }
@@ -838,7 +1028,7 @@ struct CompareRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: Spacing.s) {
-                Image(systemName: face.isEnabled ? "circle.fill" : "circle")
+                Image(systemName: face.isTemporary ? "circle.dashed.inset.filled" : face.isEnabled ? "circle.fill" : "circle")
                     .font(.system(size: 6))
                     .foregroundStyle(face.isEnabled ? Color.windowAccent(activeState) : .secondary)
                     .accessibilityHidden(true)

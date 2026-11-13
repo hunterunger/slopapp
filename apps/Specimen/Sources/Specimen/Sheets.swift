@@ -278,7 +278,7 @@ struct InstallReportSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
-            Text(report.added.isEmpty ? "No fonts were added" : report.added.count == 1 ? "Added 1 font" : "Added \(report.added.count) fonts")
+            Text(report.added.isEmpty ? "No fonts were installed" : report.added.count == 1 ? "Installed 1 font" : "Installed \(report.added.count) fonts")
                 .font(.headline)
             if !report.added.isEmpty {
                 Text("Copied to \(report.folder.replacingOccurrences(of: NSHomeDirectory(), with: "~")).")

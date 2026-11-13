@@ -19,9 +19,9 @@ enum ViewMode: String, CaseIterable, Identifiable {
     var systemImage: String { self == .grid ? "square.grid.2x2" : "list.bullet" }
 }
 
-/// The family page's tabs (⌘1–⌘5 while it's open).
+/// The family page's tabs (⌘1–⌘6 while it's open).
 enum DetailTab: String, CaseIterable, Identifiable {
-    case styles, characters, text, variables, info
+    case styles, characters, text, variables, features, info
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -29,6 +29,7 @@ enum DetailTab: String, CaseIterable, Identifiable {
         case .characters: "Characters"
         case .text: "Text"
         case .variables: "Variables"
+        case .features: "Features"
         case .info: "Info"
         }
     }
@@ -111,6 +112,64 @@ final class AppModel {
     @ObservationIgnored private var indexTask: Task<Void, Never>?
     @ObservationIgnored private var fontObserver: NSObjectProtocol?
     @ObservationIgnored private var testFontURLs: [URL] = []
+
+    // Library folders, documents and in-place activation (AppModel+Library.swift)
+    @ObservationIgnored let registrar: any FontRegistrar
+    /// Test mode's registrar (session scope only), to clean up everything it registered.
+    @ObservationIgnored let sessionOnlyRegistrar: SessionOnlyRegistrar?
+    @ObservationIgnored let folderLibrary = FolderLibrary()
+    @ObservationIgnored let watcher: any FolderWatching = FSEventsWatcher()
+    @ObservationIgnored let foldersStore: FoldersStore
+    @ObservationIgnored let documentsStore: DocumentsStore
+    @ObservationIgnored let temporaryStore: TemporaryStore
+    /// The registry's faces as last listed, and the library folders' faces.
+    @ObservationIgnored var registryFaces: [SystemFace] = []
+    @ObservationIgnored var libraryFaces: [SystemFace] = []
+    /// Files CoreText has registered (from `registryFaces`).
+    @ObservationIgnored var registeredPaths: Set<String> = []
+    @ObservationIgnored var indexCache = IndexCache()
+    @ObservationIgnored var indexGeneration = 0
+    @ObservationIgnored var pendingEvents: [FolderEvent] = []
+    @ObservationIgnored var eventTask: Task<Void, Never>?
+    @ObservationIgnored var documentReferences: [UUID: [FontReference]] = [:]
+    @ObservationIgnored var volumeObservers: [NSObjectProtocol] = []
+
+    private(set) var folders: [LibraryFolder] = []
+    /// Library folder path → its sidebar tree (online folders).
+    private(set) var folderTrees: [String: FolderNode] = [:]
+    private(set) var offlineFolders: Set<String> = []
+    private(set) var unreadableCounts: [String: Int] = [:]
+    /// Every folder the sidebar shows (for counts and filtering).
+    private(set) var folderNodePaths: [String] = []
+    private(set) var isScanningFolders = false
+    private(set) var documents: [OpenedDocument] = []
+    private(set) var documentMatches: [UUID: [DocumentFontMatch]] = [:]
+    private(set) var documentProblems: [UUID: String] = [:]
+    /// Files Specimen activated for this session only.
+    private(set) var temporaryPaths: Set<String> = []
+    /// A library folder waiting for "Remove from Library?" (it has active fonts).
+    var pendingFolderRemoval: LibraryFolder?
+
+    // Family page typography: OpenType features (shared by every tab) and axis positions.
+    var detailFeatures = FeatureSettings()
+    @ObservationIgnored var detailFeaturesFamily: String?
+    var detailVariation: (faceID: String, settings: VariationSettings)?
+
+    // Folder setters used by the extension.
+    func setFolders(_ value: [LibraryFolder]) { folders = value }
+    func setDocuments(_ value: [OpenedDocument]) { documents = value }
+    func setTemporaryPaths(_ value: Set<String>) { temporaryPaths = value }
+    func setScanningFolders(_ value: Bool) { isScanningFolders = value }
+    func setDocumentState(matches: [UUID: [DocumentFontMatch]], problems: [UUID: String]) {
+        documentMatches = matches
+        documentProblems = problems
+    }
+    func setFolderState(trees: [String: FolderNode], offline: Set<String>, unreadable: [String: Int]) {
+        folderTrees = trees
+        offlineFolders = offline
+        unreadableCounts = unreadable
+        folderNodePaths = folders.map(\.path).flatMap { trees[$0]?.allPaths ?? [$0] }
+    }
 
     // Library
     private(set) var faces: [FontFace] = []
@@ -197,6 +256,18 @@ final class AppModel {
         favoritesStore = FavoritesStore(directory: environment.dataDirectory)
         overridesStore = CategoryOverridesStore(directory: environment.dataDirectory)
         collectionsStore = CollectionsStore(directory: environment.dataDirectory)
+        foldersStore = FoldersStore(directory: environment.dataDirectory)
+        documentsStore = DocumentsStore(directory: environment.dataDirectory)
+        temporaryStore = TemporaryStore(directory: environment.dataDirectory)
+        // Test mode never registers anything beyond the session.
+        if environment.isTestMode {
+            let sessionOnly = SessionOnlyRegistrar()
+            sessionOnlyRegistrar = sessionOnly
+            registrar = sessionOnly
+        } else {
+            sessionOnlyRegistrar = nil
+            registrar = CoreTextRegistrar()
+        }
         isSnapshotRun = ProcessInfo.processInfo.environment["SPECIMEN_SNAPSHOT_DIR"] != nil
         sidebar = defaults.string(forKey: "sidebar").flatMap(SidebarItem.init(storageKey:)) ?? .all
         showSystemFonts = defaults.object(forKey: "showSystemFonts") as? Bool ?? true
@@ -224,6 +295,7 @@ final class AppModel {
         let cacheURL = environment.indexCacheURL
         let testDirectory = environment.testFontsDirectory
         isIndexing = true
+        loadLibraryState()
         indexTask = Task {
             // Test mode: register the test fonts for this session before listing.
             if let testDirectory {
@@ -232,51 +304,79 @@ final class AppModel {
                 let errors = await Task.detached { TestFonts.register(urls) }.value
                 if !errors.isEmpty { NSLog("Specimen test fonts: %@", errors.joined(separator: "; ")) }
             }
+            await endLeftoverTemporaryActivations()
             let cache = await Task.detached(priority: .userInitiated) { IndexCache.load(from: cacheURL) }.value
+            indexCache = cache
             if !cache.faces.isEmpty, faces.isEmpty {
-                apply(faces: cache.faces)
+                // Temporary activations never survive a relaunch.
+                apply(faces: cache.faces.map { var face = $0; face.isTemporary = false; return face })
             }
-            await rebuildIndex(cache: cache)
+            await loadFolders()
+            await rebuildIndex()
+            await syncFolders()
+            refreshDocuments()
         }
         fontObserver = NotificationCenter.default.addObserver(
             forName: Notification.Name(kCTFontManagerRegisteredFontsChangedNotification as String), object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.scheduleRefresh() }
         }
+        observeVolumes()
     }
 
     /// Test mode: turn the test fonts back on and unregister them, so nothing is left behind.
     func cleanUpTestFonts() {
+        if let sessionOnlyRegistrar {
+            _ = sessionOnlyRegistrar.unregister(Array(sessionOnlyRegistrar.registeredByThisRun))
+        }
         guard !testFontURLs.isEmpty else { return }
         TestFonts.cleanUp(testFontURLs)
         testFontURLs = []
     }
 
-    private func rebuildIndex(cache: IndexCache) async {
+    /// Lists the registry (unless `relist` is false), merges in the library folders' faces and
+    /// indexes them (slow facts from the cache). The newest call wins.
+    func rebuildIndex(relist: Bool = true) async {
+        indexGeneration += 1
+        let generation = indexGeneration
         isIndexing = true
         let system = system
+        if relist || registryFaces.isEmpty {
+            let listed = await Task.detached(priority: .userInitiated) { system.listFaces() }.value
+            guard generation == indexGeneration else { return }
+            setRegistry(listed)
+        }
+        let listed = LibraryMerge.merge(registry: registryFaces, library: libraryFaces, temporaryPaths: temporaryPaths)
+        let cache = indexCache
         let cacheURL = environment.indexCacheURL
         let result = await Task.detached(priority: .userInitiated) { [weak self] in
-            FontIndexer(system: system).build(cache: cache) { done, total in
+            FontIndexer(system: system).build(cache: cache, listed: listed) { done, total in
                 Task { @MainActor in self?.indexProgress = Double(done) / Double(max(total, 1)) }
             }
         }.value
-        guard !Task.isCancelled else { return }
+        guard generation == indexGeneration, !Task.isCancelled else { return }
         isIndexing = false
         indexProgress = nil
+        indexCache = result.cache
         apply(faces: result.faces)
         if result.freshlyRead > 0 || result.cache.faces != cache.faces {
             Task.detached(priority: .utility) { try? result.cache.save(to: cacheURL) }
         }
     }
 
-    private func apply(faces newFaces: [FontFace]) {
+    func setRegistry(_ listed: [SystemFace]) {
+        registryFaces = listed
+        registeredPaths = Set(listed.compactMap(\.path))
+    }
+
+    func apply(faces newFaces: [FontFace]) {
         faces = newFaces
         let shown = FontIndexer.stressCopies(newFaces, copies: environment.stressCopies)
         families = FontFamily.group(shown, overrides: categoryOverrides)
         familyIndex = Dictionary(families.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
         faceIndex = Dictionary(families.flatMap(\.faces).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         hasLoaded = true
+        rematchDocuments()
         refreshItems(counts: true)
         // Forget selections and screens whose fonts went away.
         if case .detail(let family) = screen, !families.contains(where: { $0.name == family }) { screen = .grid }
@@ -304,10 +404,12 @@ final class AppModel {
     func refreshFromSystem() async {
         let system = system
         let listed = await Task.detached(priority: .userInitiated) { system.listFaces() }.value
-        if let updated = FontIndexer.applyStates(listed, to: faces) {
+        setRegistry(listed)
+        let merged = LibraryMerge.merge(registry: listed, library: libraryFaces, temporaryPaths: temporaryPaths)
+        if let updated = FontIndexer.applyStates(merged, to: faces) {
             if updated != faces { apply(faces: updated) }
         } else {
-            await rebuildIndex(cache: IndexCache.load(from: environment.indexCacheURL))
+            await rebuildIndex(relist: false)
         }
     }
 
@@ -317,10 +419,11 @@ final class AppModel {
         LibraryQuery(sidebar: sidebar, search: search, showSystemFonts: showSystemFonts,
                      groupByFamily: groupByFamily, favorites: favorites, tags: tags,
                      smartCollections: smartCollections, sort: sort,
-                     hiddenFaceIDs: hideUncovered ? hiddenFaceIDs : [])
+                     hiddenFaceIDs: hideUncovered ? hiddenFaceIDs : [],
+                     folderPaths: folderNodePaths, documentFaceIDs: documentFaceIDs)
     }
 
-    private func refreshItems(counts recount: Bool = false) {
+    func refreshItems(counts recount: Bool = false) {
         items = LibraryFilter.items(in: families, query: query)
         itemsVersion += 1
         let visible = Set(items.map(\.id))
@@ -351,8 +454,8 @@ final class AppModel {
 
     func family(named name: String) -> FontFamily? { familyIndex[name] }
     func face(id: String) -> FontFace? { faceIndex[id] }
-    @ObservationIgnored private var familyIndex: [String: FontFamily] = [:]
-    @ObservationIgnored private var faceIndex: [String: FontFace] = [:]
+    @ObservationIgnored var familyIndex: [String: FontFamily] = [:]
+    @ObservationIgnored var faceIndex: [String: FontFace] = [:]
 
     func lockReason(for face: FontFace) -> LockReason? {
         ActivationPlanner.lockReason(for: face, testRoot: environment.testFontsDirectory,
@@ -370,14 +473,24 @@ final class AppModel {
 
     func openDetail(_ item: GridEntry? = nil) {
         guard let item = item ?? selectedItems.first else { return }
+        prepareTypography(for: item.family.name)
         detailFaceID = item.representative.id
         screen = .detail(family: item.family.name)
     }
 
     /// Opens a family's page from compare (or anywhere a face is known).
     func openDetail(face: FontFace) {
+        prepareTypography(for: face.familyName)
         detailFaceID = face.id
         screen = .detail(family: face.familyName)
+    }
+
+    /// Feature settings belong to one family page; another family starts from its defaults.
+    private func prepareTypography(for family: String) {
+        guard detailFeaturesFamily != family else { return }
+        detailFeaturesFamily = family
+        detailFeatures.reset()
+        detailVariation = nil
     }
 
     /// ⌘K: add the selection to the tray (if any) and show the tray side by side.
@@ -650,8 +763,8 @@ final class AppModel {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
         panel.allowedContentTypes = [.font]
-        panel.prompt = "Add"
-        panel.message = "Choose font files or folders to add to \(installFolder.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))."
+        panel.prompt = "Install"
+        panel.message = "Choose font files to copy into \(installFolder.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")). To use fonts where they are, choose File ▸ Add Folder to Library… instead."
         guard panel.runModal() == .OK else { return }
         addFonts(panel.urls)
     }
@@ -694,7 +807,7 @@ final class AppModel {
                 } catch {
                     problems.append((name, error.localizedDescription))
                 }
-            case .alreadyInstalled: problems.append((name, "Already added."))
+            case .alreadyInstalled: problems.append((name, "Already installed."))
             case .nameInUse(let postScriptName): problems.append((name, "A font named \(postScriptName) is already installed."))
             case .unreadable: problems.append((name, "Not a font macOS can read. It may be damaged."))
             }
@@ -787,18 +900,19 @@ final class AppModel {
 
     // MARK: Activation
 
-    func activate(_ enable: Bool) { request(enable, faces: actionFaces) }
+    func activate(_ enable: Bool, temporary: Bool = false) { request(enable, faces: actionFaces, temporary: temporary) }
 
-    func request(_ enable: Bool, faces targets: [FontFace]) {
+    func request(_ enable: Bool, faces targets: [FontFace], temporary: Bool = false) {
         guard environment.stressCopies == 1 else {
             notice = Notice(title: "Fonts can't change in stress mode", message: "Quit and open Specimen without SPECIMEN_STRESS to turn fonts on or off.")
             return
         }
         let plan = ActivationPlanner.plan(targets: targets, enable: enable, library: faces,
-                                          testRoot: environment.testFontsDirectory)
+                                          testRoot: environment.testFontsDirectory, temporary: temporary,
+                                          inPlace: { [unowned self] in isInPlace($0) })
         if plan.isEmpty {
             if !plan.lockReasons.isEmpty {
-                let what = enable ? "turned on" : "turned off"
+                let what = enable ? (temporary ? "activated temporarily" : "turned on") : "turned off"
                 notice = Notice(title: plan.locked.count == 1 ? "This font can't be \(what)" : "These fonts can't be \(what)",
                                 message: plan.lockReasons.map(\.explanation).joined(separator: " "))
             }
@@ -809,8 +923,13 @@ final class AppModel {
         } else if plan.needsConfirmation {
             pending = .bulk(plan)
         } else {
-            perform(on: enable ? plan.changes : [], off: enable ? [] : plan.changes, actionName: enable ? "Activate" : "Deactivate")
+            perform(on: enable ? plan.changes : [], off: enable ? [] : plan.changes,
+                    temporaryIDs: plan.temporary ? Set(plan.changes.map(\.id)) : [], actionName: actionName(plan))
         }
+    }
+
+    private func actionName(_ plan: ActivationPlan) -> String {
+        plan.enable ? (plan.temporary ? "Activate Temporarily" : "Activate") : "Deactivate"
     }
 
     /// Carries out a confirmed plan. `swap`: turn off the clashing copies too.
@@ -819,29 +938,57 @@ final class AppModel {
         let on = plan.enable ? plan.changes + (swap ? plan.swapOns : []) : []
         let off = plan.enable ? (swap ? plan.swapOffs : []) : plan.changes
         guard !on.isEmpty || !off.isEmpty else { return }
-        perform(on: on, off: off, actionName: plan.enable ? "Activate" : "Deactivate")
+        perform(on: on, off: off, temporaryIDs: plan.temporary ? Set(on.map(\.id)) : [], actionName: actionName(plan))
+    }
+
+    /// Faces in a library folder: turned on and off by registering their files where they are.
+    /// (Installed fonts, and fonts other apps registered, use the system switch.)
+    func isInPlace(_ face: FontFace) -> Bool {
+        guard face.location == .other, let path = face.path else { return false }
+        return folders.contains { $0.contains(path) }
     }
 
     /// Turns faces on and off off the main actor, verifies, and registers one undo step.
     /// The undo step is registered right away (not after the async work) so that, during an
-    /// undo, it becomes the redo step.
-    func perform(on: [FontFace], off: [FontFace], actionName: String) {
-        let system = system
+    /// undo, it becomes the redo step. Faces turned off while temporary come back temporary.
+    func perform(on: [FontFace], off: [FontFace], temporaryIDs: Set<String> = [], actionName: String) {
+        let system = system, registrar = registrar
+        let steps = ActivationRouter.steps(on: on, off: off, temporaryIDs: temporaryIDs,
+                                           inPlace: isInPlace, registered: registeredPaths)
+        // Undo puts every face back as it was: on (temporary or not) or off. Faces that were
+        // already on (a temporary one kept, or the reverse) stay on with their old scope.
+        let reverse = ActivationUndo.reverse(on: on, off: off)
         isChangingFonts = true
         if let undoManager {
             undoManager.registerUndo(withTarget: self) { model in
                 MainActor.assumeIsolated {
                     let current = { (f: FontFace) in model.face(id: f.id) ?? f }
-                    model.perform(on: off.map(current), off: on.map(current), actionName: actionName)
+                    model.perform(on: reverse.on.map(current), off: reverse.off.map(current),
+                                  temporaryIDs: reverse.temporaryIDs, actionName: actionName)
                 }
             }
             undoManager.setActionName(actionName)
         }
+        // Remember temporary files before registering them, so a crash can't leave one behind
+        // unrecorded.
+        var temporary = temporaryPaths.subtracting(steps.unregister).subtracting(steps.registerPersistent)
+        temporary.formUnion(steps.registerTemporary)
+        temporaryPaths = temporary
+        temporaryStore.save(temporary)
         Task {
-            await Task.detached(priority: .userInitiated) {
-                if !off.isEmpty { system.setEnabled(off, enabled: false) }
-                if !on.isEmpty { system.setEnabled(on, enabled: true) }
+            let errors = await Task.detached(priority: .userInitiated) { () -> [RegistrationError] in
+                var errors = registrar.unregister(steps.unregister)
+                if !steps.disable.isEmpty { system.setEnabled(steps.disable, enabled: false) }
+                errors += registrar.register(steps.registerPersistent, scope: .persistent)
+                errors += registrar.register(steps.registerTemporary, scope: .session)
+                if !steps.enable.isEmpty { system.setEnabled(steps.enable, enabled: true) }
+                return errors
             }.value
+            let failedPaths = Set(errors.compactMap(\.path))
+            if !failedPaths.isEmpty {
+                temporaryPaths.subtract(failedPaths.subtracting(steps.unregister))
+                temporaryStore.save(temporaryPaths)
+            }
             refreshTask?.cancel()
             await refreshFromSystem()
             isChangingFonts = false
@@ -849,14 +996,31 @@ final class AppModel {
                 + ActivationPlanner.failures(requested: off, enable: false, after: faces)
             if !failed.isEmpty {
                 let names = failed.prefix(5).map(\.fullName).joined(separator: ", ") + (failed.count > 5 ? ", and \(failed.count - 5) more" : "")
+                let reason = errors.first.map { " macOS said: \($0.message)" } ?? " Try again, or use Font Book."
                 notice = Notice(title: failed.count == 1 ? "A font didn't change" : "\(failed.count) fonts didn't change",
-                                message: "macOS didn't change \(names). Try again, or use Font Book.")
+                                message: "macOS didn't change \(names).\(reason)")
             }
         }
     }
 
+    /// Font ▸ Deactivate Temporary Fonts.
+    var temporaryFaces: [FontFace] { faces.filter(\.isTemporary) }
+
+    func deactivateTemporaryFonts() {
+        request(false, faces: temporaryFaces)
+    }
+
+    /// On quit: end every temporary activation (synchronously; they're session-scoped).
+    func endTemporaryActivations() {
+        guard !temporaryPaths.isEmpty else { return }
+        _ = registrar.unregister(Array(temporaryPaths))
+        temporaryPaths = []
+        temporaryStore.save([])
+    }
+
     /// Whether Activate / Deactivate make sense for the current target.
-    var canActivate: Bool { actionFaces.contains { !$0.isEnabled } }
+    var canActivate: Bool { actionFaces.contains { !$0.isEnabled || $0.isTemporary } }
+    var canActivateTemporarily: Bool { actionFaces.contains { !$0.isEnabled && isInPlace($0) } }
     var canDeactivate: Bool { actionFaces.contains { $0.isEnabled } }
 
     // MARK: Copy and reveal

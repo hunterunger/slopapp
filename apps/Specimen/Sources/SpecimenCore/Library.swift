@@ -64,6 +64,10 @@ public enum SidebarItem: Hashable, Codable, Sendable {
     case category(FontCategory)
     case tag(String)
     case smart(UUID)
+    /// A library folder, or a folder inside one (by path).
+    case folder(String)
+    /// An opened document: the fonts it uses.
+    case document(UUID)
 
     public static var libraryItems: [SidebarItem] { [.all, .userFonts, .systemFonts, .active, .inactive, .favorites, .variable] }
     public static var categoryItems: [SidebarItem] { FontCategory.allCases.map { .category($0) } }
@@ -81,6 +85,8 @@ public enum SidebarItem: Hashable, Codable, Sendable {
         case .category(let category): category.title
         case .tag(let name): name
         case .smart: "Smart Collection"
+        case .folder(let path): (path as NSString).lastPathComponent
+        case .document: "Document"
         }
     }
 
@@ -96,6 +102,8 @@ public enum SidebarItem: Hashable, Codable, Sendable {
         case .category(let category): category.systemImage
         case .tag: "tag"
         case .smart: "gearshape"
+        case .folder: "folder"
+        case .document: "doc.text"
         }
     }
 
@@ -105,6 +113,8 @@ public enum SidebarItem: Hashable, Codable, Sendable {
         case .category(let category): "category.\(category.rawValue)"
         case .tag(let name): "tag.\(name)"
         case .smart(let id): "smart.\(id.uuidString)"
+        case .folder(let path): "folder.\(path)"
+        case .document(let id): "document.\(id.uuidString)"
         default: title
         }
     }
@@ -120,6 +130,14 @@ public enum SidebarItem: Hashable, Codable, Sendable {
         }
         if storageKey.hasPrefix("smart."), let id = UUID(uuidString: String(storageKey.dropFirst(6))) {
             self = .smart(id)
+            return
+        }
+        if storageKey.hasPrefix("folder./") {
+            self = .folder(String(storageKey.dropFirst(7)))
+            return
+        }
+        if storageKey.hasPrefix("document."), let id = UUID(uuidString: String(storageKey.dropFirst(9))) {
+            self = .document(id)
             return
         }
         guard let item = SidebarItem.libraryItems.first(where: { $0.title == storageKey }) else { return nil }
@@ -230,11 +248,15 @@ public struct LibraryQuery: Sendable, Equatable {
     public var sort: LibrarySort
     /// Faces hidden because they can't show the preview text ("hide fonts that can't show this text").
     public var hiddenFaceIDs: Set<String>
+    /// Every folder the sidebar shows (library folders and the folders inside them), for counts.
+    public var folderPaths: [String]
+    /// The faces each opened document uses.
+    public var documentFaceIDs: [UUID: Set<String>]
 
     public init(sidebar: SidebarItem = .all, search: String = "", showSystemFonts: Bool = true,
                 groupByFamily: Bool = true, favorites: Set<String> = [], tags: TagLibrary = TagLibrary(),
                 smartCollections: [SmartCollection] = [], sort: LibrarySort = LibrarySort(),
-                hiddenFaceIDs: Set<String> = []) {
+                hiddenFaceIDs: Set<String> = [], folderPaths: [String] = [], documentFaceIDs: [UUID: Set<String>] = [:]) {
         self.sidebar = sidebar
         self.search = search
         self.showSystemFonts = showSystemFonts
@@ -244,6 +266,8 @@ public struct LibraryQuery: Sendable, Equatable {
         self.smartCollections = smartCollections
         self.sort = sort
         self.hiddenFaceIDs = hiddenFaceIDs
+        self.folderPaths = folderPaths
+        self.documentFaceIDs = documentFaceIDs
     }
 }
 
@@ -262,6 +286,10 @@ public enum LibraryFilter {
             return nil
         }()
         let smartTagged = smart?.rules.tag.map { query.tags.families(in: $0) }
+        let documentFaces: Set<String>? = {
+            if case .document(let id) = query.sidebar { return query.documentFaceIDs[id] ?? [] }
+            return nil
+        }()
         var result: [GridEntry] = []
         for family in query.sort.sorted(families) {
             if case .favorites = query.sidebar, !query.favorites.contains(family.name) { continue }
@@ -280,8 +308,11 @@ public enum LibraryFilter {
                 case .variable where !face.isVariable: return false
                 case .userFonts where face.location == .system: return false
                 case .systemFonts where face.location != .system: return false
+                case .folder(let path):
+                    guard let facePath = face.path, LibraryPaths.isInside(facePath, folder: path) else { return false }
                 default: break
                 }
+                if let documentFaces, !documentFaces.contains(face.id) { return false }
                 if let smart {
                     guard smartFacePasses(face, rules: smart.rules) else { return false }
                     if !familySmartMatches, !matches(smartTokens, in: faceHaystack(face, family: family)) { return false }
@@ -313,6 +344,7 @@ public enum LibraryFilter {
         switch rules.state {
         case .any: break
         case .active: if !face.isEnabled { return false }
+        case .temporary: if !face.isTemporary { return false }
         case .inactive: if face.isEnabled { return false }
         }
         switch rules.source {
@@ -342,7 +374,31 @@ public enum LibraryFilter {
             base.sidebar = item
             counts[item] = items(in: families, query: base).count
         }
+        counts.merge(folderCounts(in: families, folders: query.folderPaths, showSystemFonts: query.showSystemFonts)) { a, _ in a }
+        for (id, faces) in query.documentFaceIDs {
+            counts[.document(id)] = families.filter { family in family.faces.contains { faces.contains($0.id) } }.count
+        }
         return counts
+    }
+
+    /// Families per folder, in one pass: each family counts once in every folder that holds
+    /// one of its faces (directly or deeper).
+    public static func folderCounts(in families: [FontFamily], folders: [String], showSystemFonts: Bool = true) -> [SidebarItem: Int] {
+        guard !folders.isEmpty else { return [:] }
+        let known = Set(folders)
+        var counts: [String: Int] = [:]
+        for family in families {
+            var seen = Set<String>()
+            for face in family.faces {
+                guard var directory = face.path.map({ ($0 as NSString).deletingLastPathComponent }) else { continue }
+                if !showSystemFonts && face.location == .system { continue }
+                while directory.count > 1 {
+                    if known.contains(directory), seen.insert(directory).inserted { counts[directory, default: 0] += 1 }
+                    directory = (directory as NSString).deletingLastPathComponent
+                }
+            }
+        }
+        return Dictionary(uniqueKeysWithValues: folders.map { (.folder($0), counts[$0] ?? 0) })
     }
 
     static func faceHaystack(_ face: FontFace, family: FontFamily) -> String {

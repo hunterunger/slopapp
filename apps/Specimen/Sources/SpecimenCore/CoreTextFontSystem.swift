@@ -18,34 +18,48 @@ public struct CoreTextFontSystem: FontSystem {
         var faces: [SystemFace] = []
         faces.reserveCapacity(all.count)
         for descriptor in all {
-            guard let name = Self.string(descriptor, kCTFontNameAttribute),
-                  let family = Self.string(descriptor, kCTFontFamilyNameAttribute),
-                  !name.hasPrefix("."), !family.hasPrefix(".") else { continue }
-            let path = Self.path(descriptor)
-            let id = FontFace.makeID(postScriptName: name, path: path)
-            guard seen.insert(id).inserted else { continue }
-            let traits = CTFontDescriptorCopyAttribute(descriptor, kCTFontTraitsAttribute) as? [CFString: Any] ?? [:]
-            let symbolic = (traits[kCTFontSymbolicTrait] as? NSNumber)?.uint32Value ?? 0
-            let style = Self.string(descriptor, kCTFontStyleNameAttribute) ?? "Regular"
-            let display = CTFontDescriptorCopyLocalizedAttribute(descriptor, kCTFontFamilyNameAttribute, nil) as? String
-            faces.append(SystemFace(
-                postScriptName: name,
-                familyName: family,
-                displayFamilyName: display ?? family,
-                styleName: style,
-                fullName: Self.string(descriptor, kCTFontDisplayNameAttribute) ?? "\(family) \(style)",
-                path: path,
-                isEnabled: enabled.contains(id),
-                weight: (traits[kCTFontWeightTrait] as? NSNumber)?.doubleValue ?? 0,
-                width: (traits[kCTFontWidthTrait] as? NSNumber)?.doubleValue ?? 0,
-                slant: (traits[kCTFontSlantTrait] as? NSNumber)?.doubleValue ?? 0,
-                isItalic: symbolic & CTFontSymbolicTraits.traitItalic.rawValue != 0,
-                isMonospaceTrait: symbolic & CTFontSymbolicTraits.traitMonoSpace.rawValue != 0,
-                stylisticClass: Int((symbolic & CTFontSymbolicTraits.traitClassMask.rawValue) >> 28),
-                format: Self.format(descriptor, path: path)
-            ))
+            guard let face = Self.face(from: descriptor, path: Self.path(descriptor), isEnabled: nil),
+                  seen.insert(face.id).inserted else { continue }
+            var listed = face
+            listed.isEnabled = enabled.contains(face.id)
+            faces.append(listed)
         }
         return faces
+    }
+
+    /// The cheap facts from one descriptor. Hidden (dot-named) faces give nil. `isEnabled` nil
+    /// means "not known here" (set by the caller).
+    public static func face(from descriptor: CTFontDescriptor, path: String?, isEnabled: Bool?) -> SystemFace? {
+        guard let name = string(descriptor, kCTFontNameAttribute),
+              let family = string(descriptor, kCTFontFamilyNameAttribute),
+              !name.hasPrefix("."), !family.hasPrefix(".") else { return nil }
+        let traits = CTFontDescriptorCopyAttribute(descriptor, kCTFontTraitsAttribute) as? [CFString: Any] ?? [:]
+        let symbolic = (traits[kCTFontSymbolicTrait] as? NSNumber)?.uint32Value ?? 0
+        let style = string(descriptor, kCTFontStyleNameAttribute) ?? "Regular"
+        let display = CTFontDescriptorCopyLocalizedAttribute(descriptor, kCTFontFamilyNameAttribute, nil) as? String
+        return SystemFace(
+            postScriptName: name,
+            familyName: family,
+            displayFamilyName: display ?? family,
+            styleName: style,
+            fullName: string(descriptor, kCTFontDisplayNameAttribute) ?? "\(family) \(style)",
+            path: path,
+            isEnabled: isEnabled ?? false,
+            weight: (traits[kCTFontWeightTrait] as? NSNumber)?.doubleValue ?? 0,
+            width: (traits[kCTFontWidthTrait] as? NSNumber)?.doubleValue ?? 0,
+            slant: (traits[kCTFontSlantTrait] as? NSNumber)?.doubleValue ?? 0,
+            isItalic: symbolic & CTFontSymbolicTraits.traitItalic.rawValue != 0,
+            isMonospaceTrait: symbolic & CTFontSymbolicTraits.traitMonoSpace.rawValue != 0,
+            stylisticClass: Int((symbolic & CTFontSymbolicTraits.traitClassMask.rawValue) >> 28),
+            format: format(descriptor, path: path)
+        )
+    }
+
+    /// Every face in a font file (unregistered or not), read straight from the file.
+    public static func faces(inFile path: String) -> [SystemFace] {
+        let descriptors = CTFontManagerCreateFontDescriptorsFromURL(URL(fileURLWithPath: path) as CFURL) as? [CTFontDescriptor] ?? []
+        var seen = Set<String>()
+        return descriptors.compactMap { face(from: $0, path: path, isEnabled: false) }.filter { seen.insert($0.postScriptName).inserted }
     }
 
     public func details(for face: SystemFace) -> FaceDetails {

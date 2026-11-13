@@ -7,7 +7,7 @@ public struct IndexCache: Codable, Sendable, Equatable {
         public var details: FaceDetails
     }
 
-    public static let currentVersion = 4
+    public static let currentVersion = 5
     public var version = IndexCache.currentVersion
     public var entries: [String: Entry] = [:]
     /// The last full index, shown at launch while the fresh one builds.
@@ -53,7 +53,11 @@ public struct FontIndexer: Sendable {
 
     /// `progress` is called with (done, total) every so often while reading fonts.
     public func build(cache: IndexCache, progress: (@Sendable (Int, Int) -> Void)? = nil) -> Result {
-        let listed = system.listFaces()
+        build(cache: cache, listed: system.listFaces(), progress: progress)
+    }
+
+    /// Indexes `listed` (the registry's faces merged with library folders' faces).
+    public func build(cache: IndexCache, listed: [SystemFace], progress: (@Sendable (Int, Int) -> Void)? = nil) -> Result {
         var newCache = IndexCache()
         var faces: [FontFace] = []
         faces.reserveCapacity(listed.count)
@@ -90,17 +94,20 @@ public struct FontIndexer: Sendable {
             isVariable: !details.axes.isEmpty, axes: details.axes, format: face.format,
             category: Classifier.classify(facts), coversBasicLatin: details.coversBasicLatin,
             hasColorGlyphs: details.hasColorGlyphs, fileModified: modified,
-            foundry: details.foundry, version: details.version
+            foundry: details.foundry, version: details.version, isTemporary: face.isTemporary
         )
     }
 
     /// Only the enabled state changed (e.g. after turning fonts on or off): re-list, reuse details.
     public static func applyStates(_ listed: [SystemFace], to faces: [FontFace]) -> [FontFace]? {
-        let states = Dictionary(listed.map { ($0.id, $0.isEnabled) }, uniquingKeysWith: { a, _ in a })
+        let states = Dictionary(listed.map { ($0.id, ($0.isEnabled, $0.isTemporary)) }, uniquingKeysWith: { a, _ in a })
         guard states.count == faces.count, faces.allSatisfy({ states[$0.id] != nil }) else { return nil }
         return faces.map { face in
             var face = face
-            face.isEnabled = states[face.id] ?? face.isEnabled
+            if let state = states[face.id] {
+                face.isEnabled = state.0
+                face.isTemporary = state.0 && state.1
+            }
             return face
         }
     }

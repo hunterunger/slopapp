@@ -13,6 +13,11 @@ public enum LockReason: Equatable, Sendable {
     /// Another copy with the same PostScript name is protected. macOS turns fonts off by
     /// name, so turning this one off would turn that one off too.
     case sharedName
+    /// Activate Temporarily on an installed font: it's installed, so it's on or off for good.
+    case notTemporary
+    /// Another copy with this PostScript name is on, and the two are switched differently
+    /// (one installed, one in a library folder), so Specimen can't swap them safely.
+    case otherCopyActive
 
     public var title: String {
         switch self {
@@ -21,6 +26,8 @@ public enum LockReason: Equatable, Sendable {
         case .testMode: "Locked in test mode"
         case .missingFile: "File missing"
         case .sharedName: "Shares a name with a protected font"
+        case .notTemporary: "Installed font"
+        case .otherCopyActive: "Another copy is active"
         }
     }
 
@@ -32,6 +39,8 @@ public enum LockReason: Equatable, Sendable {
         case .testMode: "In test mode, only fonts in the test folder can be turned on or off."
         case .missingFile: "The font file is missing. It may have been moved, deleted, or be on a disconnected disk."
         case .sharedName: "Another copy of this font belongs to macOS or all users. macOS turns fonts off by name, so turning this one off would turn that one off too."
+        case .notTemporary: "Only fonts in your library folders can be activated temporarily. Installed fonts are turned on or off for good."
+        case .otherCopyActive: "Another copy of this font is active from a different place. Only one copy of a font can be active: deactivate that copy first."
         }
     }
 }
@@ -48,6 +57,8 @@ public struct ActivationConflict: Equatable, Sendable {
 
 public struct ActivationPlan: Equatable, Sendable {
     public var enable: Bool
+    /// Activate for this session only (ends when Specimen quits).
+    public var temporary = false
     /// Faces that will change.
     public var changes: [FontFace] = []
     public var alreadyDone: [FontFace] = []
@@ -82,15 +93,24 @@ public enum ActivationPlanner {
     }
 
     /// What turning `targets` on (or off) would do, given every face in the library.
+    /// `temporary`: activate for this session only (library-folder fonts, `inPlace`). A
+    /// temporary face activated normally is kept on for good.
     public static func plan(targets: [FontFace], enable: Bool, library: [FontFace], testRoot: URL?,
+                            temporary: Bool = false, inPlace: (FontFace) -> Bool = { _ in false },
                             fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> ActivationPlan {
-        var plan = ActivationPlan(enable: enable)
+        var plan = ActivationPlan(enable: enable, temporary: enable && temporary)
         var activeByName: [String: FontFace] = [:]
         for face in library where face.isEnabled { activeByName[face.postScriptName] = face }
         var seen = Set<String>()
         for face in targets where seen.insert(face.id).inserted {
-            if face.isEnabled == enable {
+            let keepsTemporaryOn = enable && !temporary && face.isEnabled && face.isTemporary
+            if face.isEnabled == enable && !keepsTemporaryOn {
                 plan.alreadyDone.append(face)
+                continue
+            }
+            if enable, temporary, !inPlace(face) {
+                plan.locked.append(face)
+                if !plan.lockReasons.contains(.notTemporary) { plan.lockReasons.append(.notTemporary) }
                 continue
             }
             if let reason = lockReason(for: face, testRoot: testRoot, fileExists: fileExists) {
@@ -105,7 +125,10 @@ public enum ActivationPlanner {
                 continue
             }
             if enable, let active = activeByName[face.postScriptName], active.id != face.id {
-                let lock = lockReason(for: active, testRoot: testRoot, fileExists: fileExists)
+                var lock = lockReason(for: active, testRoot: testRoot, fileExists: fileExists)
+                // Swapping across mechanisms (switch vs registration) isn't safe: macOS's
+                // switch works by name and could catch the other copy too.
+                if lock == nil, inPlace(face) != inPlace(active) { lock = .otherCopyActive }
                 plan.conflicts.append(ActivationConflict(face: face, activeCopy: active, activeCopyLock: lock))
                 continue
             }

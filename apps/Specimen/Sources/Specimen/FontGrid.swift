@@ -154,7 +154,7 @@ final class FontGridController: NSObject, NSCollectionViewDataSource, NSCollecti
             item: item, text: model.previewText, size: CGFloat(model.previewSize),
             isFavorite: model.favorites.contains(item.family.name),
             lock: model.lockReason(for: item.family), grouped: model.groupByFamily,
-            inTray: model.isInTray(item)
+            inTray: model.isInTray(item), countsShownStyles: CollectionBar.applies(to: model.sidebar)
         )
         card.cardView.onToggleTray = { [weak self] in
             self?.model.toggleTray(item)
@@ -500,7 +500,8 @@ final class FontCardView: NSView {
     override var isFlipped: Bool { true }
     override var wantsUpdateLayer: Bool { false }
 
-    func configure(item: GridEntry, text: String, size: CGFloat, isFavorite: Bool, lock: LockReason?, grouped: Bool, inTray: Bool) {
+    func configure(item: GridEntry, text: String, size: CGFloat, isFavorite: Bool, lock: LockReason?, grouped: Bool, inTray: Bool,
+                   countsShownStyles: Bool = false) {
         self.item = item
         self.text = text
         self.size = size
@@ -508,7 +509,8 @@ final class FontCardView: NSView {
         self.inTray = inTray
         self.lock = lock
         self.grouped = grouped
-        let count = grouped ? item.family.faces.count : 0
+        // In a folder or a document, count the styles that are there, not the whole family.
+        let count = grouped ? (countsShownStyles ? item.faces.count : item.family.faces.count) : 0
         countText = count > 1 ? "\(count)" : ""
         let starLabel = isFavorite ? "Remove from Favorites" : "Add to Favorites"
         starButton.image = NSImage(systemSymbolName: isFavorite ? "star.fill" : "star", accessibilityDescription: starLabel)?
@@ -606,6 +608,7 @@ final class FontCardView: NSView {
         if let lock, state == .active { return ("lock.fill", "Active, \(lock.title)") }
         switch state {
         case .active: return ("circle.fill", "Active")
+        case .temporary: return ("circle.dashed.inset.filled", "Active until you quit")
         case .inactive: return ("circle", "Inactive")
         case .mixed: return ("circle.lefthalf.filled", "Partly active")
         }
@@ -706,7 +709,7 @@ final class FontCardView: NSView {
         let dark = NSAppearance.currentDrawing().bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         let key = "\(name)|\(dark)|\(active)"
         if let image = symbolCache[key] { return image }
-        let color: NSColor = name == "circle.fill" || name == "circle.lefthalf.filled" ? accent(active) : .secondaryLabelColor
+        let color: NSColor = ["circle.fill", "circle.lefthalf.filled", "circle.dashed.inset.filled"].contains(name) ? accent(active) : .secondaryLabelColor
         let pointSize: CGFloat = name == "lock.fill" ? 8 : 7
         guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: pointSize, weight: .semibold).applying(.init(hierarchicalColor: color))) else { return nil }

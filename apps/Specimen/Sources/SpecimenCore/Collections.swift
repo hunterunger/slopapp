@@ -106,12 +106,13 @@ public struct SmartCollection: Codable, Hashable, Sendable, Identifiable {
 
 public struct SmartRules: Codable, Hashable, Sendable {
     public enum State: String, Codable, CaseIterable, Sendable, Identifiable {
-        case any, active, inactive
+        case any, active, temporary, inactive
         public var id: String { rawValue }
         public var title: String {
             switch self {
             case .any: "Any"
             case .active: "Active"
+            case .temporary: "Active until you quit"
             case .inactive: "Inactive"
             }
         }
@@ -164,7 +165,7 @@ public struct SmartRules: Codable, Hashable, Sendable {
         case .variable: variableOnly = true
         case .category(let value): category = value
         case .tag(let name): tag = name
-        case .all, .smart: break
+        case .all, .smart, .folder, .document: break
         }
     }
 

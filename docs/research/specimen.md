@@ -990,3 +990,163 @@ with `scripts/drive shot` (chrome, materials, sidebar) and the app's offscreen
 move to SlopKit as-is; **moved 2026-11-06**: now SlopKit's `WindowState.swift`, the app copy
 is deleted), `GlyphView` + `GlyphMetrics` (optically centred glyph on a shared
 baseline) and `PreviewMetrics` (shared preview baseline) in the app.
+
+## Library management round (2026-11-12)
+
+Owner's brief: designers keep large libraries of *inactive* fonts organised by project, so
+copying into `~/Library/Fonts` breaks their workflow. Add library folders (managed in place,
+watched), activation without installing (temporary and persistent), document-driven
+activation, and OpenType feature controls, integrated with the existing library, tags and
+compare. Apple frameworks only.
+
+### What was built, and how it fits
+
+- **Library folders** are a sidebar section (**Folders**), each with an outline of the
+  subfolders that hold fonts and family counts. Their faces are merged into the same face
+  index as installed fonts (`LibraryMerge`), so search, tags, favourites, smart collections,
+  compare, the detail page and the list all work on them unchanged, while they're off.
+  Unregistered files are read straight from disk (`FontLoader` already handled that). A bar
+  above a folder's fonts gives counts and Activate All ▾ (Activate Temporarily) /
+  Deactivate All.
+- **Scanning and watching** (`SpecimenCore/LibraryFolders.swift`, `LibraryWatching.swift`):
+  `LibraryScan` keeps every file's stamp (date, size) and faces, cached in
+  `Cache/library.plist`, so a launch only stats files and re-reads changed ones (files are read
+  in parallel). One FSEvents stream (file events, watch root, 0.25 s latency) covers every
+  folder; batches are debounced 150 ms and applied incrementally: file events re-check one
+  file, directory and coalesced events rescan that subtree. Paths keep the form the folder
+  was added in (FSEvents and FileManager report `/private/tmp`; both are rebased).
+- **Activation** routes per face (`ActivationRouter`): installed fonts (Fonts folders) keep
+  the system switch; library-folder fonts are registered from where they are. **Activate** =
+  `.persistent`; **Activate Temporarily** = `.session` plus unregistering on quit. The same
+  verbs work on a selection, a family (pull-down on its page), a folder, a tag, a smart
+  collection or a document. New card/list state: dashed-ring dot = on until you quit.
+- **Documents**: ⌘O, drop, or the + next to **Documents** in the sidebar. A document is a
+  sidebar item that filters the grid to the fonts it uses (best copy: an active one, else
+  the copy nearest the document), with a bar listing missing fonts and one-click activation,
+  and a popover listing every reference.
+- **Features tab** (⌘5 on the family page): `CTFontCopyFeatures` per style, grouped
+  (ligatures, letter case, figures, fractions/position, alternates, stylistic sets, character
+  variants, other), checkboxes for switches, pickers for exclusive choices, a sample per
+  feature, Reset and Copy CSS. Settings live on the model and apply to every preview on the
+  family page (Styles, Text, Variables, Features); the Variables tab's axis positions moved
+  to the model too, so both tabs preview together.
+
+### Decisions (and why)
+
+1. **Not sandboxed → plain bookmarks, no security scope.** Slopapp bundles are hardened
+   runtime, unsandboxed (no entitlements file), so paths are enough to read folders. Each
+   folder (and document) stores an ordinary bookmark only to follow it when it's moved or
+   renamed (resolved at launch, and on an FSEvents root change).
+2. **Temporary = until Specimen quits.** Registered at `.session` (gone at logout at the
+   latest), unregistered in `applicationWillTerminate`. `temporary.json` is written *before*
+   registering, so a launch after a crash or kill ends leftovers. Typeface-like "project
+   session" semantics; at logout is the worst case.
+3. **Persistent = `.persistent` (user scope), in place.** Survives restarts; nothing copied.
+4. **Temporary only for library-folder fonts.** Installed fonts are on or off for good
+   (new lock reason "Installed font").
+5. **No swapping across mechanisms.** `CTFontManagerEnableFontDescriptors` works by
+   PostScript name (found in v1), so swapping an installed copy for a library copy could hit
+   both. Two library copies (the same font in two projects) swap fine (unregister one,
+   register the other); otherwise "Another copy is active" explains what to do.
+6. **Files deleted from an online folder are unregistered** (they'd linger as missing
+   fonts); **renamed or moved files carry their registration** (same PostScript names, same
+   scope). **A folder that disappears goes offline with its files remembered** (unplugged
+   disk) and nothing is unregistered.
+7. **Drops:** folders → library, documents → Documents, font files → install (Font Book's
+   convention). **Shortcuts:** ⌘O Open… (documents), ⇧⌘O Add Folder to Library…, ⌥⌘O
+   Install Fonts… (was Add Fonts… ⌘O; renamed so the copy-into-Fonts option is clearly the
+   other one).
+8. **Document formats:** PDF and PDF-compatible `.ai` (CGPDF: page and form-XObject font
+   resources, `BaseFont`, subset prefix stripped, embedded flag), EPS/PS (DSC comments),
+   SVG/HTML/CSS (`font-family`, `font` shorthand, `@font-face` names marked "provided by the
+   document", `local()`, HTML's linked *local* stylesheets only, never the network), RTF
+   (`\fonttbl`). Not read: InDesign/Affinity (proprietary), Figma (cloud), Sketch/IDML/DOCX
+   (zip archives; Foundation has no unzip and the brief forbids dependencies).
+9. **No `CFBundleDocumentTypes`** this round: registering Specimen for PDF/HTML/RTF would add
+   it to every "Open With" menu on the owner's Mac through LaunchServices; ⌘O and window drops
+   cover it. `application(_:open:)` is implemented for when types are declared. Deferred.
+10. **Features via `CTFontCopyFeatures`, not GSUB parsing**: it covers AAT (most of Apple's
+    fonts have no GSUB) and OpenType alike, with the font's own names (Kohinoor's "ss01" is
+    "Simplified Ligatures"). Settings are applied by OpenType tag when CoreText gives one, else
+    by AAT type/selector; CSS maps AAT settings through Apple's equivalents table
+    (`FeatureCatalog.openType`). Tag-only features (`cv01`) come without selector ids.
+11. **Undo restores each face's previous state** (on, temporary, or off), so undoing "Keep
+    Active After Quitting" makes it temporary again rather than off (`ActivationUndo`).
+12. **Test mode never registers beyond the session:** `SessionOnlyRegistrar` maps
+    `.persistent` to `.session` and reports it as persistent; folders can only be added inside
+    the test folder; quit unregisters everything this run registered.
+
+### Build notes
+
+- New core files: `LibraryFolders.swift` (folders, store, scan, events, tree, merge),
+  `LibraryWatching.swift` (file system, FSEvents watcher, `FolderLibrary` actor),
+  `Registration.swift` (registrar protocol, CoreText and session-only registrars, temporary
+  store, router, carry-over, undo), `DocumentFonts.swift`, `Features.swift`,
+  `FixtureFonts.swift` (renames the OFL fixture's `name` table to make distinct test fonts).
+  App: `AppModel+Library.swift`, `CollectionBar.swift`, Features tab in `DetailViews.swift`.
+- System calls behind protocols with fakes: `FontRegistrar` (`FakeRegistrar`),
+  `LibraryFileSystem` (`FakeLibraryFileSystem`), `FolderWatching`.
+- `IndexCache` version 5 (faces gained `isTemporary`): the first launch re-reads font details
+  once. (An older installed copy and this one would each rebuild the other's cache.)
+- `specimen-fixture library [dir] [count]` and `documents`; `clean` now unregisters every
+  font file under the folder.
+- Found and fixed while testing: the folder store decoded dates with the wrong strategy;
+  `&quot;` inside `style="…"` cut CSS values at the `;`; RTF panose groups glued control words
+  to the name; STIX's character variants were dropped (no selector ids); card and list style
+  counts in a folder counted copies elsewhere; Activate/Deactivate All counted locked macOS
+  fonts; two "Small Capitals" rows; feature samples off their control's baseline; undo of
+  Keep Active turned the font off.
+
+### Gates (2026-11-12, machine load ~20, screen locked)
+
+- `scripts/check.sh Specimen --perf`: **all pass.** 123 tests in 21 suites (was 72 in 14).
+  Perf (release, `build/Specimen.app`; the owner's installed copy wasn't running): launch
+  149 ms, first window 526 ms, idle CPU 0.056 %, footprint 99.4 MB.
+- **Scale** (release, test mode, 3,009 library fonts + 668 installed = 3,677 faces): library
+  loaded 1.9 s after launch cold (every file read), 1.5 s warm (cached window shown first);
+  a file added to a watched folder appears in the grid in 0.7–0.85 s, a rename in 0.41–0.44 s,
+  a delete in 0.41–0.42 s (0.4 s of that is FSEvents latency plus the debounce); temporary
+  activation 0.26–0.28 s. Idle after 25 s: CPU 0.0 %, footprint **136 MB** (over the 120 MB
+  budget with 4.6× the library; 99 MB with the installed fonts only). Unit tests: a real
+  301-file folder scans in 32 ms cold / 3 ms warm; one event in a 5,000-file scan < 20 ms;
+  folder counts for 6,000 faces in 280 folders < 150 ms.
+- **Walkthrough**: the screen was locked the whole time, so `scripts/drive` couldn't see
+  windows (no `drive tree`, no real-window shots, no keyboard walkthrough). Instead the
+  offscreen walk (`SPECIMEN_SNAPSHOT_DIR`, release build, test mode, fixture library) ran every
+  v1 must-have of this round against real files, FSEvents and CoreText and logged results:
+  13/13 ok — file added (0.52 s), renamed (0.23 s), deleted (0.25 s); temporary activation
+  (session scope, visible to other processes by name, recorded in `temporary.json`); Keep
+  Active; persistent activation (reported scope persistent; session underneath in test mode);
+  swap between two project copies of one font; a PDF's fonts matched
+  (Helvetica active, two library fonts inactive → activated temporarily); SVG/HTML/CSS/EPS/RTF
+  matched (missing and "provided by the page" reported); Deactivate Temporary Fonts; removing
+  the folder asks first and turns its 5 active fonts off. After each run
+  `specimen-fixture status`: 0 files registered. `~/Library/Fonts` untouched (newest file
+  predates this round).
+- **Undo in the walk**: offscreen there are no input events, so AppKit never closes the
+  automatic undo group and a scripted undo undid the whole run's group; forcing the group
+  closed from the script crashed SwiftUI's display cycle. The undo logic moved to
+  `ActivationUndo` with unit tests; ⌘Z by keyboard is **not verified live** (screen locked).
+- Screenshots (looked at): `/tmp/specimen-test-shots/` — `grid-folder`, `list-folder`,
+  `grid-document`, `detail-features` (light + dark), `flow-temporary-light`,
+  `flow-document-light`, plus every earlier screen. Offscreen renders don't draw the sidebar
+  (materials), so the Folders/Documents sections weren't seen.
+- Lint clean. `drive tree` for `[unlabeled]`: **not run** (screen locked); every new control
+  has a label or `accessibilityLabel` in code.
+
+### Not done, and why
+
+- Live keyboard walkthrough, `drive tree`, sidebar screenshots, popover, pull-down menus,
+  the open panels and real drops: need an unlocked screen.
+- Real `.persistent` registration: never exercised (testing must stay at session scope);
+  covered by the router tests and the session-only stand-in.
+- Document types for Finder/Dock (decision 9), IDML/Sketch/DOCX (decision 8), auto-activation
+  when a design app asks for a font, nested folders' own activation scope.
+- Footprint with very large libraries (136 MB at 3.7k faces): CoreText's per-font cache plus
+  the index; not tuned this round.
+
+### Shared-looking pieces made in-app
+
+`FSEventsWatcher` + `FolderWatching` (`SpecimenCore/LibraryWatching.swift`; any app that
+watches folders could use it), and `CollectionActivationButtons`-style "primary action with
+alternative" pull-downs are plain SwiftUI `Menu(primaryAction:)`, nothing to share.
