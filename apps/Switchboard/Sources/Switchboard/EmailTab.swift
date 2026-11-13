@@ -316,12 +316,12 @@ struct WebmailSheet: View {
                     }
                 }
                 if draft.provider.supportsAccount {
-                    TextField("Account", text: $draft.account, prompt: Text("Optional, like you@gmail.com"))
+                    TextField("Account", text: $draft.account, prompt: Text(verbatim: "Optional, like you@gmail.com"))
                         .autocorrectionDisabled()
                 }
                 if draft.provider == .custom {
                     TextField("Compose address", text: Binding(get: { draft.template }, set: { draft.template = LinkParser.plainText($0) }),
-                              prompt: Text("https://mail.example.com/compose?to={to}"))
+                              prompt: Text(verbatim: "https://mail.example.com/compose?to={to}"))
                         .autocorrectionDisabled()
                 }
             }
@@ -350,6 +350,10 @@ struct WebmailSheet: View {
 
     private var feedback: (text: String, isProblem: Bool) {
         if browser == nil { return ("Add a browser in the Browsers tab first.", true) }
+        // Before anything is typed, a hint rather than a warning.
+        if draft.provider == .custom, draft.template.trimmingCharacters(in: .whitespaces).isEmpty {
+            return ("Enter the address of the webmail's page for a new message. Use {to}, {subject} and {body} where those go.", false)
+        }
         if let problem = webmail.templateProblem { return (problem, true) }
         if draft.provider == .custom {
             return ("Use {to}, {cc}, {bcc}, {subject}, {body}, or {mailto} for the whole link.", false)

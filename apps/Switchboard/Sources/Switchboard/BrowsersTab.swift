@@ -409,6 +409,7 @@ private struct ProfileSheet: View {
                 Button("Open Privacy Settings…") {
                     NSWorkspace.shared.open(Permission.fullDiskAccess.settingsURL)
                 }
+                .controlSize(.small)
             }
             manualEntry
         }
@@ -419,13 +420,13 @@ private struct ProfileSheet: View {
             Grid(alignment: .leading, horizontalSpacing: Spacing.m, verticalSpacing: Spacing.s) {
                 GridRow {
                     Text("Name").gridColumnAlignment(.trailing)
-                    TextField("Name", text: $manualName, prompt: Text("Work"))
+                    TextField("Name", text: $manualName, prompt: Text(verbatim: "Work"))
                         .labelsHidden()
                         .accessibilityLabel("Name")
                 }
                 GridRow {
                     Text("Folder")
-                    TextField("Folder", text: $manualFolder, prompt: Text("Profile 1"))
+                    TextField("Folder", text: $manualFolder, prompt: Text(verbatim: "Profile 1"))
                         .labelsHidden()
                         .accessibilityLabel("Folder")
                 }
@@ -462,7 +463,7 @@ private struct ProfileSheet: View {
     private func message(for failure: ChromiumProfiles.Failure) -> String {
         switch failure {
         case .notPermitted:
-            "macOS didn't let Switchboard read \(app.name)'s profile list. Add a profile by its folder name below, or give Switchboard Full Disk Access and try again."
+            "macOS keeps other apps from reading \(app.name)'s list of profiles. Type a profile's folder name below and Switchboard checks it's there. To choose from the list instead, allow Full Disk Access."
         case .notFound:
             "\(app.name) hasn't saved any profiles yet. Open it once, or add a profile by its folder name below."
         case .unreadable:

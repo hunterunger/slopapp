@@ -76,6 +76,7 @@ struct SettingsFileRow: View {
         } catch SettingsTransfer.ReadError.newerFormat {
             HUD.show("That file is from a newer Switchboard. Update Switchboard, then import it.", systemImage: "exclamationmark.triangle", duration: .seconds(3))
         } catch {
+            Diagnostics.record("import refused file=\(url.lastPathComponent) error=\(error)")
             HUD.show("“\(url.lastPathComponent)” isn't a Switchboard settings file.", systemImage: "exclamationmark.triangle", duration: .seconds(3))
         }
     }

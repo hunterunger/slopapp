@@ -157,7 +157,7 @@ struct RulesTab: View {
     private var tester: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             TextField("Test a link", text: Binding(get: { testText }, set: { testText = LinkParser.plainText($0) }),
-                      prompt: Text("Paste a link or email address to see where it goes"))
+                      prompt: Text(verbatim: "Paste a link or email address to see where it goes"))
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel("Test a link")
@@ -176,7 +176,7 @@ struct RulesTab: View {
         guard let url = Self.testLink(trimmed) else {
             return ("That doesn't look like a web link or email address.", "questionmark.circle")
         }
-        let prepared = LinkPreparation.prepare(url, config: model.config)
+        let prepared = LinkPreparation.prepare(url, config: model.config, canOpen: Opener.canOpen)
         let link = IncomingLink(url: prepared.url)
         let decision = Router.route(link, config: model.config, isInstalled: model.isInstalled, installedApp: HandoffApps.installed)
         var text = Router.describe(decision, kind: link.kind)
@@ -189,6 +189,9 @@ struct RulesTab: View {
             text = "Rewritten (rewrite \(numbers)) to \(prepared.url.absoluteString). " + text
         } else if prepared.steps.contains(.removedTracking) {
             text = "Tracking removed. " + text
+        }
+        for case .skippedAppLink(let index, let scheme) in prepared.steps {
+            text = "Rewrite \(index + 1) skipped (no app opens \(scheme): links). " + text
         }
         switch decision {
         case .open, .openInApp: return (text, "arrow.up.forward.app")
@@ -299,9 +302,10 @@ private struct RuleRow: View {
                 Image(systemName: "arrow.right")
                     .foregroundStyle(.secondary)
                     .imageScale(.small)
+                // Middle, so "Gmail in Google Chrome (Work)" keeps its profile.
                 Text(destination)
                     .lineLimit(1)
-                    .truncationMode(.tail)
+                    .truncationMode(.middle)
                     .foregroundStyle(isMissing ? AnyShapeStyle(.textOrange) : AnyShapeStyle(.secondary))
                 if isMissing {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -380,18 +384,18 @@ struct RuleEditor: View {
                     switch rule.kind {
                     case .web:
                         TextField("Website", text: Binding(get: { rule.host }, set: { rule.host = LinkParser.plainText($0) }),
-                                  prompt: Text("example.com or *.example.com"))
+                                  prompt: Text(verbatim: "example.com or *.example.com"))
                             .autocorrectionDisabled()
                         TextField("Path starts with", text: Binding(get: { rule.path }, set: { rule.path = LinkParser.plainText($0) }),
-                                  prompt: Text("Optional, like /docs"))
+                                  prompt: Text(verbatim: "Optional, like /docs"))
                             .autocorrectionDisabled()
                     case .email:
                         TextField("To", text: Binding(get: { rule.host }, set: { rule.host = LinkParser.plainText($0) }),
-                                  prompt: Text("example.com or name@example.com"))
+                                  prompt: Text(verbatim: "example.com or name@example.com"))
                             .autocorrectionDisabled()
                     case .file:
                         TextField("File types", text: Binding(get: { extensionsText }, set: { extensionsText = $0; rule.fileExtensions = FileType.parseExtensions($0) }),
-                                  prompt: Text("pdf, docx"))
+                                  prompt: Text(verbatim: "pdf, docx"))
                             .autocorrectionDisabled()
                     }
                     HStack {

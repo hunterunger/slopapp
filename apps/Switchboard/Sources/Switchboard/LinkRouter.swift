@@ -18,7 +18,7 @@ final class LinkRouter {
             self?.choose(link: link, target: target, background: background, always: always, receivedAt: receivedAt)
         }
         picker.onDismiss = { [weak self] link, copied in
-            if !copied { self?.model.lastDismissedLink = link.url }
+            if !copied { self?.model.lastDismissedLink = link.originalURL ?? link.url }
             self?.showNextWaiting()
             self?.giveFocusBackIfIdle()
         }
@@ -59,18 +59,22 @@ final class LinkRouter {
 
     private func process(_ link: URL, forced: Bool, modifiers: Modifiers, source: String?, senderPID: pid_t?, receivedAt: TimeInterval) {
         Diagnostics.record("received pid=\(senderPID.map(String.init) ?? "none") kind=\(LinkKind.of(link)?.rawValue ?? "app")")
+        if LinkKind.of(link) == .email { model.seedEmailTargetsIfNeeded() }
         let ask = model.config.askModifiers
         let wantsPicker = forced || (!ask.isEmpty && modifiers.isSuperset(of: ask))
-        // Tracking removal and rewrites. Not into an app's link when the picker shows anyway:
-        // then the point is to choose a browser.
-        let prepared = LinkPreparation.prepare(link, config: model.config, allowAppLinks: !wantsPicker)
+        // Tracking removal and rewrites. Not into an app's link when the picker shows anyway
+        // (then the point is to choose a browser), nor into one no app on this Mac opens.
+        let prepared = LinkPreparation.prepare(link, config: model.config, allowAppLinks: !wantsPicker,
+                                               canOpen: Opener.canOpen)
         for step in prepared.steps {
             switch step {
             case .removedTracking: Diagnostics.record("removed tracking parameters")
             case .rewritten(let index, let to): Diagnostics.record("rewrite \(index + 1) url=\(to.absoluteString.prefix(200))")
+            case .skippedAppLink(let index, let scheme): Diagnostics.record("rewrite \(index + 1) skipped: no app opens \(scheme): links")
             }
         }
-        let incoming = IncomingLink(url: prepared.url, sourceBundleID: source, modifiers: modifiers, forcePicker: forced)
+        let incoming = IncomingLink(url: prepared.url, sourceBundleID: source, modifiers: modifiers, forcePicker: forced,
+                                    originalURL: prepared.url == link ? nil : link)
         route(incoming, receivedAt: receivedAt)
     }
 
@@ -87,6 +91,16 @@ final class LinkRouter {
         return InternetLocation.url(from: data)
     }
 
+    /// Routes a link with app handoffs off (the app failed): rules and browsers only.
+    private func routeWithoutApps(_ link: IncomingLink, receivedAt: TimeInterval) {
+        handoffsSuspended = true
+        defer { handoffsSuspended = false }
+        route(link, receivedAt: receivedAt)
+    }
+
+    /// True while re-routing a link whose app couldn't open it.
+    private var handoffsSuspended = false
+
     private func route(_ link: IncomingLink, receivedAt: TimeInterval) {
         if picker.isShowing {
             waiting.append((link, receivedAt))
@@ -94,13 +108,14 @@ final class LinkRouter {
             Diagnostics.record("queued url=\(link.url.absoluteString.prefix(200)) waiting=\(waiting.count)")
             return
         }
-        let decision = Router.route(link, config: model.config, isInstalled: model.isInstalled, installedApp: HandoffApps.installed)
+        let decision = Router.route(link, config: model.config, isInstalled: model.isInstalled,
+                                    installedApp: handoffsSuspended ? { _ in nil } : HandoffApps.installed)
         let decideMs = Diagnostics.milliseconds(since: receivedAt)
         let source = link.sourceBundleID ?? "unknown"
         switch decision {
         case .openInApp(let app, let reason):
             Diagnostics.record("route decision=app app=\"\(app.appName ?? app.url.scheme ?? "")\" reason=\(reason) source=\(source) decide_ms=\(decideMs)")
-            openApp(app, receivedAt: receivedAt)
+            openApp(app, link: link, receivedAt: receivedAt)
             showNextWaiting()
         case .open(let target, let reason):
             Diagnostics.record("route decision=open kind=\(link.kind?.rawValue ?? "app") target=\"\(target.displayName)\" reason=\(reason) source=\(source) modifiers=\(link.modifiers.rawValue) decide_ms=\(decideMs)")
@@ -115,7 +130,7 @@ final class LinkRouter {
                         waitingCount: waiting.count, preselect: preferred?.id)
         case .noTargets:
             Diagnostics.record("route decision=none")
-            model.lastDismissedLink = link.url
+            model.lastDismissedLink = link.originalURL ?? link.url
             let message = link.kind == .email
                 ? "No email app to write this in. Add one in Switchboard's Settings › Email."
                 : "Nothing to open this in. Add a browser in Switchboard's Settings."
@@ -159,7 +174,7 @@ final class LinkRouter {
                 let handoff = receivedAt.map { " event_to_handoff_ms=\(Diagnostics.milliseconds(since: $0))" } ?? ""
                 Diagnostics.record("opened target=\"\(target.displayName)\" open_call_ms=\(Diagnostics.milliseconds(since: started))\(handoff)")
             } catch {
-                model.lastDismissedLink = link.url
+                model.lastDismissedLink = link.originalURL ?? link.url
                 let message = (error as? Opener.Failure)?.message ?? Opener.Failure.failed(target.appName).message
                 Diagnostics.record("open failed target=\"\(target.displayName)\" error=\(error)")
                 HUD.show(message, systemImage: "exclamationmark.triangle", duration: .seconds(4))
@@ -168,17 +183,29 @@ final class LinkRouter {
         }
     }
 
-    private func openApp(_ app: AppLink, receivedAt: TimeInterval) {
+    private func openApp(_ app: AppLink, link: IncomingLink, receivedAt: TimeInterval) {
         let started = Diagnostics.now()
         Task { @MainActor in
             do {
                 try await Opener.open(app)
                 Diagnostics.record("opened app=\"\(app.appName ?? app.url.scheme ?? "")\" open_call_ms=\(Diagnostics.milliseconds(since: started)) event_to_handoff_ms=\(Diagnostics.milliseconds(since: receivedAt))")
             } catch {
-                let message = (error as? Opener.Failure)?.message ?? "Couldn't open the link in its app."
                 Diagnostics.record("open failed app=\"\(app.appName ?? "")\" error=\(error)")
-                HUD.show(message, systemImage: "exclamationmark.triangle", duration: .seconds(3))
-                giveFocusBackIfIdle()
+                // Never lose the link: route what arrived, as a web link, without app links.
+                if let original = link.originalURL ?? (app.handoffID != nil ? Optional(link.url) : nil),
+                   LinkKind.of(original) != nil {
+                    Diagnostics.record("falling back to the link as it arrived")
+                    let prepared = LinkPreparation.prepare(original, config: model.config, allowAppLinks: false)
+                    var fallback = link
+                    fallback.url = prepared.url
+                    fallback.originalURL = nil
+                    fallback.forcePicker = false
+                    routeWithoutApps(fallback, receivedAt: receivedAt)
+                } else {
+                    let message = (error as? Opener.Failure)?.message ?? "Couldn't open the link in its app."
+                    HUD.show(message, systemImage: "exclamationmark.triangle", duration: .seconds(3))
+                    giveFocusBackIfIdle()
+                }
             }
         }
     }

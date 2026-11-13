@@ -82,6 +82,9 @@ public enum LinkStep: Equatable, Sendable {
     case removedTracking
     /// Rewrite number `index` (0-based) changed the link.
     case rewritten(index: Int, to: URL)
+    /// Rewrite number `index` would have made a `scheme:` link, but no app on this Mac opens
+    /// those, so it was left out and the link went on as a web link.
+    case skippedAppLink(index: Int, scheme: String)
 }
 
 /// A link after tracking removal and rewrites, ready to route.
@@ -94,9 +97,13 @@ public enum LinkPreparation {
     /// Tracking removal (if on), then each rewrite in order, each on the result of the last.
     /// Stops once a rewrite turns the link into an app's link.
     ///
-    /// - Parameter allowAppLinks: false when the picker will show anyway (⌥ held, forced), so
-    ///   the link stays a web link a browser can open.
-    public static func prepare(_ url: URL, config: Config, allowAppLinks: Bool = true) -> PreparedLink {
+    /// - Parameters:
+    ///   - allowAppLinks: false when the picker will show anyway (⌥ held, forced), so the
+    ///     link stays a web link a browser can open.
+    ///   - canOpen: whether some app (not Switchboard) opens this app link. A rewrite into a
+    ///     link nothing opens is skipped instead of losing the link.
+    public static func prepare(_ url: URL, config: Config, allowAppLinks: Bool = true,
+                               canOpen: (URL) -> Bool = { _ in true }) -> PreparedLink {
         var current = url
         var steps: [LinkStep] = []
         guard LinkKind.of(url) == .web, !url.isFileURL else { return PreparedLink(url: url, steps: []) }
@@ -108,6 +115,10 @@ public enum LinkPreparation {
             guard let next = rewrite.apply(to: current) else { continue }
             let isWeb = LinkKind.of(next) == .web
             if !isWeb && !allowAppLinks { continue }
+            if LinkKind.of(next) == nil, !canOpen(next) {
+                steps.append(.skippedAppLink(index: index, scheme: next.scheme ?? ""))
+                continue
+            }
             current = next
             steps.append(.rewritten(index: index, to: next))
             if !isWeb { break }

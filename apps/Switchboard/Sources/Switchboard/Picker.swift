@@ -84,6 +84,7 @@ final class PickerController {
             )
         }
         panel.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
+        watchMenus()
         panel.onDismiss = { [weak self] in self?.didDismiss() }
         panel.setAccessibilityLabel("Choose a browser")
         return panel
@@ -132,6 +133,7 @@ final class PickerController {
         state.heldModifiers = NSEvent.modifierFlags.intersection([.command, .shift])
         state.mouseAtShow = NSEvent.mouseLocation
         state.generation &+= 1
+        panel.setAccessibilityLabel(state.isEmail ? "Choose an email app" : state.isFile ? "Choose an app" : "Choose a browser")
         icons.preload(targets)
         place(panel)
         panel.displayIfNeeded()
@@ -211,7 +213,26 @@ final class PickerController {
         83: 1, 84: 2, 85: 3, 86: 4, 87: 5, 88: 6, 89: 7, 91: 8, 92: 9,
     ]
 
+    /// True while a row's "…" or right-click menu is open: its keys (Esc, arrows) are the
+    /// menu's, so the picker leaves them alone.
+    private var isMenuOpen = false
+    private var menuObservers: [NSObjectProtocol] = []
+
+    private func watchMenus() {
+        guard menuObservers.isEmpty else { return }
+        let center = NotificationCenter.default
+        menuObservers = [
+            center.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.isMenuOpen = true }
+            },
+            center.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.isMenuOpen = false }
+            },
+        ]
+    }
+
     private func handleKey(_ event: NSEvent) -> Bool {
+        if isMenuOpen { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if let number = Self.digitKeys[event.keyCode], flags.intersection([.control, .option]).isEmpty {
             pick(number - 1, flags: flags)
