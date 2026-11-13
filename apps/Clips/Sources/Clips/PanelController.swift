@@ -4,127 +4,6 @@ import Observation
 import SlopKit
 import SwiftUI
 
-/// What the panel shows. Updated in place, so the panel is built once and stays warm.
-@MainActor
-@Observable
-final class PanelState {
-    var query = "" {
-        didSet {
-            guard query != oldValue else { return }
-            let started = Diagnostics.now()
-            // Typing always goes back to the search.
-            if cardsFocused { cardsFocused = false }
-            refresh(resetSelection: true)
-            Diagnostics.recordWhenIdle("panel search settled results=\(results.count)", since: started)
-        }
-    }
-
-    var filter: ClipFilter = .all {
-        didSet { if filter != oldValue { refresh(resetSelection: true) } }
-    }
-
-    private(set) var results: [Clip] = []
-    /// Bumped whenever `results` is recomputed (cheaper to compare than the array).
-    private(set) var resultsVersion = 0
-    /// The history revision `results` was computed from.
-    @ObservationIgnored private var resultsRevision = -1
-    var selectedID: UUID? {
-        didSet { if selectedID != oldValue, pendingPinnedDelete != nil { pendingPinnedDelete = nil } }
-    }
-    /// A pinned clip waiting for a second ⌘⌫.
-    var pendingPinnedDelete: UUID?
-    /// Bumped when the selection moves by keyboard, so the strip scrolls to it.
-    private(set) var scrollRequest = 0
-    /// Bumped on every show, so the search field takes focus again.
-    private(set) var focusRequest = 0
-    /// ⌘ is held: the first nine cards show their number.
-    var commandHeld = false
-    /// Tab moved the keyboard to the cards (Space previews; typing goes back to search).
-    var cardsFocused = false {
-        didSet { if cardsFocused != oldValue { onCardsFocusChange?(cardsFocused) } }
-    }
-    @ObservationIgnored var onCardsFocusChange: ((Bool) -> Void)?
-    var quickLookOpen = false
-    /// Whole cards visible at once (the strip reports it), for Page Up / Page Down.
-    @ObservationIgnored var pageSize = 5
-    /// The app Return pastes into.
-    @ObservationIgnored var target: NSRunningApplication?
-    private(set) var targetName: String?
-    /// "Now" for relative times, fixed while the panel is open.
-    private(set) var now = Date()
-
-    @ObservationIgnored private let model: AppModel
-
-    init(model: AppModel) {
-        self.model = model
-    }
-
-    var selectedIndex: Int? {
-        guard let selectedID else { return nil }
-        return results.firstIndex { $0.id == selectedID }
-    }
-
-    var selected: Clip? {
-        selectedIndex.map { results[$0] }
-    }
-
-    /// Resets to "newest clip selected, no search". Only touches what changed: every
-    /// assignment to observed state costs a redraw, and this runs on the hot path.
-    func prepareForShow(target: NSRunningApplication?) {
-        self.target = target
-        let name = target?.localizedName
-        if targetName != name { targetName = name }
-        if Date().timeIntervalSince(now) > 30 { now = Date() }
-        if !query.isEmpty { query = "" }
-        if filter != .all { filter = .all }
-        if pendingPinnedDelete != nil { pendingPinnedDelete = nil }
-        if cardsFocused { cardsFocused = false }
-        if commandHeld { commandHeld = false }
-        if quickLookOpen { quickLookOpen = false }
-        if resultsRevision != model.revision { refresh() }
-        if selectedID != results.first?.id || selectedIndex != 0 {
-            selectedID = results.first?.id
-            scrollRequest &+= 1
-        }
-        focusRequest &+= 1
-    }
-
-    /// Re-runs the search. Keeps the selection if it's still listed.
-    func refresh(resetSelection: Bool = false) {
-        let started = Diagnostics.now()
-        results = ClipSearch.run(model.history.clips, query: query, filter: filter)
-        resultsRevision = model.revision
-        resultsVersion &+= 1
-        if resetSelection || selectedIndex == nil {
-            if selectedID != results.first?.id { selectedID = results.first?.id }
-            scrollRequest &+= 1
-        }
-        if Diagnostics.isLogging, !query.isEmpty {
-            Diagnostics.record("search results=\(results.count) of=\(model.history.clips.count) ms=\(Diagnostics.milliseconds(since: started))")
-        }
-    }
-
-    func moveSelection(by delta: Int) {
-        guard !results.isEmpty else { return }
-        let current = selectedIndex ?? 0
-        let next = min(max(current + delta, 0), results.count - 1)
-        selectedID = results[next].id
-        scrollRequest &+= 1
-    }
-
-    func select(index: Int) {
-        guard results.indices.contains(index) else { return }
-        selectedID = results[index].id
-        scrollRequest &+= 1
-    }
-
-    func cycleFilter(by delta: Int) {
-        let all = ClipFilter.allCases
-        let index = all.firstIndex(of: filter) ?? 0
-        filter = all[(index + delta + all.count) % all.count]
-    }
-}
-
 /// The panel: a non-activating strip along the bottom of the active screen, with a larger
 /// preview (Space) floating above it.
 @MainActor
@@ -163,17 +42,32 @@ final class PanelController {
 
     private var actions: PanelActions {
         PanelActions(
-            choose: { [weak self] clip, plain in self?.choose(clip, plain: plain) },
-            copy: { [weak self] clip in self?.copy(clip) },
-            togglePin: { [weak self] clip in self?.model.togglePin(clip) },
-            delete: { [weak self] clip in self?.delete(clip) },
+            choose: { [weak self] clips, plain in self?.choose(clips, plain: plain) },
+            copy: { [weak self] clips in self?.copy(clips) },
+            togglePin: { [weak self] clips in self?.model.togglePin(clips) },
+            pin: { [weak self] clips, board in self?.model.pin(Set(clips.map(\.id)), to: board) },
+            newBoard: { [weak self] clips in self?.newBoard(with: clips) },
+            delete: { [weak self] clips in self?.delete(clips) },
             preview: { [weak self] clip in
                 self?.state.selectedID = clip.id
                 self?.setQuickLook(open: true)
             },
+            edit: { [weak self] clip, title in
+                self?.state.selectedID = clip.id
+                self?.startEditing(clip, inTitle: title)
+            },
             open: { [weak self] clip in self?.open(clip) },
             reveal: { [weak self] clip in self?.reveal(clip) },
-            dismiss: { [weak self] in self?.dismiss() }
+            copyImageText: { [weak self] clip in
+                guard let text = clip.imageText else { return }
+                self?.dismiss()
+                self?.model.copyText(text)
+            },
+            pasteStack: { [weak self] clips in self?.togglePasteStack(with: clips) },
+            requestBoardDelete: { [weak self] board in self?.requestBoardDelete(board) },
+            dismiss: { [weak self] in self?.dismiss() },
+            dragMoved: { [weak self] point in self?.dragMoved(to: point) ?? false },
+            dragEnded: { [weak self] point, clips in self?.dragEnded(at: point, clips: clips) ?? false }
         )
     }
 
@@ -217,9 +111,11 @@ final class PanelController {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isShowing, let panel = self.panel, !panel.isKeyWindow else { return }
             if let quickLook = self.quickLook, quickLook.isKeyWindow {
-                panel.makeKey()
+                // Typing in the editor needs the preview to keep the keyboard.
+                if self.state.editor == nil { panel.makeKey() }
                 return
             }
+            if self.state.editor != nil { self.finishEditing(save: true) }
             Diagnostics.record("panel lost key; closing (key window: \(NSApp.keyWindow.map { String(describing: type(of: $0)) } ?? "none"))")
             self.dismiss()
         }
@@ -277,12 +173,30 @@ final class PanelController {
     private func startMonitors() {
         guard monitors.isEmpty else { return }
         if let escape = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
-            guard let self, event.keyCode == 53, self.isShowing, self.panel?.isKeyWindow == true else { return event }
-            if let editor = self.panel?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
+            guard let self, event.keyCode == 53, self.isShowing,
+                  self.panel?.isKeyWindow == true || self.quickLook?.isKeyWindow == true else { return event }
+            let window = self.quickLook?.isKeyWindow == true ? self.quickLook : self.panel
+            if let editor = window?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
+            // Esc backs out one step at a time: the editor, a board's name, a pending board
+            // delete, the preview, a multiple selection, the search; then the strip closes.
+            if self.state.editor != nil {
+                self.finishEditing(save: false)
+                return nil
+            }
+            if self.state.renaming != nil {
+                self.state.cancelRename()
+                return nil
+            }
+            if self.state.pendingBoardDelete != nil || self.state.pendingDelete != nil {
+                self.state.pendingBoardDelete = nil
+                self.state.pendingDelete = nil
+                return nil
+            }
             if self.state.quickLookOpen {
                 self.setQuickLook(open: false)
                 return nil
             }
+            if self.state.collapseSelection() { return nil }
             guard !self.state.query.isEmpty else { return event }
             self.state.query = ""
             return nil
@@ -304,9 +218,25 @@ final class PanelController {
         monitors.removeAll()
     }
 
+    /// While editing, clicking another app closes everything (keeping the edit, as any
+    /// click-away does; Esc is the way to throw it away). A click on the strip keeps it too.
+    private func previewDidResignKey() {
+        guard state.editor != nil else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.state.editor != nil, self.quickLook?.isKeyWindow != true else { return }
+            self.finishEditing(save: true)
+            if self.panel?.isKeyWindow != true { self.dismiss() }
+        }
+    }
+
     private func didDismiss() {
         Diagnostics.record("panel closed")
         isShowing = false
+        if state.editor != nil {
+            finishEditing(save: true)
+            // An emptied text can't be saved: drop that edit.
+            if state.editor != nil { finishEditing(save: false) }
+        }
         stopMonitors()
         setQuickLook(open: false)
         if backdrop != nil { testSetBackdrop(false) }
@@ -381,17 +311,74 @@ final class PanelController {
     func testSetQuickLook(_ open: Bool) { setQuickLook(open: open) }
 
     func testTogglePinSelected() {
-        if let clip = state.selected { model.togglePin(clip) }
+        model.togglePin(state.selectedClips)
     }
 
-    /// Copies the selected clip as Return does with direct paste off (the paste sound plays;
+    /// Copies the selected clip(s) as Return does with direct paste off (the paste sound plays;
     /// nothing is typed into another app).
     func testCopySelected() {
-        if let clip = state.selected { copy(clip) }
+        copy(state.selectedClips)
     }
 
     func testDeleteSelected() {
-        if let clip = state.selected { delete(clip) }
+        delete(state.selectedClips)
+    }
+
+    func testPin(toBoard index: Int) {
+        let boards = model.boards.all
+        guard boards.indices.contains(index) else { return }
+        model.pin(Set(state.selectedClips.map(\.id)), to: boards[index].id)
+    }
+
+    func testNewBoard(named name: String?) {
+        newBoard(with: [])
+        if let name, var renaming = state.renaming {
+            renaming.draft = name
+            state.renaming = renaming
+            state.commitRename()
+        }
+    }
+
+    func testRequestBoardDelete(_ index: Int) {
+        let boards = model.boards.all
+        guard boards.indices.contains(index) else { return }
+        requestBoardDelete(boards[index])
+    }
+
+    func testConfirmBoardDelete() {
+        if let id = state.pendingBoardDelete { confirmBoardDelete(id) }
+    }
+
+    func testEdit(inTitle: Bool) {
+        if let clip = state.selected { startEditing(clip, inTitle: inTitle) }
+    }
+
+    func testSetEditorText(_ text: String) {
+        guard let view = state.editor?.textView else { return }
+        view.selectAll(nil)
+        view.insertText(text, replacementRange: view.selectedRange())
+    }
+
+    func testSetEditorTitle(_ title: String) {
+        state.editor?.label = title
+    }
+
+    func testFinishEditing(save: Bool) {
+        finishEditing(save: save)
+    }
+
+    func testPasteStack() {
+        togglePasteStack(with: state.isMultipleSelection ? state.selectedClips : [])
+    }
+
+    func testDropOnTab(_ index: Int) {
+        // Past the last tab: the + button.
+        let tabs = state.tabs
+        let tab = tabs.indices.contains(index) ? tabs[index] : Self.newBoardTab
+        guard let frame = state.tabFrames[tab.id], let panel else { return }
+        let point = NSPoint(x: panel.frame.minX + frame.midX, y: panel.frame.maxY - frame.midY)
+        _ = dragMoved(to: point)
+        _ = dragEnded(at: point, clips: state.selectedClips)
     }
 
     private var backdrop: NSWindow?
@@ -451,7 +438,7 @@ final class PanelController {
 
     private func makeQuickLook() -> FloatingPanel {
         let preview = FloatingPanel(cornerRadius: PanelMetrics.cornerRadius) { [state] in
-            QuickLookView(state: state)
+            QuickLookView(state: state, finishEditing: { [weak self] save in self?.finishEditing(save: save) })
         }
         // Scrolling the preview doesn't need key status, so the strip keeps the keyboard.
         preview.becomesKeyOnlyIfNeeded = true
@@ -459,25 +446,45 @@ final class PanelController {
         preview.animationBehavior = .none
         preview.setAccessibilityLabel("Clip Preview")
         preview.keyHandler = { [weak self] event in
-            // If a click made the preview key, keys still drive the strip.
             guard let self, self.isShowing else { return false }
+            if self.state.editor != nil {
+                // The editor has the keyboard: ⌘S and ⌘Return save, the rest is typing.
+                let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+                if flags == .command, event.charactersIgnoringModifiers?.lowercased() == "s" || event.keyCode == 36 || event.keyCode == 76 {
+                    self.finishEditing(save: true)
+                    return true
+                }
+                return false
+            }
+            // If a click made the preview key, keys still drive the strip.
             self.panel?.makeKey()
             return self.handleKey(event)
+        }
+        NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: preview, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.previewDidResignKey() }
         }
         return preview
     }
 
     // MARK: - Actions
 
-    private func choose(_ clip: Clip, plain: Bool) {
+    private func choose(_ clips: [Clip], plain: Bool) {
         let target = state.target
         dismiss()
-        model.use(clip, .paste(target: target), plainText: plain ? true : nil)
+        if clips.count > 1 {
+            model.use(clips, .paste(target: target))
+        } else if let clip = clips.first {
+            model.use(clip, .paste(target: target), plainText: plain ? true : nil)
+        }
     }
 
-    private func copy(_ clip: Clip) {
+    private func copy(_ clips: [Clip]) {
         dismiss()
-        model.use(clip, .copy)
+        if clips.count > 1 {
+            model.use(clips, .copy)
+        } else if let clip = clips.first {
+            model.use(clip, .copy)
+        }
     }
 
     private func open(_ clip: Clip) {
@@ -505,18 +512,19 @@ final class PanelController {
 
     /// Pinned clips take a second ⌘⌫ (within a few seconds) so a favourite isn't lost to a
     /// stray key. Any delete can be undone with ⌘Z.
-    private func delete(_ clip: Clip) {
-        if clip.isPinned, state.pendingPinnedDelete != clip.id {
-            state.pendingPinnedDelete = clip.id
-            let id = clip.id
+    private func delete(_ clips: [Clip]) {
+        guard !clips.isEmpty else { return }
+        let ids = Set(clips.map(\.id))
+        if clips.contains(where: \.isPinned), state.pendingDelete != ids {
+            state.pendingDelete = ids
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
-                if self?.state.pendingPinnedDelete == id { self?.state.pendingPinnedDelete = nil }
+                if self?.state.pendingDelete == ids { self?.state.pendingDelete = nil }
             }
             return
         }
-        state.pendingPinnedDelete = nil
-        let index = state.selectedIndex ?? 0
-        model.delete([clip.id])
+        state.pendingDelete = nil
+        let index = state.results.firstIndex { ids.contains($0.id) } ?? 0
+        model.delete(ids)
         state.refresh()
         if !state.results.isEmpty {
             state.select(index: min(index, state.results.count - 1))
@@ -525,9 +533,119 @@ final class PanelController {
         }
     }
 
+    // MARK: - Boards
+
+    /// A new board at the end of the tabs (with `clips` on it), its name ready to type.
+    private func newBoard(with clips: [Clip]) {
+        let board = model.createBoard(with: Set(clips.map(\.id)))
+        state.beginRenaming(board, isNew: clips.isEmpty)
+        Diagnostics.record("board created clips=\(clips.count)")
+    }
+
+    /// Deletes an empty board at once; one with clips asks first, in the top bar.
+    private func requestBoardDelete(_ board: Board) {
+        if model.clipCount(onBoard: board.id) == 0 {
+            confirmBoardDelete(board.id)
+        } else {
+            state.pendingBoardDelete = board.id
+        }
+    }
+
+    func confirmBoardDelete(_ id: UUID) {
+        state.pendingBoardDelete = nil
+        if state.filter == .board(id) { state.filter = .all }
+        model.deleteBoard(id)
+        state.refresh()
+    }
+
+    /// The board tab (or +) under a point on screen, for a dragged card.
+    private func dropTarget(at point: NSPoint) -> ClipFilter? {
+        guard let panel, isShowing, panel.frame.contains(point) else { return nil }
+        let local = CGPoint(x: point.x - panel.frame.minX, y: panel.frame.maxY - point.y)
+        for tab in state.tabs + [Self.newBoardTab] where tab.boardID != nil || tab == Self.newBoardTab {
+            if let frame = state.tabFrames[tab.id], frame.insetBy(dx: -2, dy: -4).contains(local) { return tab }
+        }
+        return nil
+    }
+
+    /// Stands for the + button among the drop targets.
+    static let newBoardTab = ClipFilter.board(UUID(uuidString: "00000000-0000-4000-8000-00000000000A")!)
+
+    private func dragMoved(to point: NSPoint) -> Bool {
+        let target = dropTarget(at: point)
+        if state.dropTarget != target { state.dropTarget = target }
+        return target != nil
+    }
+
+    /// A card dropped on a board tab goes on that board; dropped on +, on a new board.
+    private func dragEnded(at point: NSPoint, clips: [Clip]) -> Bool {
+        let target = dropTarget(at: point)
+        state.dropTarget = nil
+        guard let target, !clips.isEmpty else { return false }
+        if target == Self.newBoardTab {
+            newBoard(with: clips)
+        } else if let board = target.boardID {
+            model.pin(Set(clips.map(\.id)), to: board)
+        }
+        return true
+    }
+
+    // MARK: - Paste stack
+
+    /// ⇧⌘C: stops a running stack; otherwise starts one with the selected cards (pasting the
+    /// first into the app you were in), or an empty one that collects what you copy next.
+    private func togglePasteStack(with clips: [Clip]) {
+        if model.stack.isActive {
+            model.stack.cancel()
+            return
+        }
+        let target = state.target
+        dismiss()
+        if clips.count > 1 {
+            model.stack.start(with: ClipJoin.chronological(clips).map(\.id), pasteFirst: target)
+        } else {
+            model.stack.start()
+        }
+    }
+
+    // MARK: - Editing
+
+    /// Whether the preview was open before editing started (it stays open after, if so).
+    private var previewWasOpen = false
+
+    /// ⌘E (text) or ⌘R (title): the preview turns into an editor for the clip.
+    private func startEditing(_ clip: Clip, inTitle: Bool) {
+        guard isShowing, state.editor == nil else { return }
+        state.collapseSelection()
+        let session = ClipEditSession(clip: clip, startsInTitle: inTitle)
+        previewWasOpen = state.quickLookOpen
+        state.editor = session
+        setQuickLook(open: true)
+        quickLook?.makeKey()
+        Task { await session.load(model: model, clip: clip) }
+        Diagnostics.record("editing started title=\(inTitle)")
+    }
+
+    /// Ends editing: saves (unless the text was emptied) or throws the changes away.
+    func finishEditing(save: Bool) {
+        guard let session = state.editor else { return }
+        if save, !session.save(model: model) {
+            HUD.show("A clip can't be empty. Change the text or press Esc.", systemImage: "exclamationmark.triangle")
+            return
+        }
+        state.editor = nil
+        state.refresh()
+        if let id = state.results.first(where: { $0.id == session.clipID })?.id { state.selectedID = id }
+        if !previewWasOpen { setQuickLook(open: false) }
+        if isShowing { panel?.makeKey() }
+        Diagnostics.record("editing ended saved=\(save)")
+    }
+
     // MARK: - Keyboard
 
     private func handleKey(_ event: NSEvent) -> Bool {
+        // A board's name field takes every key (Return commits, Esc cancels).
+        if state.renaming != nil { return false }
         // Let input methods (Japanese, Chinese…) finish composing before we take Return/arrows.
         let editor = panel?.firstResponder as? NSTextView
         if let editor, editor.hasMarkedText() { return false }
@@ -544,11 +662,19 @@ final class PanelController {
                                               modifiers: modifiers, context: context) else { return false }
         switch command {
         case .choose(let plain):
-            if let clip = state.selected { choose(clip, plain: plain) }
+            choose(state.selectedClips, plain: plain)
         case .quickPaste(let index, let plain):
-            if state.results.indices.contains(index) { choose(state.results[index], plain: plain) }
+            if state.results.indices.contains(index) { choose([state.results[index]], plain: plain) }
         case .move(let delta):
             state.moveSelection(by: delta)
+        case .extend(let delta):
+            state.extendSelection(by: delta)
+        case .extendToFirst:
+            state.extendSelection(toEnd: false)
+        case .extendToLast:
+            state.extendSelection(toEnd: true)
+        case .selectAll:
+            state.selectAll()
         case .first:
             state.select(index: 0)
         case .last:
@@ -566,13 +692,28 @@ final class PanelController {
         case .quickLook:
             setQuickLook(open: !state.quickLookOpen)
         case .copy:
-            if let clip = state.selected { copy(clip) }
+            copy(state.selectedClips)
         case .togglePin:
-            if let clip = state.selected { model.togglePin(clip) }
+            model.togglePin(state.selectedClips)
+        case .pinToBoard(let index):
+            let boards = model.boards.all
+            guard boards.indices.contains(index) else { return true }
+            let board = boards[index]
+            let clips = state.selectedClips
+            // Already all on it: take them off, like ⌘P.
+            model.pin(Set(clips.map(\.id)), to: clips.allSatisfy { $0.boardID == board.id } ? nil : board.id)
+        case .newBoard:
+            newBoard(with: state.isMultipleSelection ? state.selectedClips : [])
+        case .edit:
+            if let clip = state.selected { startEditing(clip, inTitle: !ClipEdit.canEditText(clip)) }
+        case .rename:
+            if let clip = state.selected { startEditing(clip, inTitle: true) }
+        case .pasteStack:
+            togglePasteStack(with: state.isMultipleSelection ? state.selectedClips : [])
         case .open:
             if let clip = state.selected { open(clip) }
         case .delete:
-            if let clip = state.selected { delete(clip) }
+            delete(state.selectedClips)
         case .undo:
             guard model.canUndoDelete else { return false }
             let restored = model.undoDelete()

@@ -72,10 +72,21 @@ public struct Clip: Identifiable, Sendable, Equatable {
     /// A link's page title, when the copying app provided one (Safari's "Copy Link", a link
     /// copied from a web page). Never fetched from the network.
     public var title: String?
+    /// A name the user gave the clip ("Home address"). Shown instead of the kind on its card,
+    /// searched, and kept when the same content is copied again.
+    public var label: String? {
+        didSet { if label != oldValue { rebuildSearchKey() } }
+    }
+    /// The board the clip is pinned to, if any. Pinned clips are never removed automatically.
+    public var boardID: UUID?
+    /// Text found in an image clip (on-device, after capture). Nil until it has been looked
+    /// for; empty when there was none.
+    public var recognizedText: String? {
+        didSet { if recognizedText != oldValue { rebuildSearchKey() } }
+    }
     public var created: Date
     public var lastUsed: Date
     public var useCount: Int
-    public var isPinned: Bool
     /// Content fingerprint, so copying the same thing again moves it to the top instead of
     /// adding a duplicate.
     public var fingerprint: String
@@ -88,6 +99,7 @@ public struct Clip: Identifiable, Sendable, Equatable {
         imageWidth: Int = 0, imageHeight: Int = 0, byteCount: Int = 0, hasRichText: Bool = false,
         sourceBundleID: String? = nil, sourceName: String? = nil, title: String? = nil,
         created: Date, lastUsed: Date? = nil, useCount: Int = 1, isPinned: Bool = false,
+        boardID: UUID? = nil, label: String? = nil, recognizedText: String? = nil,
         fingerprint: String
     ) {
         self.id = id
@@ -111,10 +123,28 @@ public struct Clip: Identifiable, Sendable, Equatable {
         self.created = created
         self.lastUsed = lastUsed ?? created
         self.useCount = useCount
-        self.isPinned = isPinned
+        self.boardID = boardID ?? (isPinned ? Board.pinnedID : nil)
+        self.label = label
+        self.recognizedText = recognizedText
         self.fingerprint = fingerprint
         self.searchKey = []
         rebuildSearchKey()
+    }
+
+    /// On a board. Setting it to true puts an unpinned clip on the default board (Pinned);
+    /// setting it to false takes the clip off its board.
+    public var isPinned: Bool {
+        get { boardID != nil }
+        set { boardID = newValue ? (boardID ?? Board.pinnedID) : nil }
+    }
+
+    /// Longest text kept from an image (a dense screenshot is a few thousand characters).
+    public static let recognizedTextLimit = 5_000
+
+    /// Text recognised in an image, if any was found.
+    public var imageText: String? {
+        guard kind == .image, let recognizedText, !recognizedText.isEmpty else { return nil }
+        return recognizedText
     }
 
     public var isTruncated: Bool { textLength > text.count }
@@ -123,7 +153,7 @@ public struct Clip: Identifiable, Sendable, Equatable {
     public var isSearchTruncated: Bool { textLength > Self.searchLimit }
 
     /// The text search sees: up to `searchLimit` characters.
-    public var searchableText: String { longText ?? text }
+    public var searchableText: String { kind == .image ? (recognizedText ?? "") : (longText ?? text) }
 
     /// File paths of a file clip.
     public var filePaths: [String] {
@@ -132,7 +162,8 @@ public struct Clip: Identifiable, Sendable, Equatable {
 
     mutating func rebuildSearchKey() {
         var key = longText ?? text
-        if kind == .image { key = "image" }
+        if kind == .image { key = "image" + (recognizedText.map { "\n" + $0 } ?? "") }
+        if let label { key += "\n" + label }
         if let title { key += "\n" + title }
         if let sourceName { key += "\n" + sourceName }
         searchKey = Array(SearchText.fold(key).utf8)
@@ -145,6 +176,7 @@ public struct Clip: Identifiable, Sendable, Equatable {
             && lhs.hasRichText == rhs.hasRichText && lhs.sourceBundleID == rhs.sourceBundleID
             && lhs.sourceName == rhs.sourceName && lhs.title == rhs.title && lhs.created == rhs.created
             && lhs.lastUsed == rhs.lastUsed && lhs.useCount == rhs.useCount
-            && lhs.isPinned == rhs.isPinned && lhs.fingerprint == rhs.fingerprint
+            && lhs.boardID == rhs.boardID && lhs.label == rhs.label && lhs.recognizedText == rhs.recognizedText
+            && lhs.fingerprint == rhs.fingerprint
     }
 }

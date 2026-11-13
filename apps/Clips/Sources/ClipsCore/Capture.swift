@@ -62,14 +62,21 @@ public enum CapturePolicy {
     }
 }
 
+/// Trims a rich text representation (RTF or RTFD) the same way as its plain text. Returns
+/// nil when it can't, and the rich version is then dropped. Lives in the app (it needs AppKit).
+public typealias RichTextTrimmer = @Sendable (Representation) -> Representation?
+
 /// Turns a pasteboard snapshot into a clip and the payload to store.
 public enum ClipBuilder {
     /// Rich text larger than this is dropped (the plain text is kept).
     static let richTextLimit = 10_000_000
 
+    /// `trimWhitespace` removes spaces, tabs and line breaks from both ends of copied text.
+    /// RTF goes through `trimRichText`; HTML is kept as is, since it doesn't show whitespace at its ends.
     public static func build(
         _ snapshot: PasteboardSnapshot, sourceBundleID: String?, sourceName: String?,
-        now: Date, maxBytes: Int = 50_000_000
+        now: Date, maxBytes: Int = 50_000_000,
+        trimWhitespace: Bool = false, trimRichText: RichTextTrimmer? = nil
     ) -> Result<(Clip, ClipPayload), SkipReason> {
         func clip(_ kind: ClipKind, text: String, payload: ClipPayload, fingerprint: String,
                   width: Int = 0, height: Int = 0, rich: Bool = false, title: String? = nil) -> Result<(Clip, ClipPayload), SkipReason> {
@@ -101,16 +108,21 @@ public enum ClipBuilder {
         }) {
             let raw = item.first(where: { $0.type == PasteboardType.string })?.data
                 ?? item.first(where: { $0.type == PasteboardType.url })?.data ?? Data()
-            let text = String(decoding: raw, as: UTF8.self)
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let copied = String(decoding: raw, as: UTF8.self)
+            let trimmed = copied.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
+                let trims = trimWhitespace && trimmed != copied
+                let text = trims ? trimmed : copied
                 var reps = [Representation(type: PasteboardType.string, data: Data(text.utf8))]
                 var rich = false
                 for type in PasteboardType.richTextTypes + [PasteboardType.url, PasteboardType.urlName] {
-                    if let rep = item.first(where: { $0.type == type }), rep.data.count <= richTextLimit {
-                        reps.append(rep)
-                        if PasteboardType.richTextTypes.contains(type) { rich = true }
+                    guard var rep = item.first(where: { $0.type == type }), rep.data.count <= richTextLimit else { continue }
+                    if trims, type == PasteboardType.rtf || type == PasteboardType.rtfd {
+                        guard let cleaned = trimRichText?(rep) else { continue }
+                        rep = cleaned
                     }
+                    reps.append(rep)
+                    if PasteboardType.richTextTypes.contains(type) { rich = true }
                 }
                 let kind: ClipKind = LinkDetector.isLink(trimmed) ? .link
                     : (ColorValue(hex: trimmed) != nil ? .color : .text)

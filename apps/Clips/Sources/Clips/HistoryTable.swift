@@ -11,6 +11,9 @@ struct HistoryTable: NSViewRepresentable {
         let copy: (Set<UUID>) -> Void
         let copyPlain: (Set<UUID>) -> Void
         let togglePin: (Set<UUID>) -> Void
+        let pin: (Set<UUID>, UUID?) -> Void
+        let edit: (UUID) -> Void
+        let rename: (UUID) -> Void
         let delete: (Set<UUID>) -> Void
     }
 
@@ -21,6 +24,7 @@ struct HistoryTable: NSViewRepresentable {
     let now: Date
     @Binding var selection: Set<UUID>
     let actions: Actions
+    let boards: [Board]
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -58,6 +62,7 @@ struct HistoryTable: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         let coordinator = context.coordinator
         coordinator.actions = actions
+        coordinator.boards = boards
         coordinator.setSelection = { selection = $0 }
         coordinator.sync(clips: clips, version: version, query: query, now: now, selection: selection)
     }
@@ -66,6 +71,7 @@ struct HistoryTable: NSViewRepresentable {
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
         weak var table: NSTableView?
         var actions: Actions?
+        var boards: [Board] = []
         var setSelection: ((Set<UUID>) -> Void)?
         private(set) var clips: [Clip] = []
         private var version = -1
@@ -142,9 +148,35 @@ struct HistoryTable: NSViewRepresentable {
             if targets.contains(where: { $0.kind != .image && $0.kind != .file }) {
                 menu.addItem(ClosureMenuItem("Copy as Plain Text") { actions.copyPlain(ids) })
             }
+            if targets.count == 1, let clip = targets.first {
+                if let text = clip.imageText {
+                    menu.addItem(ClosureMenuItem("Copy Text in Image") { AppModel.shared.copyText(text) })
+                }
+                menu.addItem(.separator())
+                if ClipEdit.canEditText(clip) {
+                    menu.addItem(ClosureMenuItem("Edit…", key: "e") { actions.edit(clip.id) })
+                }
+                menu.addItem(ClosureMenuItem(clip.label == nil ? "Add Title…" : "Rename…", key: "r") { actions.rename(clip.id) })
+            }
             menu.addItem(.separator())
-            menu.addItem(ClosureMenuItem(targets.allSatisfy(\.isPinned) ? "Unpin" : "Pin") { actions.togglePin(ids) })
-            menu.addItem(ClosureMenuItem("Delete") { actions.delete(ids) })
+            menu.addItem(ClosureMenuItem(targets.allSatisfy(\.isPinned) ? "Unpin" : "Pin", key: "p") { actions.togglePin(ids) })
+            let pinTo = NSMenuItem(title: "Pin to", action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            let current = Set(targets.map(\.boardID))
+            for (index, board) in boards.enumerated() {
+                let on = current == [board.id]
+                let item = ClosureMenuItem(board.name, key: index < 9 ? "\(index + 1)" : "", modifiers: [.command, .option]) {
+                    actions.pin(ids, on ? nil : board.id)
+                }
+                item.image = BoardSwatch.image(board.color)
+                item.state = on ? .on : .off
+                sub.addItem(item)
+            }
+            pinTo.submenu = sub
+            pinTo.isHidden = boards.isEmpty
+            menu.addItem(pinTo)
+            menu.addItem(.separator())
+            menu.addItem(ClosureMenuItem("Delete", key: "\u{8}") { actions.delete(ids) })
         }
 
         // Keyboard, forwarded by the table.

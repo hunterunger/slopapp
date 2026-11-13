@@ -94,6 +94,57 @@ public struct History: Sendable {
         return clips[index]
     }
 
+    /// Puts clips on a board (or takes them off with nil). Returns the clips that changed.
+    @discardableResult
+    public mutating func setBoard(_ boardID: UUID?, ids: Set<UUID>) -> [Clip] {
+        var changed: [Clip] = []
+        for index in clips.indices where ids.contains(clips[index].id) && clips[index].boardID != boardID {
+            clips[index].boardID = boardID
+            changed.append(clips[index])
+        }
+        return changed
+    }
+
+    /// Takes every clip off a board that's being deleted. They stay in the history, unpinned.
+    @discardableResult
+    public mutating func releaseBoard(_ boardID: UUID) -> [Clip] {
+        setBoard(nil, ids: Set(clips.filter { $0.boardID == boardID }.map(\.id)))
+    }
+
+    /// How many clips are on a board.
+    public func count(onBoard boardID: UUID) -> Int {
+        clips.reduce(0) { $0 + ($1.boardID == boardID ? 1 : 0) }
+    }
+
+    /// Replaces a clip with an edited version of itself (same id), where it is.
+    @discardableResult
+    public mutating func replace(_ clip: Clip) -> Bool {
+        guard let index = clips.firstIndex(where: { $0.id == clip.id }) else { return false }
+        clips[index] = clip
+        return true
+    }
+
+    /// Gives a clip a label (nil removes it). Returns the clip if it changed.
+    @discardableResult
+    public mutating func setLabel(_ label: String?, id: UUID) -> Clip? {
+        guard let index = clips.firstIndex(where: { $0.id == id }), clips[index].label != label else { return nil }
+        clips[index].label = label
+        return clips[index]
+    }
+
+    /// Stores the text found in an image clip. Returns the clip, or nil if it's gone.
+    @discardableResult
+    public mutating func setRecognizedText(_ text: String, id: UUID) -> Clip? {
+        guard let index = clips.firstIndex(where: { $0.id == id }) else { return nil }
+        clips[index].recognizedText = text
+        return clips[index]
+    }
+
+    /// Image clips whose text hasn't been looked for yet, newest first.
+    public var imagesAwaitingText: [UUID] {
+        clips.filter { $0.kind == .image && $0.recognizedText == nil }.map(\.id)
+    }
+
     /// Removes clips and returns them (with their positions) so the removal can be undone.
     @discardableResult
     public mutating func remove(ids: Set<UUID>) -> [Clip] {

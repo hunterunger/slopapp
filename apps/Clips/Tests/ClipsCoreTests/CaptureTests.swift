@@ -85,6 +85,53 @@ func makePNG(width: Int, height: Int) -> Data {
         #expect(payload.plainText()?.items == [[rep(PasteboardType.string, "Bold")]])
     }
 
+    @Test func keepsWhitespaceByDefault() throws {
+        let (clip, payload) = try build(PasteboardSnapshot(text: "  hello world \n")).get()
+        #expect(clip.text == "  hello world \n")
+        #expect(payload.items == [[rep(PasteboardType.string, "  hello world \n")]])
+    }
+
+    @Test(arguments: ["  hello  world ", "\n\nhello  world\n", "\t hello  world\r\n", "hello  world"])
+    func trimsWhitespaceWhenAsked(text: String) throws {
+        let (clip, payload) = try ClipBuilder.build(PasteboardSnapshot(text: text), sourceBundleID: nil, sourceName: nil,
+                                                    now: now, trimWhitespace: true).get()
+        #expect(clip.text == "hello  world")
+        #expect(clip.fingerprint == "text:" + ClipBuilder.digest(Data("hello  world".utf8)))
+        #expect(payload.items == [[rep(PasteboardType.string, "hello  world")]])
+    }
+
+    @Test func trimmedLinkKeepsItsKind() throws {
+        let (clip, _) = try ClipBuilder.build(PasteboardSnapshot(text: "https://example.com\n"), sourceBundleID: nil,
+                                              sourceName: nil, now: now, trimWhitespace: true).get()
+        #expect(clip.kind == .link)
+        #expect(clip.text == "https://example.com")
+    }
+
+    @Test func trimmingRunsRTFThroughTheTrimmerAndKeepsHTML() throws {
+        let snapshot = PasteboardSnapshot(items: [[rep(PasteboardType.string, "Bold\n"), rep(PasteboardType.rtf, "{\\rtf1 Bold\\par}"),
+                                                   rep(PasteboardType.html, "<b>Bold</b>")]])
+        let (clip, payload) = try ClipBuilder.build(snapshot, sourceBundleID: nil, sourceName: nil, now: now, trimWhitespace: true,
+                                                    trimRichText: { Representation(type: $0.type, data: Data("trimmed".utf8)) }).get()
+        #expect(clip.hasRichText)
+        #expect(payload.items == [[rep(PasteboardType.string, "Bold"), rep(PasteboardType.rtf, "trimmed"),
+                                   rep(PasteboardType.html, "<b>Bold</b>")]])
+    }
+
+    @Test func dropsRTFTheTrimmerCantHandle() throws {
+        let snapshot = PasteboardSnapshot(items: [[rep(PasteboardType.string, " Bold "), rep(PasteboardType.rtf, "{\\rtf1 Bold}")]])
+        let (clip, payload) = try ClipBuilder.build(snapshot, sourceBundleID: nil, sourceName: nil, now: now, trimWhitespace: true,
+                                                    trimRichText: { _ in nil }).get()
+        #expect(!clip.hasRichText)
+        #expect(payload.items == [[rep(PasteboardType.string, "Bold")]])
+    }
+
+    @Test func leavesRTFAloneWhenThereIsNothingToTrim() throws {
+        let snapshot = PasteboardSnapshot(items: [[rep(PasteboardType.string, "Bold"), rep(PasteboardType.rtf, "{\\rtf1 Bold}")]])
+        let (_, payload) = try ClipBuilder.build(snapshot, sourceBundleID: nil, sourceName: nil, now: now, trimWhitespace: true,
+                                                 trimRichText: { _ in Issue.record("trimmer called"); return nil }).get()
+        #expect(payload.items[0].map(\.type) == [PasteboardType.string, PasteboardType.rtf])
+    }
+
     @Test(arguments: ["https://example.com/a?b=c", "http://localhost:3000", "mailto:someone@example.com", "www.example.com"])
     func detectsLinks(text: String) throws {
         #expect(try build(PasteboardSnapshot(text: text)).get().0.kind == .link)

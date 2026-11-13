@@ -2,8 +2,15 @@ import Foundation
 
 /// Short display strings for clips.
 public enum ClipText {
-    /// One line for a list row: the first non-blank line, whitespace collapsed, capped.
+    /// One line for a list row: the clip's label, or the first non-blank line, whitespace
+    /// collapsed, capped.
     public static func title(of clip: Clip, limit: Int = 200) -> String {
+        if let label = clip.label { return oneLine(label, limit: limit) }
+        return contentTitle(of: clip, limit: limit)
+    }
+
+    /// The same, ignoring the label: what the clip itself says.
+    public static func contentTitle(of clip: Clip, limit: Int = 200) -> String {
         switch clip.kind {
         case .image:
             return clip.imageWidth > 0 ? "Image, \(clip.imageWidth) × \(clip.imageHeight)" : "Image"
@@ -92,6 +99,43 @@ public enum ClipText {
         if short == "now" { return "Just now" }
         if short.hasSuffix(" min") || short.hasSuffix(" hr") { return short + " ago" }
         return short
+    }
+
+    /// The card header's big line: the clip's label, or its kind.
+    public static func headerTitle(of clip: Clip) -> String {
+        clip.label.map { oneLine($0, limit: 80) } ?? kindName(of: clip)
+    }
+
+    /// A label as typed: whitespace collapsed and trimmed, at most 120 characters, nil if empty.
+    public static func cleanLabel(_ raw: String) -> String? {
+        let label = oneLine(raw, limit: 120)
+        return label.isEmpty ? nil : label
+    }
+
+    /// For an image whose recognised text matches the search: the words around the first
+    /// match, on one line ("…invoice 4471 for March…"). Nil otherwise.
+    public static func imageTextSnippet(of clip: Clip, query: String, length: Int = 44) -> String? {
+        guard let text = clip.imageText, !SearchText.terms(query).isEmpty,
+              SearchText.matches(Array(SearchText.fold(text).utf8), terms: SearchText.terms(query)) else { return nil }
+        let words = query.split(whereSeparator: { $0.isWhitespace })
+        let string = text as NSString
+        var first = NSNotFound
+        for word in words {
+            let found = string.range(of: String(word), options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive])
+            if found.location != NSNotFound { first = min(first, found.location) }
+        }
+        guard first != NSNotFound else { return nil }
+        var start = max(0, first - length / 3)
+        if start > 0 {
+            let window = NSRange(location: start, length: first - start)
+            let space = string.rangeOfCharacter(from: .whitespacesAndNewlines, options: [], range: window)
+            if space.location != NSNotFound { start = space.location + 1 }
+            start = string.rangeOfComposedCharacterSequence(at: start).location
+        }
+        let end = min(string.length, start + length)
+        let body = oneLine(string.substring(with: string.rangeOfComposedCharacterSequences(for: NSRange(location: start, length: end - start))),
+                           limit: length)
+        return (start > 0 ? "…" : "") + body + (end < string.length ? "…" : "")
     }
 
     /// The card header's type word: "Text", "Link", "Image", "File", "Color".

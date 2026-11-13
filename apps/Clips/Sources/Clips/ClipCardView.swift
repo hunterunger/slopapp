@@ -143,6 +143,7 @@ final class ClipCardView: NSView, NSDraggingSource {
         chip.layer?.cornerCurve = .continuous
         chipLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         chipLabel.alignment = .center
+        chipLabel.lineBreakMode = .byTruncatingTail
         chip.addSubview(chipLabel)
         numberBadge.wantsLayer = true
         numberBadge.layer?.cornerCurve = .continuous
@@ -176,13 +177,15 @@ final class ClipCardView: NSView, NSDraggingSource {
 
     // MARK: - Content
 
-    func configure(clip: Clip, index: Int, number: Int?, now: Date, query: String, selected: Bool, showsNumber: Bool) {
+    func configure(clip: Clip, index: Int, number: Int?, now: Date, query: String, selected: Bool, showsNumber: Bool,
+                   board: Board? = nil) {
         let sameClip = self.clip?.id == clip.id
         self.clip = clip
         self.index = index
         self.query = query
         isSelected = selected
-        kindLabel.stringValue = ClipText.kindName(of: clip)
+        // A title the user gave the clip takes the kind's place.
+        kindLabel.stringValue = ClipText.headerTitle(of: clip)
         let age = ClipText.ageSentence(of: clip.lastUsed, now: now)
         ageLabel.stringValue = age
         pin.isHidden = !clip.isPinned
@@ -231,7 +234,11 @@ final class ClipCardView: NSView, NSDraggingSource {
             chipLabel.stringValue = hex
         case .image:
             picture.isHidden = false
-            if let footer = ClipText.cardFooter(of: clip) {
+            // A search that matched text in the image shows the words it matched.
+            if let found = ClipText.imageTextSnippet(of: clip, query: query) {
+                chip.isHidden = false
+                chipLabel.stringValue = found
+            } else if let footer = ClipText.cardFooter(of: clip) {
                 chip.isHidden = false
                 chipLabel.stringValue = footer
             }
@@ -252,12 +259,15 @@ final class ClipCardView: NSView, NSDraggingSource {
         }
 
         var spoken = [ClipText.kindName(of: clip)]
+        if let label = clip.label { spoken.append(label) }
         switch clip.kind {
         case .link: spoken.append(clip.title.map { "\($0), \(ClipText.host(ofLink: clip.text))" } ?? clip.text)
-        case .image: if clip.imageWidth > 0 { spoken.append("\(clip.imageWidth) by \(clip.imageHeight)") }
-        default: spoken.append(ClipText.title(of: clip, limit: 120))
+        case .image:
+            if clip.imageWidth > 0 { spoken.append("\(clip.imageWidth) by \(clip.imageHeight)") }
+            if let found = ClipText.imageTextSnippet(of: clip, query: query) { spoken.append("text: \(found)") }
+        default: spoken.append(ClipText.contentTitle(of: clip, limit: 120))
         }
-        if clip.isPinned { spoken.append("pinned") }
+        if clip.isPinned { spoken.append(board.map { "pinned to \($0.name)" } ?? "pinned") }
         if let source = clip.sourceName { spoken.append("from \(source)") }
         spoken.append(age)
         if let number { spoken.append("Command \(number)") }
@@ -369,7 +379,8 @@ final class ClipCardView: NSView, NSDraggingSource {
         picture.frame = CGRect(x: 0, y: bodyTop, width: size.width, height: size.height - bodyTop)
         chipLabel.sizeToFit()
         let chipHeight = Self.footRowHeight
-        let chipWidth = chipLabel.frame.width + chipHeight
+        let chipWidth = min(chipLabel.frame.width + chipHeight, size.width - Self.padding * 2)
+        chipLabel.frame.size.width = chipWidth - chipHeight
         chip.frame = CGRect(x: ((size.width - chipWidth) / 2).rounded(), y: footMidY - chipHeight / 2, width: chipWidth, height: chipHeight)
         chip.layer?.cornerRadius = chipHeight / 2
         chipLabel.frame = CGRect(x: chipHeight / 2, y: ((chipHeight - chipLabel.frame.height) / 2).rounded(),
@@ -538,25 +549,38 @@ final class ClipCardView: NSView, NSDraggingSource {
 
     override func mouseDown(with event: NSEvent) {
         mouseDownPoint = event.locationInWindow
-        strip?.cardClicked(self, clickCount: event.clickCount)
+        strip?.cardClicked(self, clickCount: event.clickCount, modifiers: event.modifierFlags)
     }
 
     override func mouseUp(with event: NSEvent) {
         mouseDownPoint = nil
+        strip?.cardMouseUp(self)
     }
 
+    /// The clips being dragged (several when the card is one of a selection).
+    private var draggedClips: [Clip] = []
+
     override func mouseDragged(with event: NSEvent) {
-        guard let start = mouseDownPoint, let clip else { return }
+        guard let start = mouseDownPoint, clip != nil, let strip else { return }
         let point = event.locationInWindow
         guard hypot(point.x - start.x, point.y - start.y) > 4 else { return }
         mouseDownPoint = nil
-        guard let writers = strip?.dragWriters(for: clip), !writers.isEmpty else { return }
-        let items = writers.map { writer -> NSDraggingItem in
-            let item = NSDraggingItem(pasteboardWriter: writer)
-            item.setDraggingFrame(bounds, contents: snapshot())
-            return item
+        strip.dragStarted()
+        draggedClips = strip.targets(for: self)
+        let image = snapshot()
+        var items: [NSDraggingItem] = []
+        for (offset, clip) in draggedClips.enumerated() {
+            for writer in strip.dragWriters(for: clip) {
+                let item = NSDraggingItem(pasteboardWriter: writer)
+                // Several cards: a small fan of this one, so the drag shows it's more than one.
+                let shift = CGFloat(min(offset, 3)) * 6
+                item.setDraggingFrame(bounds.offsetBy(dx: shift, dy: shift), contents: offset < 4 ? image : nil)
+                items.append(item)
+            }
         }
-        beginDraggingSession(with: items, event: event, source: self)
+        guard !items.isEmpty else { return }
+        let session = beginDraggingSession(with: items, event: event, source: self)
+        session.draggingFormation = .none
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -567,9 +591,22 @@ final class ClipCardView: NSView, NSDraggingSource {
         context == .outsideApplication ? .copy : []
     }
 
-    /// A card dropped into an app counts as using the clip: the paste sound.
+    /// Over a board tab, the card drops there instead of sliding back.
+    func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint) {
+        let overBoard = strip?.dragMoved(to: screenPoint) ?? false
+        session.animatesToStartingPositionsOnCancelOrFail = !overBoard
+    }
+
+    /// A card dropped into an app counts as using the clip: the paste sound. Dropped on a
+    /// board tab, it's pinned there.
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        if operation != [] { AppModel.shared.clipDelivered() }
+        let clips = draggedClips
+        draggedClips = []
+        if operation != [] {
+            AppModel.shared.clipDelivered()
+        } else {
+            _ = strip?.dragEnded(at: screenPoint, clips: clips)
+        }
     }
 
     private func snapshot() -> NSImage {

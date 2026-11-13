@@ -17,25 +17,35 @@ import QuartzCore
 ///   `app.slopapp.clips.test.show` (object "passive": without taking the keyboard), `.hide`,
 ///   `.search` (object = query), `.numbers` (object "1" shows the ⌘-number badges as if ⌘
 ///   were held), `.select` (card index), `.preview` ("1"/"0"), `.tab` (tab index) and `.do`
-///   ("pause", "resume", "pin", "copy" (the selected clip, as Return without direct paste), "delete", "cards", "search", "history", "settings",
-///   "backdrop", "nobackdrop") so scripts can time and
-///   screenshot the panel without Accessibility or synthetic keys.
+///   ("pause", "resume", "pin", "copy" (the selected clip(s), as Return without direct paste), "delete", "undo",
+///   "cards", "search", "history", "settings", "backdrop", "nobackdrop"; selection: "select-add:i" (⌘-click),
+///   "select-range:n" (⇧-arrows), "select-all", "select-none"; boards: "board-new:Name", "board-rename:i",
+///   "board-color:i,red", "board-move:i,delta", "board-delete:i", "board-delete-confirm", "pin-to:i",
+///   "drop-on-tab:i" (as if the selected cards were dropped on tab i; past the last tab: +); editing:
+///   "edit", "rename", "edit-text:…", "edit-title:…", "edit-save", "edit-cancel"; paste stack: "stack"
+///   (⇧⌘C), "stack-start", "stack-stop") so scripts can time and screenshot the panel without
+///   Accessibility or synthetic keys. A paste stack's "paste" is any read of the test pasteboard.
 /// - `CLIPS_NO_HOTKEY=1`: don't register the global shortcut, so a test copy can run beside
 ///   someone's real Clips without taking ⇧⌥V from it.
+/// - `SLOPAPP_SMOKE_TEST=1` (scripts/smoke.sh): a throwaway history folder, a private
+///   pasteboard and no shortcut, so a launch test never opens, migrates or adds to your history.
 /// - `CLIPS_ALLOW_CAPTURE=1`: let screenshots see the panel even when "Hide from screen
 ///   sharing" is on (scripted tests and blind testers need screenshots).
 enum Diagnostics {
     static let logger = Logger(subsystem: "app.slopapp.clips", category: "clips")
 
     private static let environment = ProcessInfo.processInfo.environment
+    static let isSmokeTest = environment["SLOPAPP_SMOKE_TEST"] == "1"
     static let dataDirectory = environment["CLIPS_DATA_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+        ?? (isSmokeTest ? FileManager.default.temporaryDirectory.appendingPathComponent("clips-smoke-\(ProcessInfo.processInfo.processIdentifier)") : nil)
     static let pasteboardName = environment["CLIPS_PASTEBOARD"].flatMap { $0.isEmpty ? nil : $0 }
+        ?? (isSmokeTest ? "app.slopapp.clips.smoke" : nil)
     static let seedCount = environment["CLIPS_SEED"].flatMap(Int.init)
     static let forcedAppearance = environment["CLIPS_APPEARANCE"]
     static let showPanelAtLaunch = environment["CLIPS_SHOW_PANEL"] == "1"
     static let allowCapture = environment["CLIPS_ALLOW_CAPTURE"] == "1"
     static let testHooks = environment["CLIPS_TEST_HOOKS"] == "1"
-    static let noHotkey = environment["CLIPS_NO_HOTKEY"] == "1"
+    static let noHotkey = environment["CLIPS_NO_HOTKEY"] == "1" || isSmokeTest
     /// Clips' settings: its own domain, or `app.slopapp.clips.test` under `CLIPS_DATA_DIR`.
     /// (UserDefaults is thread-safe; the SDK just doesn't mark it Sendable.)
     nonisolated(unsafe) static let defaults: UserDefaults = dataDirectory == nil

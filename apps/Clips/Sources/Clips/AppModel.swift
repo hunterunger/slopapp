@@ -18,6 +18,8 @@ final class AppModel {
     private(set) var storageError: String?
     /// Bumped on every history change so views and the panel can refresh.
     private(set) var revision = 0
+    /// The user's boards, in tab order ("Pinned" first until they change it).
+    private(set) var boards = Boards()
 
     // MARK: Settings (UserDefaults)
 
@@ -35,6 +37,11 @@ final class AppModel {
 
     var alwaysPlainText: Bool {
         didSet { defaults.set(alwaysPlainText, forKey: Keys.alwaysPlainText) }
+    }
+
+    /// Remove spaces and line breaks from both ends of copied text before it's saved (off by default).
+    var trimsWhitespace: Bool {
+        didSet { defaults.set(trimsWhitespace, forKey: Keys.trimsWhitespace) }
     }
 
     /// Keep the panel and History window out of screen sharing, recordings and screenshots.
@@ -98,6 +105,10 @@ final class AppModel {
     @ObservationIgnored private let defaults = Diagnostics.defaults
     @ObservationIgnored let chime: CopyChime
     @ObservationIgnored let soundPlayer = SystemSoundPlayer()
+    /// Lines clips up to paste one by one (see PasteStackController).
+    @ObservationIgnored private(set) lazy var stack = PasteStackController(model: self)
+    /// Looks for text in images, one at a time in the background.
+    @ObservationIgnored private var recognition: TextRecognitionQueue?
     @ObservationIgnored private var pauseTimer: Timer?
     @ObservationIgnored private var undoStack: [DeletedClips] = [] {
         didSet { undoableDeletes = undoStack.count }
@@ -113,6 +124,7 @@ final class AppModel {
         static let retention = "retention"
         static let pasteDirectly = "pasteDirectly"
         static let alwaysPlainText = "alwaysPlainText"
+        static let trimsWhitespace = "trimsWhitespace"
         static let ignoredApps = "ignoredApps"
         static let hideFromScreenSharing = "hideFromScreenSharing"
         static let pausedUntil = "pausedUntil"
@@ -125,6 +137,7 @@ final class AppModel {
         retention = defaults.string(forKey: Keys.retention).flatMap(HistoryRetention.init) ?? .default
         pasteDirectly = defaults.object(forKey: Keys.pasteDirectly) as? Bool ?? true
         alwaysPlainText = defaults.bool(forKey: Keys.alwaysPlainText)
+        trimsWhitespace = defaults.bool(forKey: Keys.trimsWhitespace)
         hideFromScreenSharing = defaults.object(forKey: Keys.hideFromScreenSharing) as? Bool ?? true
         ignoredApps = IgnoredApp.decode(defaults.data(forKey: Keys.ignoredApps))
         // Nobody who never picked a sound has a saved choice: they get Paper. Off stays off.
@@ -165,6 +178,7 @@ final class AppModel {
                 Diagnostics.record("seeded \(seed) synthetic clips")
             }
             let clips = try await database.loadAll()
+            boards = Boards(try await database.loadBoards())
             history = History(clips: clips)
             isLoaded = true
             prune()
@@ -173,7 +187,8 @@ final class AppModel {
             if #available(macOS 15.4, *) {
                 Diagnostics.record("clipboard accessBehavior=\(pasteboard.board.accessBehavior.rawValue) accessibility=\(hasAccessibility)")
             }
-            Diagnostics.record("loaded clips=\(clips.count) ms=\(Diagnostics.milliseconds(since: started))")
+            Diagnostics.record("loaded clips=\(clips.count) boards=\(boards.all.count) ms=\(Diagnostics.milliseconds(since: started))")
+            startTextRecognition(database)
         } catch {
             storageError = "Clips couldn't open its history file, so nothing is being saved. Quit and reopen Clips; if that doesn't help, check the disk has space."
             isLoaded = true
@@ -222,10 +237,12 @@ final class AppModel {
         let boardName = pasteboard.name
         let expectedCount = pasteboard.changeCount
         let started = Diagnostics.now()
+        let trims = trimsWhitespace
         Task.detached(priority: .userInitiated) {
             let (snapshot, count) = SystemPasteboard.snapshot(named: boardName)
             guard count == expectedCount else { return } // changed again; the next tick gets it
-            let built = ClipBuilder.build(snapshot, sourceBundleID: sourceID, sourceName: sourceName, now: Date())
+            let built = ClipBuilder.build(snapshot, sourceBundleID: sourceID, sourceName: sourceName, now: Date(),
+                                          trimWhitespace: trims, trimRichText: RichTextTrim.trimmer)
             var thumbnail: Data?
             if case .success(let (clip, payload)) = built, clip.kind == .image, let data = payload.items.first?.first?.data {
                 thumbnail = ImageInfo.thumbnailPNG(of: data)
@@ -251,6 +268,14 @@ final class AppModel {
         if let database {
             Task { try? await database.save(saved, payload: payload, thumbnail: thumbnail) }
         }
+        if saved.kind == .image, saved.recognizedText == nil, let recognition {
+            // After the save, so the image can be read back.
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                await recognition.enqueue([saved.id], first: true)
+            }
+        }
+        stack.copyRecorded(saved.id)
         // Only copies that were really recorded get here: skipped, ignored and concealed
         // content returns earlier, and Clips' own pastes never count as a change.
         if chime.copyRecorded() { Diagnostics.record("copy sound played sound=\(soundChoice.rawValue)") }
@@ -324,6 +349,7 @@ final class AppModel {
             if plain, let text = payload.plainText() { payload = text }
             let count = pasteboard.write(payload)
             watcher.noteOwnWrite(changeCount: count)
+            stack.clipboardReplaced()
             if let touched = history.touch(id: clip.id, now: Date()) {
                 try? await database.update(touched)
             }
@@ -348,12 +374,50 @@ final class AppModel {
         }
     }
 
-    /// Copies plain text that isn't a single clip (several clips joined in the History window).
+    /// Copies plain text that isn't a single clip (the text found in an image).
     func copyText(_ text: String) {
         let payload = ClipPayload(items: [[Representation(type: PasteboardType.string, data: Data(text.utf8))]])
         watcher.noteOwnWrite(changeCount: pasteboard.write(payload))
+        stack.clipboardReplaced()
         clipDelivered()
         HUD.show("Copied", systemImage: "doc.on.doc")
+    }
+
+    /// Pastes or copies several clips at once, joined (see `ClipJoin`): oldest first, text one
+    /// per line, or all the files, or all the images. They keep their places in the history.
+    func use(_ clips: [Clip], _ delivery: Delivery) {
+        guard clips.count > 1 else {
+            if let clip = clips.first { use(clip, delivery) }
+            return
+        }
+        guard let database else { return }
+        refreshPermissions()
+        Task {
+            let payloads = (try? await database.payloads(for: clips.map(\.id))) ?? [:]
+            guard let payload = ClipJoin.payload(for: clips, payloads: payloads) else {
+                HUD.show("Nothing to paste in those clips", systemImage: "exclamationmark.triangle")
+                return
+            }
+            watcher.noteOwnWrite(changeCount: pasteboard.write(payload))
+            stack.clipboardReplaced()
+            let what = ClipJoin.describe(clips)
+            switch delivery {
+            case .paste(let target) where willPasteDirectly(into: target):
+                try? await Task.sleep(for: .milliseconds(60))
+                Paster.sendPaste()
+                clipDelivered()
+                Diagnostics.record("pasted several count=\(clips.count)")
+            case .paste:
+                clipDelivered()
+                HUD.show(hasAccessibility || !pasteDirectly ? "Copied \(what). Press ⌘V to paste." : "Copied \(what). Allow Accessibility to paste directly.",
+                         systemImage: "doc.on.clipboard")
+                Diagnostics.record("copied several count=\(clips.count) reason=noDirectPaste")
+            case .copy:
+                clipDelivered()
+                HUD.show("Copied \(what)", systemImage: "doc.on.doc")
+                Diagnostics.record("copied several count=\(clips.count)")
+            }
+        }
     }
 
     /// Clips pasted or copied a clip for you (or you dragged a card into an app): the paste
@@ -362,9 +426,128 @@ final class AppModel {
         if chime.clipUsed() { Diagnostics.record("paste sound played sound=\(soundChoice.rawValue)") }
     }
 
+    /// ⌘P: takes a pinned clip off its board, or pins it to the first board.
     func togglePin(_ clip: Clip) {
-        guard let updated = history.setPinned(!clip.isPinned, id: clip.id) else { return }
+        togglePin([clip])
+    }
+
+    /// For several clips: unpins them if they're all pinned, otherwise pins the others to the
+    /// first board (clips already on a board stay where they are).
+    func togglePin(_ clips: [Clip]) {
+        guard !clips.isEmpty else { return }
+        if clips.allSatisfy(\.isPinned) {
+            pin(Set(clips.map(\.id)), to: nil)
+        } else {
+            let board = boards.defaultBoard ?? createBoard(name: Board.pinned.name, color: Board.pinned.color)
+            pin(Set(clips.filter { !$0.isPinned }.map(\.id)), to: board.id)
+        }
+    }
+
+    /// Puts clips on a board, or takes them off (nil).
+    func pin(_ ids: Set<UUID>, to boardID: UUID?) {
+        let changed = history.setBoard(boardID, ids: ids)
+        guard !changed.isEmpty else { return }
+        if let database { Task { try? await database.updateAll(changed) } }
+        Diagnostics.record("pinned count=\(changed.count) board=\(boardID.flatMap { boards.index(of: $0) }.map(String.init) ?? "none")")
+        self.changed()
+    }
+
+    /// A new board at the end of the tabs, optionally with clips on it.
+    @discardableResult
+    func createBoard(name: String = "New Board", color: BoardColor? = nil, with ids: Set<UUID> = []) -> Board {
+        let board = boards.add(name: name, color: color)
+        saveBoards()
+        if !ids.isEmpty { pin(ids, to: board.id) } else { changed() }
+        return board
+    }
+
+    func renameBoard(_ id: UUID, to name: String) {
+        guard boards.rename(id, to: name) != nil else { return }
+        saveBoards()
+        changed()
+    }
+
+    func setColor(_ color: BoardColor, ofBoard id: UUID) {
+        guard boards.setColor(color, of: id) != nil else { return }
+        saveBoards()
+        changed()
+    }
+
+    func moveBoard(_ id: UUID, by delta: Int) {
+        guard boards.move(id, by: delta) else { return }
+        saveBoards()
+        changed()
+    }
+
+    func moveBoards(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        boards.move(fromOffsets: offsets, toOffset: destination)
+        saveBoards()
+        changed()
+    }
+
+    /// Deletes a board. Its clips stay in the history, no longer pinned (so they age out like
+    /// any other clip); the caller asks first when there are some.
+    func deleteBoard(_ id: UUID) {
+        guard boards.remove(id) != nil else { return }
+        let released = history.releaseBoard(id)
+        saveBoards()
+        if let database, !released.isEmpty { Task { try? await database.updateAll(released) } }
+        changed()
+    }
+
+    private func saveBoards() {
+        let all = boards.all
+        if let database { Task { try? await database.saveBoards(all) } }
+    }
+
+    func clipCount(onBoard id: UUID) -> Int { history.count(onBoard: id) }
+
+    // MARK: - Labels and edits
+
+    /// Gives a clip a title (empty removes it).
+    func setLabel(_ raw: String, for id: UUID) {
+        guard let updated = history.setLabel(ClipText.cleanLabel(raw), id: id) else { return }
         if let database { Task { try? await database.update(updated) } }
+        changed()
+    }
+
+    /// Saves an edit of a clip's text: `rich` is the editor's RTF/RTFD when it edited formatted
+    /// text. The edited version replaces the clip, so it's what pastes from now on.
+    @discardableResult
+    func saveEdit(of clip: Clip, text: String, rich: Representation?) -> Bool {
+        guard let current = history.clip(id: clip.id),
+              let (edited, payload) = ClipEdit.apply(text: text, rich: rich, to: current) else { return false }
+        history.replace(edited)
+        if let database { Task { try? await database.save(edited, payload: payload) } }
+        Diagnostics.record("edited kind=\(edited.kind) chars=\(edited.textLength) rich=\(rich != nil)")
+        changed()
+        return true
+    }
+
+    // MARK: - Text in images
+
+    private func startTextRecognition(_ database: ClipDatabase) {
+        let queue = TextRecognitionQueue(
+            recognizer: HelperTextRecognizer(),
+            canRun: { !ProcessInfo.processInfo.isLowPowerModeEnabled },
+            load: { id in (try? await database.payload(for: id)).flatMap { $0.items.first.flatMap(ImageExport.image(in:))?.data } },
+            deliver: { [weak self] id, text in
+                try? await database.setRecognizedText(text, for: id)
+                await self?.recognized(text, in: id)
+            })
+        recognition = queue
+        let waiting = history.imagesAwaitingText
+        guard !waiting.isEmpty else { return }
+        // Let launch and the first panel warm-up finish first.
+        Task {
+            try? await Task.sleep(for: .seconds(5))
+            await queue.enqueue(waiting)
+        }
+    }
+
+    private func recognized(_ text: String, in id: UUID) {
+        guard history.setRecognizedText(text, id: id) != nil else { return }
+        Diagnostics.record("image text found chars=\(text.count)")
         changed()
     }
 
@@ -386,6 +569,9 @@ final class AppModel {
         let removed = history.remove(ids: ids)
         guard !removed.isEmpty else { return }
         let entry = DeletedClips(clips: removed)
+        let removedIDs = Set(removed.map(\.id))
+        stack.removed(removedIDs)
+        if let recognition { Task { await recognition.cancel(removedIDs) } }
         undoStack.append(entry)
         if undoStack.count > 20 { undoStack.removeFirst() }
         changed()
@@ -402,10 +588,12 @@ final class AppModel {
         guard let entry = undoStack.popLast(), let database else { return [] }
         history.restore(entry.clips)
         changed()
+        let images = entry.clips.filter { $0.kind == .image && $0.recognizedText == nil }.map(\.id)
         Task {
             // Let the deletion finish first, so it can't remove what we put back.
             await entry.deletion?.value
             try? await database.saveAll(entry.clips.map { ($0, entry.payloads[$0.id]) })
+            if !images.isEmpty { await recognition?.enqueue(images) }
         }
         return entry.clips
     }
@@ -413,6 +601,7 @@ final class AppModel {
     /// Removes every unpinned clip. Not undoable (the caller confirms first).
     func clearHistory() {
         let removed = history.clear(keepPinned: true)
+        stack.removed(Set(removed.map(\.id)))
         undoStack.removeAll()
         changed()
         guard let database else { return }
@@ -439,6 +628,7 @@ final class AppModel {
     private func prune() {
         let removed = history.prune(retention: retention, now: Date())
         guard !removed.isEmpty else { return }
+        stack.removed(Set(removed))
         changed()
         if let database { Task { try? await database.delete(ids: removed) } }
     }
