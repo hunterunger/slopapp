@@ -115,6 +115,12 @@ final class AppModel {
     }
     /// How many deletions ⌘Z can bring back (observable, for the Undo menu item).
     private(set) var undoableDeletes = 0
+    /// The clips the last undo brought back, and a count that changes with each undo, so the
+    /// History window can select them again.
+    private(set) var lastRestored: [UUID] = []
+    private(set) var restoreCount = 0
+    /// A board just made from a menu, whose name the History window should open for typing.
+    var boardToName: UUID?
     /// Called after every history change (the panel refreshes its results).
     @ObservationIgnored var onHistoryChange: (() -> Void)?
 
@@ -266,13 +272,15 @@ final class AppModel {
         case .inserted(let clip), .bumped(let clip): saved = clip
         }
         if let database {
-            Task { try? await database.save(saved, payload: payload, thumbnail: thumbnail) }
-        }
-        if saved.kind == .image, saved.recognizedText == nil, let recognition {
-            // After the save, so the image can be read back.
+            // An image's text is read from the history file, so only once it's saved there.
+            let reads = saved.kind == .image && saved.recognizedText == nil ? recognition : nil
+            let isImage = saved.kind == .image
             Task {
-                try? await Task.sleep(for: .seconds(1))
-                await recognition.enqueue([saved.id], first: true)
+                try? await database.save(saved, payload: payload, thumbnail: thumbnail)
+                await reads?.enqueue([saved.id], first: true)
+                // A big image went through a few copies on its way in: give that memory back
+                // once the last of them (this save) is done.
+                if isImage { Memory.relieveSoon() }
             }
         }
         stack.copyRecorded(saved.id)
@@ -528,9 +536,8 @@ final class AppModel {
 
     private func startTextRecognition(_ database: ClipDatabase) {
         let queue = TextRecognitionQueue(
-            recognizer: HelperTextRecognizer(),
+            recognizer: HelperTextRecognizer(historyFile: database.fileURL),
             canRun: { !ProcessInfo.processInfo.isLowPowerModeEnabled },
-            load: { id in (try? await database.payload(for: id)).flatMap { $0.items.first.flatMap(ImageExport.image(in:))?.data } },
             deliver: { [weak self] id, text in
                 try? await database.setRecognizedText(text, for: id)
                 await self?.recognized(text, in: id)
@@ -587,6 +594,8 @@ final class AppModel {
     func undoDelete() -> [Clip] {
         guard let entry = undoStack.popLast(), let database else { return [] }
         history.restore(entry.clips)
+        lastRestored = entry.clips.map(\.id)
+        restoreCount &+= 1
         changed()
         let images = entry.clips.filter { $0.kind == .image && $0.recognizedText == nil }.map(\.id)
         Task {

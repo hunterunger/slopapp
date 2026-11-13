@@ -23,6 +23,8 @@ struct HistoryTable: NSViewRepresentable {
     let query: String
     let now: Date
     @Binding var selection: Set<UUID>
+    /// Bump to put the keyboard in the list (selecting the first clip if none is).
+    let focusRequest: Int
     let actions: Actions
     let boards: [Board]
 
@@ -65,6 +67,13 @@ struct HistoryTable: NSViewRepresentable {
         coordinator.boards = boards
         coordinator.setSelection = { selection = $0 }
         coordinator.sync(clips: clips, version: version, query: query, now: now, selection: selection)
+        if coordinator.focusRequest != focusRequest {
+            coordinator.focusRequest = focusRequest
+            if let table = coordinator.table {
+                table.window?.makeFirstResponder(table)
+                if selection.isEmpty, let first = clips.first { DispatchQueue.main.async { selection = [first.id] } }
+            }
+        }
     }
 
     @MainActor
@@ -72,6 +81,7 @@ struct HistoryTable: NSViewRepresentable {
         weak var table: NSTableView?
         var actions: Actions?
         var boards: [Board] = []
+        var focusRequest = 0
         var setSelection: ((Set<UUID>) -> Void)?
         private(set) var clips: [Clip] = []
         private var version = -1

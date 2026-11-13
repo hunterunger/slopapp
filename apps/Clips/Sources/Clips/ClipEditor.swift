@@ -190,8 +190,11 @@ private struct EditableTextView: NSViewRepresentable {
             view.textColor = .textColor
             view.string = session.plainText
         }
-        view.setSelectedRange(NSRange(location: 0, length: 0))
+        // The caret goes at the end: most edits add to a clip.
+        let end = NSRange(location: (view.string as NSString).length, length: 0)
+        view.setSelectedRange(end)
         session.textView = view
+        DispatchQueue.main.async { view.scrollRangeToVisible(end) }
         if focus {
             DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
         }

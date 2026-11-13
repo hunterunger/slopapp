@@ -119,6 +119,28 @@ public actor ClipDatabase {
         sqlite3_close(db)
     }
 
+    /// The image of an image clip, read straight from a history file, read-only and without
+    /// the actor (the text-recognition helper runs in its own process). Nil if it's not there.
+    public nonisolated static func imageData(inFile file: URL, clipID: UUID) -> Data? {
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(file.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            sqlite3_close(handle)
+            return nil
+        }
+        defer { sqlite3_close(handle) }
+        sqlite3_busy_timeout(handle, 2_000)
+        let types = PasteboardType.imageTypes.map { "'\($0)'" }.joined(separator: ",")
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, "SELECT data FROM reps WHERE clip_id = ? AND type IN (\(types)) ORDER BY item, idx LIMIT 1",
+                                 -1, &statement, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, clipID.uuidString, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let count = Int(sqlite3_column_bytes(statement, 0))
+        guard count > 0, let bytes = sqlite3_column_blob(statement, 0) else { return nil }
+        return Data(bytes: bytes, count: count)
+    }
+
     // MARK: - Reading
 
     /// Every clip's metadata, most recently used first.
