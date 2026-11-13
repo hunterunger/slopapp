@@ -16,6 +16,8 @@ struct HistoryWindow: View {
     @State private var selection = Set<UUID>()
     @State private var now = Date()
     @State private var focusSearch = 0
+    /// Bumped to put the keyboard in the clip list (↓ from the search).
+    @State private var focusList = 0
     /// Clips waiting for "Delete N clips?" confirmation (several, or pinned ones).
     @State private var pendingDeletion: [Clip] = []
     /// The clip being edited in the detail pane.
@@ -25,6 +27,10 @@ struct HistoryWindow: View {
     @State private var renameDraft = ""
     /// A board with clips, waiting for "Delete Board?".
     @State private var pendingBoardDelete: Board?
+    /// The board whose name is being typed in the sidebar (New Board, Rename).
+    @State private var namingBoard: UUID?
+    @State private var boardName = ""
+    @FocusState private var boardFieldFocused: Bool
 
     enum Renaming: Equatable {
         case board(UUID)
@@ -63,7 +69,8 @@ struct HistoryWindow: View {
                 .help(model.isPaused ? "Resume recording" : "Pause recording")
             }
             ToolbarItem {
-                SearchField(text: $query, prompt: "Search clips", focusRequest: focusSearch)
+                SearchField(text: $query, prompt: "Search clips", focusRequest: focusSearch,
+                            onMoveDown: { focusList &+= 1 })
                     .frame(width: 220)
             }
         }
@@ -79,6 +86,14 @@ struct HistoryWindow: View {
             pin: { board in model.pin(Set(selectedClips.map(\.id)), to: board) },
             edit: { if let clip = selectedClips.first { startEditing(clip) } },
             rename: { if let clip = selectedClips.first { beginRename(.clip(clip.id), name: clip.label ?? "") } },
+            selectedBoard: {
+                if case .filter(.board(let id)) = sidebar { return model.boards.board(id: id) }
+                return nil
+            }(),
+            newBoard: newBoard,
+            renameBoard: {
+                if case .filter(.board(let id)) = sidebar, let board = model.boards.board(id: id) { startNaming(board) }
+            },
             delete: { requestDelete(selectedClips) },
             find: { focusSearch &+= 1 }
         ))
@@ -124,6 +139,29 @@ struct HistoryWindow: View {
             Diagnostics.recordWhenIdle("history search settled results=\(results.count)", since: started)
         }
         .onChange(of: sidebar) { recompute() }
+        .onChange(of: boardFieldFocused) { _, focused in
+            if !focused, namingBoard != nil { commitBoardName() }
+        }
+        .onChange(of: model.boardToName, initial: true) { _, id in
+            guard let id, let board = model.boards.board(id: id) else { return }
+            model.boardToName = nil
+            sidebar = .filter(.board(id))
+            startNaming(board)
+        }
+        .onChange(of: model.restoreCount) {
+            // Undo: select what came back, as Finder does.
+            recompute()
+            let back = Set(model.lastRestored).intersection(results.map(\.id))
+            if !back.isEmpty { selection = back }
+        }
+        .task {
+            // "Just now" becomes "1 min ago" while the window stays open.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                let fresh = Date()
+                if Calendar.current.component(.minute, from: fresh) != Calendar.current.component(.minute, from: now) { now = fresh }
+            }
+        }
         .onChange(of: selection) { if let editor, !selection.contains(editor.clipID) { finishEditing(save: true) } }
         .background(WindowSharing(type: model.windowSharingType))
     }
@@ -155,20 +193,42 @@ struct HistoryWindow: View {
                     .badge(count(for: filter))
                     .tag(SidebarItem.filter(filter))
             }
-            Section("Boards") {
+            Section {
                 ForEach(model.boards.all) { board in
                     Label {
-                        Text(board.name)
+                        if namingBoard == board.id {
+                            TextField("Board name", text: $boardName)
+                                .focused($boardFieldFocused)
+                                .onSubmit { commitBoardName() }
+                                .onExitCommand { namingBoard = nil }
+                                .accessibilityLabel("Board name")
+                        } else {
+                            Text(board.name)
+                        }
                     } icon: {
                         Image(systemName: "circle.fill")
                             .foregroundStyle(board.color.color)
                             .imageScale(.small)
+                            .accessibilityHidden(true)
                     }
                     .badge(model.clipCount(onBoard: board.id))
                     .tag(SidebarItem.filter(.board(board.id)))
                     .contextMenu { boardMenu(board) }
+                    .accessibilityLabel("\(board.name), board")
                 }
                 .onMove { model.moveBoards(fromOffsets: $0, toOffset: $1) }
+            } header: {
+                HStack {
+                    Text("Boards")
+                    Spacer()
+                    Button(action: newBoard) {
+                        Image(systemName: "plus")
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("New Board")
+                    .help("New board (⇧⌘N). Drag boards to reorder them.")
+                }
             }
             let sources = sourceApps
             if !sources.isEmpty {
@@ -179,8 +239,9 @@ struct HistoryWindow: View {
                         } icon: {
                             if let icon = AppIcons.icon(for: source.id) {
                                 Image(nsImage: icon).resizable().frame(width: 16, height: 16)
+                                    .accessibilityHidden(true)
                             } else {
-                                Image(systemName: "app")
+                                Image(systemName: "app").accessibilityHidden(true)
                             }
                         }
                         .badge(source.count)
@@ -189,26 +250,10 @@ struct HistoryWindow: View {
                 }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack {
-                Button {
-                    let board = model.createBoard()
-                    sidebar = .filter(.board(board.id))
-                    beginRename(.board(board.id), name: board.name)
-                } label: {
-                    Label("New Board", systemImage: "plus")
-                }
-                .buttonStyle(.borderless)
-                .help("Make a board for clips you keep. Drag boards to reorder them.")
-                Spacer()
-            }
-            .padding(.horizontal, Spacing.m)
-            .padding(.vertical, Spacing.s)
-        }
     }
 
     @ViewBuilder private func boardMenu(_ board: Board) -> some View {
-        Button("Rename…") { beginRename(.board(board.id), name: board.name) }
+        Button("Rename") { startNaming(board) }
         Menu("Color") {
             ForEach(BoardColor.allCases) { color in
                 Toggle(isOn: Binding(get: { board.color == color }, set: { if $0 { model.setColor(color, ofBoard: board.id) } })) {
@@ -220,6 +265,24 @@ struct HistoryWindow: View {
         Button(model.clipCount(onBoard: board.id) > 0 ? "Delete Board…" : "Delete Board") {
             if model.clipCount(onBoard: board.id) > 0 { pendingBoardDelete = board } else { deleteBoard(board) }
         }
+    }
+
+    private func newBoard() {
+        let board = model.createBoard()
+        sidebar = .filter(.board(board.id))
+        startNaming(board)
+    }
+
+    /// Opens the board's name for typing, in its sidebar row.
+    private func startNaming(_ board: Board) {
+        boardName = board.name
+        namingBoard = board.id
+        DispatchQueue.main.async { boardFieldFocused = true }
+    }
+
+    private func commitBoardName() {
+        if let id = namingBoard { model.renameBoard(id, to: boardName) }
+        namingBoard = nil
     }
 
     private func deleteBoard(_ board: Board) {
@@ -246,7 +309,7 @@ struct HistoryWindow: View {
 
     private var clipList: some View {
         HistoryTable(
-            clips: results, version: resultsVersion, query: query, now: now, selection: $selection,
+            clips: results, version: resultsVersion, query: query, now: now, selection: $selection, focusRequest: focusList,
             actions: HistoryTable.Actions(
                 copy: { ids in selection = ids; copy(plain: false) },
                 copyPlain: { ids in selection = ids; copy(plain: true) },
@@ -273,6 +336,9 @@ struct HistoryWindow: View {
                 } else if model.history.clips.isEmpty {
                     ContentUnavailableView("No Clips Yet", systemImage: "doc.on.clipboard",
                                            description: Text("Copy text, links, images or files in any app and they show up here."))
+                } else if case .filter(.board(let id)) = sidebar {
+                    ContentUnavailableView("\(model.boards.board(id: id)?.name ?? "This Board") Is Empty", systemImage: "pin",
+                                           description: Text("Pin clips to it with Clip › Pin to, or their right-click menu. Clips on a board are never removed automatically."))
                 } else {
                     ContentUnavailableView("Nothing Here", systemImage: "tray",
                                            description: Text("No clips of this kind yet."))
@@ -303,22 +369,24 @@ struct HistoryWindow: View {
                 VStack(alignment: .leading, spacing: Spacing.s) {
                     ClipSourceLine(clip: clip, now: now)
                     HStack(spacing: Spacing.s) {
+                        // Natural widths, never truncated: the text found in an image is copied
+                        // from the row's right-click menu (Copy Text in Image).
                         if ClipEdit.canEditText(clip) {
                             Button("Edit") { startEditing(clip) }
                                 .help("Edit the text and title (⌘E)")
+                                .fixedSize()
                         } else {
                             Button(clip.label == nil ? "Add Title" : "Rename") { beginRename(.clip(clip.id), name: clip.label ?? "") }
                                 .help("Give the clip a title (⌘R)")
+                                .fixedSize()
                         }
-                        if let text = clip.imageText {
-                            Button("Copy Text") { model.copyText(text) }
-                                .help("Copy the text found in this image")
-                        }
-                        Spacer(minLength: 0)
                         pinMenu(clips)
+                        Spacer(minLength: 0)
                         Button("Delete") { requestDelete(clips) }
+                            .fixedSize()
                         Button("Copy") { copy(plain: false) }
                             .buttonStyle(.borderedProminent)
+                            .fixedSize()
                     }
                     .controlSize(.small)
                 }
@@ -346,7 +414,7 @@ struct HistoryWindow: View {
 
     /// "Pin ▾": Unpin, each board, New Board.
     private func pinMenu(_ clips: [Clip]) -> some View {
-        Menu(clips.allSatisfy(\.isPinned) ? "Pinned" : "Pin") {
+        Menu(pinTitle(clips)) {
             if clips.contains(where: \.isPinned) {
                 Button("Unpin") { model.pin(Set(clips.map(\.id)), to: nil) }
                 Divider()
@@ -360,11 +428,18 @@ struct HistoryWindow: View {
             Divider()
             Button("New Board…") {
                 let board = model.createBoard(with: Set(clips.map(\.id)))
-                beginRename(.board(board.id), name: board.name)
+                startNaming(board)
             }
         }
         .fixedSize()
         .help("Pin to a board. Pinned clips are never removed automatically.")
+    }
+
+    /// "Pin", or where they're pinned: "On Work" (one board), "Pinned" (several boards).
+    private func pinTitle(_ clips: [Clip]) -> String {
+        let boards = Set(clips.map(\.boardID))
+        if boards.count == 1, let id = boards.first ?? nil, let board = model.boards.board(id: id) { return "On \(board.name)" }
+        return clips.allSatisfy(\.isPinned) ? "Pinned" : "Pin"
     }
 
     // MARK: Editing and renaming
@@ -473,6 +548,8 @@ struct SearchField: NSViewRepresentable {
     let prompt: String
     /// Bump to move keyboard focus into the field.
     let focusRequest: Int
+    /// ↓ or Return in the field: go to the results.
+    var onMoveDown: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
 
@@ -491,6 +568,7 @@ struct SearchField: NSViewRepresentable {
 
     func updateNSView(_ field: NSSearchField, context: Context) {
         context.coordinator.text = $text
+        context.coordinator.onMoveDown = onMoveDown
         if field.stringValue != text { field.stringValue = text }
         if context.coordinator.focusRequest != focusRequest {
             context.coordinator.focusRequest = focusRequest
@@ -502,6 +580,7 @@ struct SearchField: NSViewRepresentable {
     final class Coordinator: NSObject, NSSearchFieldDelegate {
         var text: Binding<String>
         var focusRequest = 0
+        var onMoveDown: (() -> Void)?
 
         init(text: Binding<String>) {
             self.text = text
@@ -514,6 +593,13 @@ struct SearchField: NSViewRepresentable {
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSSearchField else { return }
             changed(field)
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard selector == #selector(NSResponder.moveDown(_:)) || selector == #selector(NSResponder.insertNewline(_:)),
+                  let onMoveDown else { return false }
+            onMoveDown()
+            return true
         }
     }
 }
@@ -532,6 +618,9 @@ struct HistoryActions {
     var pin: (UUID?) -> Void
     var edit: () -> Void
     var rename: () -> Void
+    var selectedBoard: Board?
+    var newBoard: () -> Void
+    var renameBoard: () -> Void
     var delete: () -> Void
     var find: () -> Void
 }
@@ -554,6 +643,38 @@ struct HistoryCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("Show Clips") { AppDelegate.panel?.showFromMenu() }
+            Button("New Board") {
+                if let actions {
+                    actions.newBoard()
+                } else {
+                    // From Settings: make it in History, where its name can be typed.
+                    model.boardToName = model.createBoard().id
+                    NSApp.activate()
+                    openWindow(id: HistoryWindow.id)
+                }
+            }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("Rename Board") { actions?.renameBoard() }
+                .disabled(actions?.selectedBoard == nil)
+            Divider()
+            if model.isPaused {
+                Button("Resume Recording") { model.resume() }
+            } else {
+                Menu("Pause Recording") {
+                    Button("For 15 Minutes") { model.pause(for: 15 * 60) }
+                    Button("For 1 Hour") { model.pause(for: 3_600) }
+                    Button("Until I Resume") { model.pause(for: nil) }
+                }
+            }
+            Button(model.stack.isActive ? "Stop Paste Stack" : "Start Paste Stack") {
+                if model.stack.isActive { model.stack.cancel() } else { model.stack.start() }
+            }
+            Divider()
+            Button("Clear History…") { ClearHistory.confirm(model: model) }
+                .disabled(model.history.clips.allSatisfy(\.isPinned))
+        }
         CommandGroup(before: .windowList) {
             Button("Clip History") {
                 NSApp.activate()
@@ -564,7 +685,8 @@ struct HistoryCommands: Commands {
         }
         HelpCommands(info: info) {
             Button("Clips Help") {
-                NSWorkspace.shared.open(Brand.repoURL.appending(path: "tree/main/apps/Clips"))
+                NSApp.activate()
+                openWindow(id: HelpWindow.id)
             }
         }
         // Undo prefers bringing back deleted clips; otherwise it's the usual text undo.

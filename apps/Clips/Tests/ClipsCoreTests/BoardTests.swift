@@ -292,6 +292,9 @@ private func tempDirectory() -> URL {
         #expect(ClipSearch.run([loaded], query: "4471").count == 1)
         #expect(ClipSearch.run([loaded], query: "image").count == 1)
         #expect(ClipSearch.run([clip], query: "4471").isEmpty)
+        // The helper reads the image straight from the file, read-only.
+        #expect(ClipDatabase.imageData(inFile: db.fileURL, clipID: clip.id) == png)
+        #expect(ClipDatabase.imageData(inFile: db.fileURL, clipID: UUID()) == nil)
         // A later metadata save doesn't lose it.
         try await db.update(loaded)
         #expect(try await db.loadAll().first?.recognizedText == "Invoice 4471\nTotal due")

@@ -70,12 +70,17 @@ private let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
     }
 }
 
-/// A recognizer that "reads" the image bytes as text, and records what it saw.
+/// A recognizer that "reads" each clip's made-up image (a word), and records what it saw.
 private actor FakeRecognizer: TextRecognizer {
     private(set) var seen: [String] = []
+    let images: [UUID: String]
 
-    func recognizeText(in imageData: Data) async throws -> [String] {
-        let text = String(decoding: imageData, as: UTF8.self)
+    init(images: [UUID: String]) {
+        self.images = images
+    }
+
+    func recognizeText(inClip id: UUID) async throws -> [String]? {
+        guard let text = images[id] else { return nil }
         seen.append(text)
         if text == "broken" { throw CocoaError(.fileReadCorruptFile) }
         return text == "blank" ? [] : ["  " + text + "  ", "", "line two"]
@@ -99,12 +104,10 @@ private actor Results {
     }
 
     @Test func worksThroughImagesOneAtATimeNewestFirst() async {
-        let recognizer = FakeRecognizer()
         let results = Results()
         let ids = (0..<4).map { _ in UUID() }
-        let images: [UUID: String] = [ids[0]: "zero", ids[1]: "one", ids[2]: "broken", ids[3]: "blank"]
+        let recognizer = FakeRecognizer(images: [ids[0]: "zero", ids[1]: "one", ids[2]: "broken", ids[3]: "blank"])
         let queue = TextRecognitionQueue(recognizer: recognizer, pause: .zero,
-                                         load: { images[$0].map { Data($0.utf8) } },
                                          deliver: { await results.add($0, $1) })
         await queue.enqueue([ids[1], ids[2], ids[3]])
         await queue.enqueue([ids[0]], first: true)
@@ -121,11 +124,10 @@ private actor Results {
     }
 
     @Test func deletedImagesAreSkipped() async {
-        let recognizer = FakeRecognizer()
         let results = Results()
         let keep = UUID(), gone = UUID(), missing = UUID()
+        let recognizer = FakeRecognizer(images: [keep: "img", gone: "img"])
         let queue = TextRecognitionQueue(recognizer: recognizer, pause: .milliseconds(20),
-                                         load: { $0 == missing ? nil : Data("img".utf8) },
                                          deliver: { await results.add($0, $1) })
         await queue.enqueue([keep, gone, missing])
         await queue.cancel([gone])

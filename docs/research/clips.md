@@ -641,6 +641,59 @@ controls.
 **Shipped as beta 0.2.0** (`app.json`).
 
 
+### Round 3 (2026-11-12, on the organize-and-reuse build)
+
+A fresh tester; no blocker or major findings. Triage per `docs/dev-cycle.md` step 5.
+
+| # | Finding | Severity | Decision | What changed |
+|---|---|---|---|---|
+| F1 | Menu bar › Show Clips sometimes did nothing (strip stayed parked); once vanished | minor | **Accept** | The menu item now waits for the menu to close (0.15 s) before showing, and takes key back once if something grabbed it. A loss of key in the first 0.4 s after showing no longer dismisses the strip (it re-takes key); later losses still close it, as clicking away should. |
+| F2 | "Just now" in History never updates while it stays open | minor | **Accept** | History refreshes its clock every 30 s while open, but redraws only when the minute changes. |
+| F3 | History › Edit puts the caret at the start | minor | **Accept** | The editor (History and the strip's preview) puts the caret at the end and scrolls to it. |
+| F4 | Help › Clips Help does nothing visible | minor | **Accept** | Clips Help opens an in-app help window (each feature in a paragraph, every key in the strip, "More Help on the Web"); also in the strip's ⋯ menu. |
+| F5 | ↓ in the History search doesn't move into the results | minor | **Accept** | ↓ (or Return) in the search puts the keyboard in the list and selects the first clip if none is. |
+| F6 | New Board gives no name prompt; rename only in the right-click menu; no main-menu board commands | minor | **Accept** | The name is typed in the board's own sidebar row, selected and focused (Return keeps it, Esc leaves it, clicking away keeps it); + moved into the Boards header. New main-menu File group: Show Clips, New Board (⇧⌘N), Rename Board, Pause/Resume Recording, Start/Stop Paste Stack, Clear History…. An empty board says "Work Is Empty" and how to fill it. |
+| F7 | After undoing a delete in History, the restored clip isn't selected | nit | **Accept** | Undo selects the clips it brought back. |
+| F8 | Detail's pin button says "Pinned" for a custom board | nit | **Accept** | It names the board ("On Work"), "Pinned" only for clips on several boards. |
+| F9 | Tab in the strip never reaches the type filters | nit | **Reject** | Tab switches the keyboard between search and cards by design; tabs are ⌘← / ⌘→, shown in every tab's help tag, the README and the new help window. Adding the filters to the Tab loop would make Tab-then-Space (preview while searching) take more presses. |
+| F10 | Search highlights text cards but not link cards | nit | **Accept** | Link titles and addresses, and file names, highlight matches the same way (dark ink on the find highlight, kept through appearance changes). |
+| — | Expected: main-menu home for Show Clips / Pause / Clear History | — | **Accept** | The File group above. |
+| — | History sidebar app icons have no AX label | — | **Accept** | Sidebar app and board-dot icons are hidden from Accessibility (the row's name labels it); `drive tree`: 0 unlabeled. |
+| — | Source labels, a stack advancing once, ⌘⌫ when not key | — | Not app bugs (tester agreed) | — |
+
+Found while fixing (not from the tester):
+
+- **`perf.sh --direct` ran against the real history.** The script's direct mode doesn't
+  isolate data, and its first run here used the owner's real settings and history for
+  about 45 s: it migrated `history.sqlite` to schema 4 (adding an empty Pinned board;
+  277 clips intact, none were pinned), recognized the text of the one image in it
+  (stored with it), watched the real clipboard and registered ⇧⌥V. Nothing left the Mac
+  and no content was looked at (counts only). The installed older build reads schema 4.
+  Fix: a second Clips started beside a running one (and `SLOPAPP_SMOKE_TEST=1`) now takes
+  a temporary history, a private pasteboard and no shortcut; verified with `lsof` that a
+  bare direct copy opens `$TMPDIR/clips-smoke-<pid>/history.sqlite`. Two copies on one
+  history would record every copy twice for real users too.
+- **Text recognition held big images in Clips.** A 42 MB screenshot took Clips from 38 to
+  370 MB. The helper now reads the image straight from the history file (read-only, by
+  clip id) and is asked only after the save commits, so Clips never holds the image for it:
+  same image, 204 MB. The remaining rise is **capture's own** (pre-existing: the previous
+  release, run from a copy with test data, went 33.5 → 202.3 MB on the same image; freed
+  large blocks the allocator keeps, which `malloc_zone_pressure_relief` doesn't return).
+  **Deferred**: needs capture to stream big images to disk or into the helper.
+- History detail buttons truncated ("Add T…", "Copy…") at the default width: buttons keep
+  their natural width now, and Copy Text in Image lives in the row's right-click menu.
+
+Gates: unit tests 167 pass (the recognition queue tests now fake the helper by clip id; a
+read-only image read test was added to the database suite). `scripts/check.sh Clips`: pass. `scripts/perf.sh Clips
+--direct` (isolated as above, busy machine, load 9.8): launch 95 ms, first status item 270 ms,
+idle CPU 0.014 %, footprint 31.1 MB: pass. Shots
+(`/tmp/clips-test/shots/`, not committed): `strip-multi-light.png` (board tabs, +, three
+selected cards, the selection notice), `search-link-dark.png` (F10), `history-newboard-dark.png`
+(F6 name field; it showed the footer overlap fixed since), `history-down-light.png` (F5, F2 ages,
+Boards header +), `help-light.png` (F4). Keyboard checks (F5) ran only while the owner was away;
+F3's caret, F1 and F7 were verified in code and builds only, because the owner came back
+mid-check and keyboard driving stopped.
+
 ## Parity pass (2026-11-03)
 
 Owner's request: "Redesign Clips to look more like Paste. It should also have the sound

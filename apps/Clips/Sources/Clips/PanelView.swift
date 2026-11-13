@@ -639,6 +639,10 @@ struct PanelMenu: NSViewRepresentable {
             actions.dismiss()
             ClearHistory.confirm(model: model)
         })
+        menu.addItem(ClosureMenuItem("Clips Help") {
+            actions.dismiss()
+            HelpOpener.open()
+        })
         return menu
     }
 }

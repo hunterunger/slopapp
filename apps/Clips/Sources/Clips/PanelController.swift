@@ -16,6 +16,8 @@ final class PanelController {
     private var monitors: [Any] = []
     /// Where the strip is while showing (its frame may still be sliding into place).
     private var shownFrame: CGRect = .zero
+    /// When the strip last appeared (see panelDidResignKey).
+    private var shownAt: TimeInterval = 0
 
     init(model: AppModel) {
         self.model = model
@@ -107,6 +109,16 @@ final class PanelController {
 
     private func panelDidResignKey() {
         guard isShowing else { return }
+        // Losing key right as it appears (a closing menu, an app settling its windows) isn't
+        // the person clicking away: keep it up and take key back.
+        if Diagnostics.now() - shownAt < 0.4 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                guard let self, self.isShowing, let panel = self.panel, !panel.isKeyWindow,
+                      NSApp.keyWindow == nil || NSApp.keyWindow === self.quickLook else { return }
+                panel.makeKey()
+            }
+            return
+        }
         // Let AppKit settle who's key now (a click on the preview, an open menu…).
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isShowing, let panel = self.panel, !panel.isKeyWindow else { return }
@@ -258,6 +270,22 @@ final class PanelController {
         if isShowing { dismiss() } else { show(trigger: trigger) }
     }
 
+    /// From a menu (the menu bar icon's Show Clips, File › Show Clips): waits until the menu has
+    /// closed and AppKit has settled who's key. Shown while the menu is still going away, the
+    /// strip could lose key at once and park itself again.
+    func showFromMenu() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self else { return }
+            self.show()
+            // If something still took key from it in that moment, take it back once.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                guard let self, self.isShowing, let panel = self.panel, !panel.isKeyWindow,
+                      self.quickLook?.isKeyWindow != true else { return }
+                panel.makeKey()
+            }
+        }
+    }
+
     /// `takesKeyboard: false` is for test hooks only: the strip shows without becoming key,
     /// so a person typing elsewhere is never interrupted by a scripted screenshot.
     func show(trigger: TimeInterval = Diagnostics.now(), takesKeyboard: Bool = true) {
@@ -281,6 +309,7 @@ final class PanelController {
         if !panel.isVisible { panel.orderFrontRegardless() }
         panel.ignoresMouseEvents = false
         isShowing = true
+        shownAt = Diagnostics.now()
         startMonitors()
         if takesKeyboard { panel.makeKey() }
         if slides {

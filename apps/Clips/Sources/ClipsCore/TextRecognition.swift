@@ -1,9 +1,10 @@
 import Foundation
 
-/// Finds the text in an image. The app uses Vision (on device); tests use a fake.
+/// Finds the text in an image clip. The app uses Vision (on device, in a helper process that
+/// reads the image from the history file itself); tests use a fake.
 public protocol TextRecognizer: Sendable {
-    /// The lines of text in the image, top to bottom.
-    func recognizeText(in imageData: Data) async throws -> [String]
+    /// The lines of text in the clip's image, top to bottom, or nil if the clip is gone.
+    func recognizeText(inClip id: UUID) async throws -> [String]?
 }
 
 public enum RecognizedText {
@@ -19,13 +20,11 @@ public enum RecognizedText {
 /// before this feature, or left when Clips quit) are worked through after them, with a pause
 /// between each so it never hogs the Mac.
 public actor TextRecognitionQueue {
-    public typealias Loader = @Sendable (UUID) async -> Data?
     /// Gets the result: the found text, or "" when there was none (or the image couldn't be read).
     public typealias Sink = @Sendable (UUID, String) async -> Void
     public typealias Gate = @Sendable () -> Bool
 
     private let recognizer: any TextRecognizer
-    private let load: Loader
     private let deliver: Sink
     private let pause: Duration
     /// While this says false (Low Power Mode), the queue waits.
@@ -36,11 +35,10 @@ public actor TextRecognitionQueue {
     private var idleWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(recognizer: any TextRecognizer, pause: Duration = .milliseconds(400), canRun: @escaping Gate = { true },
-                load: @escaping Loader, deliver: @escaping Sink) {
+                deliver: @escaping Sink) {
         self.recognizer = recognizer
         self.pause = pause
         self.canRun = canRun
-        self.load = load
         self.deliver = deliver
     }
 
@@ -77,18 +75,18 @@ public actor TextRecognitionQueue {
                 try? await Task.sleep(for: .seconds(30))
             }
             let id = pending.removeFirst()
-            guard let data = await load(id) else {
-                queued.remove(id)
-                continue
-            }
-            // Deleted while loading?
-            guard queued.contains(id) else { continue }
             let text: String
             do {
-                text = RecognizedText.join(try await recognizer.recognizeText(in: data))
+                guard let lines = try await recognizer.recognizeText(inClip: id) else {
+                    // The clip is gone.
+                    queued.remove(id)
+                    continue
+                }
+                text = RecognizedText.join(lines)
             } catch {
                 text = ""
             }
+            // Deleted while it was being read?
             if queued.remove(id) != nil { await deliver(id, text) }
             if !pending.isEmpty { try? await Task.sleep(for: pause) }
         }

@@ -184,6 +184,7 @@ final class ClipCardView: NSView, NSDraggingSource {
         self.index = index
         self.query = query
         isSelected = selected
+        highlighted.removeAll()
         // A title the user gave the clip takes the kind's place.
         kindLabel.stringValue = ClipText.headerTitle(of: clip)
         let age = ClipText.ageSentence(of: clip.lastUsed, now: now)
@@ -222,8 +223,8 @@ final class ClipCardView: NSView, NSDraggingSource {
             tile.isHidden = false
             titleLabel.isHidden = false
             subtitleLabel.isHidden = false
-            titleLabel.stringValue = clip.title ?? host
-            subtitleLabel.stringValue = ClipText.shortURL(clip.text)
+            setHighlighted(titleLabel, clip.title ?? host, font: Self.titleFont)
+            setHighlighted(subtitleLabel, ClipText.shortURL(clip.text), font: Self.subtitleFont)
         case .color:
             let hex = clip.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if let value = ColorValue(hex: hex) {
@@ -250,7 +251,7 @@ final class ClipCardView: NSView, NSDraggingSource {
             titleLabel.isHidden = false
             subtitleLabel.isHidden = false
             fileIcon.image = paths.first.map(AppIcons.icon(forFile:)) ?? NSImage(systemSymbolName: "doc", accessibilityDescription: nil)
-            titleLabel.stringValue = ClipText.title(of: clip)
+            setHighlighted(titleLabel, ClipText.title(of: clip), font: Self.titleFont)
             if let first = paths.first, paths.count == 1, !FileManager.default.fileExists(atPath: first) {
                 subtitleLabel.stringValue = "Not found"
             } else {
@@ -284,6 +285,33 @@ final class ClipCardView: NSView, NSDraggingSource {
 
     func setShowsNumber(_ shows: Bool) {
         numberBadge.isHidden = !(shows && !numberLabel.stringValue.isEmpty)
+    }
+
+    private static let titleFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
+    private static let subtitleFont = NSFont.systemFont(ofSize: 11)
+
+    /// A one-line label with the search's matches marked, as the text cards do. Its colour is
+    /// set later (applyColors), so plain text keeps the label's own colour.
+    private func setHighlighted(_ label: NSTextField, _ text: String, font: NSFont) {
+        let ranges = SearchText.highlights(in: text, query: query)
+        highlighted[ObjectIdentifier(label)] = ranges.isEmpty ? nil : (text, font, ranges)
+        if ranges.isEmpty { label.stringValue = text }
+    }
+
+    /// Labels showing search matches: their text, font and the matched ranges.
+    private var highlighted: [ObjectIdentifier: (String, NSFont, [NSRange])] = [:]
+
+    /// Sets a label's colour, keeping its matches dark on the find highlight.
+    private func setColor(_ color: NSColor, of label: NSTextField) {
+        guard let (text, font, ranges) = highlighted[ObjectIdentifier(label)] else {
+            label.textColor = color
+            return
+        }
+        let attributed = NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
+        for range in ranges where NSMaxRange(range) <= attributed.length {
+            attributed.addAttributes([.backgroundColor: NSColor.findHighlightColor, .foregroundColor: NSColor.black], range: range)
+        }
+        label.attributedStringValue = attributed
     }
 
     /// The text body: the start of the clip, or the words around a match that's further in,
@@ -515,8 +543,8 @@ final class ClipCardView: NSView, NSDraggingSource {
         kindLabel.textColor = headerInk == .light ? ink : ink.withAlphaComponent(0.85)
         ageLabel.textColor = headerInk == .light ? ink : ink.withAlphaComponent(HeaderColor.darkSecondaryOpacity)
         pin.contentTintColor = kindLabel.textColor
-        titleLabel.textColor = plain(.primary)
-        subtitleLabel.textColor = plain(subtitleLabel.stringValue == "Not found" ? .warning : .secondary)
+        setColor(plain(.primary), of: titleLabel)
+        setColor(plain(subtitleLabel.stringValue == "Not found" ? .warning : .secondary), of: subtitleLabel)
         footerLabel.textColor = plain(.secondary)
         chipLabel.textColor = .white
         numberLabel.textColor = .white

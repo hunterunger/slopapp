@@ -58,6 +58,9 @@ quiet when macOS sound effects are off.
   off by default). Formatting is kept; spaces inside the text are left alone.
 - **Pause** recording (⌘T, or for 15 minutes or an hour from the menu), or skip just the
   next copy.
+- **Help › Clips Help** explains each feature and lists every key. While the History window
+  or Settings is open, the File menu has Show Clips, New Board, Pause Recording, the paste
+  stack and Clear History….
 
 ## Keyboard (in the panel)
 

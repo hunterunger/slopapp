@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import os
 import QuartzCore
@@ -29,13 +30,21 @@ import QuartzCore
 ///   someone's real Clips without taking ⇧⌥V from it.
 /// - `SLOPAPP_SMOKE_TEST=1` (scripts/smoke.sh): a throwaway history folder, a private
 ///   pasteboard and no shortcut, so a launch test never opens, migrates or adds to your history.
+///   A second Clips started directly beside a running one (`perf.sh --direct`, a binary run by
+///   hand) does the same: two copies would record every copy twice and fight over ⇧⌥V.
 /// - `CLIPS_ALLOW_CAPTURE=1`: let screenshots see the panel even when "Hide from screen
 ///   sharing" is on (scripted tests and blind testers need screenshots).
 enum Diagnostics {
     static let logger = Logger(subsystem: "app.slopapp.clips", category: "clips")
 
     private static let environment = ProcessInfo.processInfo.environment
-    static let isSmokeTest = environment["SLOPAPP_SMOKE_TEST"] == "1"
+    /// A launch test, or a second copy beside a running Clips (not a test copy with its own data).
+    static let isSmokeTest = environment["SLOPAPP_SMOKE_TEST"] == "1" || isSecondCopy
+    static let isSecondCopy: Bool = {
+        guard environment["CLIPS_DATA_DIR"] == nil, let id = Bundle.main.bundleIdentifier else { return false }
+        let me = ProcessInfo.processInfo.processIdentifier
+        return NSRunningApplication.runningApplications(withBundleIdentifier: id).contains { $0.processIdentifier != me }
+    }()
     static let dataDirectory = environment["CLIPS_DATA_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
         ?? (isSmokeTest ? FileManager.default.temporaryDirectory.appendingPathComponent("clips-smoke-\(ProcessInfo.processInfo.processIdentifier)") : nil)
     static let pasteboardName = environment["CLIPS_PASTEBOARD"].flatMap { $0.isEmpty ? nil : $0 }

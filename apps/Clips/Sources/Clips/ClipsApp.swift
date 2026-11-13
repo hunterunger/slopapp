@@ -47,6 +47,12 @@ struct ClipsApp: App {
         .windowToolbarStyle(.unified)
         .commands { HistoryCommands(model: model, info: info) }
 
+        Window("Clips Help", id: HelpWindow.id) {
+            HelpWindow()
+        }
+        .defaultSize(width: 480, height: 620)
+        .windowResizability(.contentSize)
+
         Settings {
             SettingsView(model: model, info: info)
         }
@@ -67,6 +73,7 @@ struct MenuBarLabel: View {
             .onAppear {
                 SettingsOpener.action = { openSettings() }
                 HistoryOpener.action = { openWindow(id: HistoryWindow.id) }
+                HelpOpener.action = { openWindow(id: HelpWindow.id) }
             }
     }
 }
@@ -161,7 +168,7 @@ struct ClipsMenu: View {
     }
 
     @ViewBuilder private var showClipsButton: some View {
-        let button = Button("Show Clips") { AppDelegate.panel?.show() }
+        let button = Button("Show Clips") { AppDelegate.panel?.showFromMenu() }
         if let shortcut = KeyboardShortcuts.getShortcut(for: .showClips), let key = shortcut.menuKey {
             button.keyboardShortcut(key, modifiers: shortcut.eventModifiers)
         } else {
@@ -237,6 +244,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         if Diagnostics.testHooks { installTestHooks(panel) }
+        if Diagnostics.isSecondCopy {
+            Diagnostics.logger.notice("Another Clips is running: this copy keeps a separate, temporary history and doesn't take the shortcut.")
+        }
         // Render the chosen sounds (first launch of a version only) and create their IDs in
         // the background now, so the first copy plays without a delay.
         model.soundPlayer.prepare(model.soundChoice)
@@ -330,6 +340,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Without activating Clips: the window can't take anyone's typing.
                 case "history-passive": HistoryOpener.open(activate: false)
                 case "settings-passive": SettingsOpener.open(activate: false)
+                case "help-passive": HelpOpener.action?()
+                case "history-new-board": AppModel.shared.boardToName = AppModel.shared.createBoard().id
                 case "backdrop": panel.testSetBackdrop(true)
                 case "nobackdrop": panel.testSetBackdrop(false)
                 default: break

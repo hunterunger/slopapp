@@ -32,54 +32,59 @@ enum VisionText {
     }
 }
 
-/// The helper's side: images in on stdin (an 8-byte little-endian length, then the bytes),
-/// one JSON line out per image (the lines found, or null). Ends when stdin closes.
+/// What the helper answers for one image.
+struct TextHelperReply: Codable {
+    /// The lines found; nil when the image couldn't be read.
+    var lines: [String]?
+    /// The clip (or its image) isn't in the history file any more.
+    var missing = false
+}
+
+/// The helper's side: one request per line on stdin, "<history file path>\t<clip id>"; one
+/// JSON reply per line on stdout. It reads the image from the history file itself (read-only),
+/// so Clips never holds the image for this. Ends when stdin closes.
 enum TextHelper {
     static let argument = "--recognize-text"
 
     static func run() -> Never {
-        let input = FileHandle.standardInput
+        let reader = LineReader(FileHandle.standardInput)
         let output = FileHandle.standardOutput
-        while true {
-            guard let header = read(input, count: 8) else { exit(0) }
-            let length = header.withUnsafeBytes { $0.loadUnaligned(as: UInt64.self) }.littleEndian
-            guard length > 0, length < 200_000_000, let image = read(input, count: Int(length)) else { exit(1) }
-            let lines = try? VisionText.recognize(image)
-            var reply = (try? JSONEncoder().encode(lines)) ?? Data("null".utf8)
-            reply.append(0x0A)
-            output.write(reply)
+        while let line = reader.nextLine() {
+            let parts = String(decoding: line, as: UTF8.self).split(separator: "\t", maxSplits: 1).map(String.init)
+            var reply = TextHelperReply(lines: nil, missing: true)
+            if parts.count == 2, let id = UUID(uuidString: parts[1]),
+               let image = ClipDatabase.imageData(inFile: URL(fileURLWithPath: parts[0]), clipID: id) {
+                reply = TextHelperReply(lines: try? VisionText.recognize(image), missing: false)
+            }
+            var data = (try? JSONEncoder().encode(reply)) ?? Data("{}".utf8)
+            data.append(0x0A)
+            output.write(data)
         }
-    }
-
-    private static func read(_ handle: FileHandle, count: Int) -> Data? {
-        var data = Data()
-        data.reserveCapacity(count)
-        while data.count < count {
-            guard let chunk = try? handle.read(upToCount: count - data.count), !chunk.isEmpty else { return nil }
-            data.append(chunk)
-        }
-        return data
+        exit(0)
     }
 }
 
-/// Clips' side: hands images to the helper one at a time, starting it when needed and
+/// Clips' side: asks the helper about one clip at a time, starting it when needed and
 /// quitting it after a few idle seconds.
 actor HelperTextRecognizer: TextRecognizer {
     static let idleQuit: Duration = .seconds(10)
 
+    private let historyFile: URL
     private var process: Process?
     private var toHelper: FileHandle?
     private var fromHelper: LineReader?
     private var idleTask: Task<Void, Never>?
 
-    func recognizeText(in imageData: Data) async throws -> [String] {
+    init(historyFile: URL) {
+        self.historyFile = historyFile
+    }
+
+    func recognizeText(inClip id: UUID) async throws -> [String]? {
         idleTask?.cancel()
         let (input, reader) = try running()
+        let request = Data("\(historyFile.path)\t\(id.uuidString)\n".utf8)
         let reply: Data? = await Task.detached(priority: .utility) {
-            var length = UInt64(imageData.count).littleEndian
-            var frame = Data(bytes: &length, count: 8)
-            frame.append(imageData)
-            do { try input.write(contentsOf: frame) } catch { return nil }
+            do { try input.write(contentsOf: request) } catch { return nil }
             return reader.nextLine()
         }.value
         scheduleIdleQuit()
@@ -87,13 +92,13 @@ actor HelperTextRecognizer: TextRecognizer {
             stop()
             throw VisionText.Failure.helperFailed
         }
-        // null (the helper couldn't read the image) and bad JSON both come out as nil.
-        guard let lines = try? JSONDecoder().decode([String]?.self, from: reply) else {
-            throw VisionText.Failure.unreadableImage
+        guard let decoded = try? JSONDecoder().decode(TextHelperReply.self, from: reply) else {
+            throw VisionText.Failure.helperFailed
         }
+        if decoded.missing { return nil }
+        guard let lines = decoded.lines else { throw VisionText.Failure.unreadableImage }
         return lines
     }
-
     private func running() throws -> (FileHandle, LineReader) {
         if let process, process.isRunning, let toHelper, let fromHelper { return (toHelper, fromHelper) }
         stop()
