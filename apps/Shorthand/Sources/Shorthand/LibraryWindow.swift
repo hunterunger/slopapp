@@ -108,11 +108,11 @@ struct LibraryWindow: View {
                     ContentUnavailableView {
                         Label("No Snippets Yet", systemImage: "character.cursor.ibeam")
                     } description: {
-                        Text("Make one, or bring in the text replacements you already have.")
+                        Text("Make one, or bring in your Text Replacements or another expander's snippets.")
                     } actions: {
                         Button("New Snippet") { newSnippet() }
                             .buttonStyle(.borderedProminent)
-                        Button("Import Text Replacements…") { showsImport = true }
+                        Button("Import Snippets…") { showsImport = true }
                     }
                 } else if visible.isEmpty && !query.isEmpty {
                     ContentUnavailableView.search(text: query)
@@ -123,10 +123,11 @@ struct LibraryWindow: View {
                         Button("New Snippet") { newSnippet() }
                     }
                 } else {
+                    let lookup = model.library.lookup
                     List(selection: $selection) {
                         ForEach(visible) { snippet in
                             SnippetRow(snippet: snippet, enabled: model.library.group(snippet.groupID)?.isEnabled ?? true,
-                                       duplicate: isDuplicate(snippet))
+                                       duplicate: isDuplicate(snippet), hasFields: FillIn.hasFields(snippet, lookup: lookup))
                                 .tag(snippet.id)
                                 .draggable(snippet.id.uuidString)
                                 .contextMenu { rowMenu(snippet) }
@@ -175,7 +176,6 @@ struct LibraryWindow: View {
             newSnippet: { newSnippet() },
             newGroup: { newGroup() },
             importReplacements: { showsImport = true },
-            importSnippets: { importSnippets() },
             exportSnippets: { exportSnippets() },
             duplicate: duplicateAction,
             delete: deleteAction,
@@ -225,21 +225,15 @@ struct LibraryWindow: View {
         switch request {
         case .newSnippet: newSnippet()
         case .importReplacements: showsImport = true
+        case .importFile(let url):
+            ImportSheet.pendingFile = url
+            showsImport = true
+        case .select(let abbreviation):
+            guard let snippet = model.library.snippet(abbreviation: abbreviation) else { return }
+            query = ""
+            sidebar = .all
+            selection = [snippet.id]
         }
-    }
-
-    private func importSnippets() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.message = "Choose a file exported from Shorthand."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let data = try? Data(contentsOf: url), let imported = try? SnippetStore.decode(data) else {
-            HUD.show("That file isn't a Shorthand export.", systemImage: "exclamationmark.triangle")
-            return
-        }
-        var added = 0
-        model.edit { added = LibraryExport.merge(imported, into: &$0) }
-        HUD.show(added == 1 ? "Imported 1 snippet" : "Imported \(added) snippets", systemImage: "square.and.arrow.down")
     }
 
     private func exportSnippets() {
@@ -261,6 +255,7 @@ struct SnippetRow: View {
     let snippet: Snippet
     let enabled: Bool
     let duplicate: Bool
+    var hasFields = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
@@ -276,6 +271,18 @@ struct SnippetRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
+            if snippet.isFormatted {
+                Image(systemName: "textformat")
+                    .foregroundStyle(.secondary)
+                    .help("Formatted text")
+                    .accessibilityLabel("Formatted")
+            }
+            if hasFields {
+                Image(systemName: "rectangle.and.pencil.and.ellipsis")
+                    .foregroundStyle(.secondary)
+                    .help("Asks for fill-ins")
+                    .accessibilityLabel("Asks for fill-ins")
+            }
             if duplicate {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
@@ -472,7 +479,6 @@ struct LibraryActions {
     var newSnippet: () -> Void
     var newGroup: () -> Void
     var importReplacements: () -> Void
-    var importSnippets: () -> Void
     var exportSnippets: () -> Void
     var duplicate: (() -> Void)?
     var delete: (() -> Void)?
@@ -515,11 +521,16 @@ struct LibraryCommands: Commands {
             Button("New Group") { withLibrary { $0.newGroup() } }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
             Divider()
-            Button("Import Text Replacements…") { withLibrary { $0.importReplacements() } }
-            Button("Import Snippets…") { withLibrary { $0.importSnippets() } }
+            Button("Import Snippets…") { withLibrary { $0.importReplacements() } }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
             Button("Export Snippets…") { actions?.exportSnippets() }
                 .disabled(actions == nil)
         }
+        CommandGroup(after: .newItem) {
+            Divider()
+            Button("Insert a Snippet…") { model.toggleSearch() }
+        }
+        TextFormattingCommands()
         CommandGroup(after: .pasteboard) {
             Divider()
             Button("Duplicate") { actions?.duplicate?() }
@@ -535,7 +546,7 @@ struct LibraryCommands: Commands {
                 .disabled(actions == nil)
         }
         CommandMenu("Snippet") {
-            PlaceholderMenu { insertPlaceholder?($0) }
+            PlaceholderMenu(snippets: model.library.snippets) { insertPlaceholder?($0) }
                 .disabled(insertPlaceholder == nil)
             Divider()
             Button(actions?.selectedGroup?.isEnabled == false ? "Turn On Group" : "Turn Off Group") { actions?.toggleGroup() }
@@ -555,6 +566,8 @@ struct LibraryCommands: Commands {
 
 /// The "Insert Placeholder" menu: in the editor and the Snippet menu.
 struct PlaceholderMenu: View {
+    /// Snippets that can be included (with an abbreviation).
+    var snippets: [Snippet] = []
     let insert: (Placeholder) -> Void
 
     var body: some View {
@@ -566,7 +579,7 @@ struct PlaceholderMenu: View {
                 Divider()
                 Button("Tomorrow") { insert(.date(DateSpec(kind: .date, offset: DateOffset(amount: 1, unit: .day)))) }
                 Button("In a Week") { insert(.date(DateSpec(kind: .date, offset: DateOffset(amount: 1, unit: .week)))) }
-                Button("Custom Format…") { insert(.date(DateSpec(kind: .date, format: "EEEE d MMMM"))) }
+                Button("Custom Format") { insert(.date(DateSpec(kind: .date, format: "EEEE d MMMM"))) }
             }
             Menu("Time") {
                 ForEach([DateSpec.Style.short, .medium, .iso], id: \.self) { style in
@@ -577,6 +590,20 @@ struct PlaceholderMenu: View {
             Divider()
             Button("Clipboard") { insert(.clipboard) }
             Button("Cursor Position") { insert(.cursor) }
+            Divider()
+            Button("Fill-In Field") { insert(.field(name: "Name", defaultValue: "")) }
+            Button("Choice") { insert(.choice(name: "Choice", options: ["First", "Second"])) }
+            Button("Optional Section") { insert(.optionalStart(name: "Section", defaultOn: true)) }
+            Menu("Another Snippet") {
+                let named = snippets.filter { !$0.abbreviation.isEmpty }
+                if named.isEmpty {
+                    Text("No other snippets with an abbreviation")
+                } else {
+                    ForEach(named) { snippet in
+                        Button("\(snippet.title) (\(snippet.abbreviation))") { insert(.snippet(abbreviation: snippet.abbreviation)) }
+                    }
+                }
+            }
         }
     }
 

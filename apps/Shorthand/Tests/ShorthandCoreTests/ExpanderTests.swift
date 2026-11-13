@@ -6,13 +6,18 @@ import Testing
 @MainActor
 final class RecordingPoster: KeyPosting {
     enum Event: Equatable {
-        case backspace(Int), left(Int), type(String), paste(String, restore: Bool)
+        case backspace(Int), left(Int), type(String), paste(String, restore: Bool), pasteFormatted(String, restore: Bool)
     }
     var events: [Event] = []
     func backspace(_ count: Int) { if count > 0 { events.append(.backspace(count)) } }
     func left(_ count: Int) { if count > 0 { events.append(.left(count)) } }
     func type(_ text: String) { events.append(.type(text)) }
     func paste(_ text: String, restore: Bool) async { events.append(.paste(text, restore: restore)) }
+    var lastFormatted: Resolved?
+    func pasteFormatted(_ resolved: Resolved, restore: Bool) async {
+        lastFormatted = resolved
+        events.append(.pasteFormatted(resolved.text, restore: restore))
+    }
 }
 
 @MainActor
@@ -40,6 +45,7 @@ final class DirectTap: TapControl {
     func cancel(_ id: UInt64) { engine.cancel(id) }
     func beginUndo() { engine.beginUndo() }
     func finishUndo(abbreviation: String) { engine.finishUndo(abbreviation: abbreviation) }
+    func inserted(tail: String) { engine.inserted(tail: tail) }
 }
 
 @MainActor
@@ -59,6 +65,7 @@ struct Harness {
         tap.engine.index = AbbreviationIndex(snippets: library.expandable)
         let lib = library
         expander = Expander(tap: tap, poster: poster, environment: environment) { id in lib.snippet(id) }
+        expander.lookup = lib.lookup
     }
 
     /// Types into the engine; returns the first match.
@@ -173,6 +180,81 @@ struct ExpanderTests {
         #expect(h.tap.engine.buffer.contents == ";hi")
         // Undo doesn't fire again for the same expansion.
         #expect(!h.expander.undo(id))
+    }
+
+    @Test func fillInsWaitForTheForm() async {
+        let h = Harness([snippet(";reply", "Hi {field:Name}, {choice:Tone|warm|brief}.")])
+        let match = h.typeMatch(";reply")!
+        // A key typed before the form opens stays after the snippet.
+        h.environment.clock += 10_000_000
+        _ = h.tap.engine.handle(KeyInput.text("x")[0], now: h.environment.clock)
+        let report = await h.expander.expand(match)
+        #expect(report.outcome == .needsFillIn)
+        #expect(h.poster.events.isEmpty)
+        let request = report.fillIn!
+        #expect(request.fields.map(\.name) == ["Name", "Tone"])
+        #expect(request.backspaces == 7 && request.retype == "x" && request.targetPID == 42)
+        // While the form is open the tap ignores keys (they're the form's).
+        #expect(h.tap.engine.isBusy)
+        let done = await h.expander.complete(request, values: FillValues(["name": .text("Bo"), "Tone": .text("brief")]))
+        #expect(done.outcome == .inserted(.type, characters: 13, restoredClipboard: false))
+        #expect(h.poster.events == [.backspace(7), .type("Hi Bo, brief."), .type("x")])
+        #expect(!h.tap.engine.isBusy)
+        #expect(h.tap.engine.buffer.contents == "Hi Bo, brief.x")
+    }
+
+    @Test func cancellingAFormLeavesTheAbbreviation() async {
+        let h = Harness([snippet(";reply", "Hi {field:Name}")])
+        let report = await h.expander.expand(h.typeMatch(";reply")!)
+        h.expander.cancel(report.fillIn!)
+        #expect(h.poster.events.isEmpty)
+        #expect(!h.tap.engine.isBusy)
+    }
+
+    @Test func nothingIsTypedIfAnotherAppCameForward() async {
+        let h = Harness([snippet(";reply", "Hi {field:Name}")])
+        let report = await h.expander.expand(h.typeMatch(";reply")!)
+        h.environment.frontApp = FrontApp(pid: 7, bundleID: "app.slopapp.test.other", name: "Other")
+        let done = await h.expander.complete(report.fillIn!, values: FillValues(["Name": .text("Bo")]))
+        #expect(done.outcome == .targetChanged)
+        #expect(done.resolved?.text == "Hi Bo")
+        #expect(h.poster.events.isEmpty)
+        #expect(!h.tap.engine.isBusy)
+    }
+
+    @Test func insertingFromSearchDeletesNothing() async {
+        let h = Harness([snippet(";hi", "slopapp-test hello"), snippet(";f", "Dear {field:Name}")])
+        let report = await h.expander.insert(h.library.snippets[0].id)
+        #expect(report.outcome == .inserted(.type, characters: 18, restoredClipboard: false))
+        #expect(h.poster.events == [.type("slopapp-test hello")])
+        #expect(h.tap.engine.buffer.contents == "slopapp-test hello")
+        let form = await h.expander.insert(h.library.snippets[1].id)
+        #expect(form.outcome == .needsFillIn)
+        #expect(form.fillIn?.matchID == nil && form.fillIn?.backspaces == 0)
+        _ = await h.expander.complete(form.fillIn!, values: FillValues(["Name": .text("Bo")]))
+        #expect(h.poster.events.last == .type("Dear Bo"))
+    }
+
+    @Test func searchInsertRespectsGuards() async {
+        let h = Harness([snippet(";hi", "slopapp-test")])
+        h.environment.focusedFieldIsSecure = true
+        #expect(await h.expander.insert(h.library.snippets[0].id).outcome == .blockedPasswordField)
+        #expect(await h.expander.insert(UUID()).outcome == .snippetMissing)
+        #expect(h.poster.events.isEmpty)
+    }
+
+    @Test func formattedSnippetsPasteFormatted() async {
+        var s = snippet(";sig", "slopapp-test Best")
+        s.richText = Data([0])
+        let h = Harness([s, snippet(";outer", "Thanks\n{snippet:;sig}")])
+        h.expander.settings.insertMode = .alwaysType
+        let report = await h.expander.expand(h.typeMatch(";sig")!)
+        #expect(report.formatted)
+        #expect(h.poster.events == [.backspace(4), .pasteFormatted("slopapp-test Best", restore: true)])
+        // A plain snippet including a formatted one goes formatted too.
+        _ = await h.expander.expand(h.typeMatch(" ;outer")!)
+        #expect(h.poster.events.last == .pasteFormatted("Thanks\nslopapp-test Best", restore: true))
+        #expect(h.poster.lastFormatted?.includedSnippets == [h.library.snippets[0].id])
     }
 
     @Test func missingSnippet() async {

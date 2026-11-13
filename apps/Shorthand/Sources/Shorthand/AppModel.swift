@@ -5,7 +5,7 @@ import SlopKit
 
 extension KeyboardShortcuts.Name {
     /// Unset by default: every obvious combination is taken by some app or by macOS.
-    static let togglePause = Self("togglePause")
+    static let togglePause = Self(Diagnostics.isTestMode ? "test.togglePause" : "togglePause")
 }
 
 /// What the menu bar icon and the status line show.
@@ -87,6 +87,12 @@ final class AppModel {
     /// A long snippet was pasted but the clipboard couldn't be put back.
     private(set) var pastedWithoutRestore = false
     private(set) var tapGaveUp = false
+    /// Shorthand's search or fill-in panel has the keyboard.
+    private(set) var ownPanelOpen = false
+
+    @ObservationIgnored let fillIn = FillInController()
+    @ObservationIgnored let search = SearchController()
+    @ObservationIgnored private var formattedCache: [UUID: (Data, NSAttributedString)] = [:]
 
     @ObservationIgnored let tapShared = TapShared()
     @ObservationIgnored private(set) lazy var tap = KeyTap(shared: tapShared)
@@ -143,6 +149,17 @@ final class AppModel {
         expander = Expander(tap: TapController(shared: tapShared), poster: poster, environment: environment) { [weak self] id in
             self?.library.snippet(id)
         }
+        expander.lookup = { [weak self] in self?.library.snippet(abbreviation: $0) }
+        poster.formattedText = { [weak self] in self?.formattedText($0) }
+    }
+
+    /// A formatted snippet's decoded text (cached until it changes).
+    func formattedText(_ id: UUID) -> NSAttributedString? {
+        guard let data = library.snippet(id)?.richText else { return nil }
+        if let cached = formattedCache[id], cached.0 == data { return cached.1 }
+        guard let text = RichText.decode(data) else { return nil }
+        formattedCache[id] = (data, text)
+        return text
     }
 
     // MARK: Lifecycle
@@ -157,6 +174,17 @@ final class AppModel {
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.tapTimedOut() } }
         }
         poster.onPasteFinished = { outcome in Diagnostics.record("clipboard \(outcome)") }
+        fillIn.onShowingChange = { [weak self] showing in self?.setOwnPanel(showing) }
+        search.onShowingChange = { [weak self] showing in self?.setOwnPanel(showing || (self?.fillIn.isShowing ?? false)) }
+        search.state.library = { [weak self] in self?.library ?? Library() }
+        search.state.hasFields = { [weak self] snippet in
+            guard let self else { return false }
+            return FillIn.hasFields(snippet, lookup: self.library.lookup)
+        }
+        search.state.preview = { [weak self] in self?.readablePreview($0) ?? $0.plainContent }
+        search.onPick = { [weak self] snippet in Task { await self?.insertFromSearch(snippet.id) } }
+        search.onCopy = { [weak self] snippet in self?.copySnippet(snippet.id) }
+        search.onOpenLibrary = { LibraryOpener.open() }
         let workspace = NSWorkspace.shared.notificationCenter
         observers.append(workspace.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.frontAppChanged() }
@@ -186,6 +214,7 @@ final class AppModel {
         tap.remove()
         // A borrowed clipboard goes back now, not after a delay that won't happen.
         ClipboardPaster.restorePendingNow()
+        RichClipboardPaster.restorePendingNow()
         // Only an edit still waiting to be written; quitting never creates files on its own.
         if saveTask != nil { flushSave() }
     }
@@ -497,7 +526,14 @@ final class AppModel {
         gate.excludedApp = isExcluded(frontApp?.bundleID)
         gate.inputMethod = inputMethodOn
         gate.secureInput = secureInputOn
+        gate.ownPanel = ownPanelOpen
         tapShared.update { $0.setGate(gate) }
+    }
+
+    private func setOwnPanel(_ open: Bool) {
+        guard ownPanelOpen != open else { return }
+        ownPanelOpen = open
+        updateGate()
     }
 
     // MARK: Expanding
@@ -522,22 +558,130 @@ final class AppModel {
         case .inserted(let method, let characters, let restored):
             if method == .type { typedLatency.record(microseconds: ms * 1_000) } else { pastedLatency.record(microseconds: ms * 1_000) }
             let t = report.timings.map { Double($0 &- match.at) / 1_000_000 }
-            Diagnostics.record(String(format: "expanded #%llu by %@ chars=%d restore=%@ match_at=%.6f guards_ms=%.2f (field_check_ms=%.2f) resolved_ms=%.2f posted_ms=%.2f match_to_posted_ms=%.2f",
-                                      match.id, method.rawValue, characters, restored ? "yes" : "no", Double(match.at) / 1e9,
+            Diagnostics.record(String(format: "expanded #%llu by %@%@ chars=%d restore=%@ match_at=%.6f guards_ms=%.2f (field_check_ms=%.2f) resolved_ms=%.2f posted_ms=%.2f match_to_posted_ms=%.2f",
+                                      match.id, method.rawValue, report.formatted ? " (formatted)" : "", characters, restored ? "yes" : "no", Double(match.at) / 1e9,
                                       environment.lastFieldCheckMilliseconds,
                                       t.count > 0 ? t[0] : -1, t.count > 1 ? t[1] : -1, t.count > 2 ? t[2] : -1, ms))
-            if let id = report.snippetID { recordUse(id) }
-            if report.pastedWithoutRestore && !pastedWithoutRestore {
-                pastedWithoutRestore = true
-                if !pasteNoticeDismissed {
-                    HUD.show("Pasted. Allow Paste from Other Apps to get your clipboard back next time.", systemImage: "doc.on.clipboard",
-                             duration: .seconds(3))
-                }
-            }
+            inserted(report)
+        case .needsFillIn:
+            if let request = report.fillIn { presentFillIn(request) }
         case .dropped: Diagnostics.record("dropped #\(match.id)")
         case .blockedSecureInput: Diagnostics.record("blocked #\(match.id): secure input")
         case .blockedPasswordField: Diagnostics.record("blocked #\(match.id): password field")
         case .snippetMissing: Diagnostics.record("dropped #\(match.id): snippet gone")
+        case .targetChanged: break
+        }
+    }
+
+    /// After any insert: count the use, and explain once if the clipboard couldn't be put back.
+    private func inserted(_ report: Expander.Report) {
+        if let id = report.snippetID { recordUse(id) }
+        if report.pastedWithoutRestore && !pastedWithoutRestore {
+            pastedWithoutRestore = true
+            if !pasteNoticeDismissed {
+                HUD.show("Pasted. Allow Paste from Other Apps to get your clipboard back next time.", systemImage: "doc.on.clipboard",
+                         duration: .seconds(3))
+            }
+        }
+    }
+
+    // MARK: Fill-ins
+
+    /// The text with `values`, for the form's live preview: plain, and never the real
+    /// clipboard (it shows where the clipboard goes instead).
+    func previewText(_ snippetID: UUID, values: FillValues) -> String {
+        guard let snippet = library.snippet(snippetID) else { return "" }
+        return PlaceholderResolver(now: Date()).resolve(snippet, values: values, lookup: library.lookup) { .text("‹clipboard›") }.text
+    }
+
+    /// One readable line for lists: placeholders resolved, an empty fill-in shown as ‹Name›.
+    func readablePreview(_ snippet: Snippet) -> String {
+        let lookup = library.lookup
+        var values = FillValues()
+        for field in FillIn.fields(for: snippet, lookup: lookup) {
+            if case .text(let value) = field.kind, value.isEmpty { values[field.name] = .text("‹\(field.name)›") }
+        }
+        return PlaceholderResolver(now: Date()).resolve(snippet, values: values, lookup: lookup) { .text("‹clipboard›") }.text
+    }
+
+    private func presentFillIn(_ request: FillInRequest) {
+        guard let snippet = library.snippet(request.snippetID) else { expander.cancel(request); return }
+        let state = FillInState(title: snippet.title, fields: request.fields) { [weak self] values in
+            self?.previewText(request.snippetID, values: values) ?? ""
+        }
+        fillIn.present(state, targetPID: request.targetPID, onInsert: { [weak self] values in
+            Task { await self?.completeFillIn(request, values: values) }
+        }, onCancel: { [weak self] in
+            self?.expander.cancel(request)
+            Diagnostics.record("fill-in cancelled")
+        })
+    }
+
+    private func completeFillIn(_ request: FillInRequest, values: FillValues) async {
+        // Let the keyboard go back to the app before typing into it.
+        try? await Task.sleep(for: .milliseconds(60))
+        let report = await expander.complete(request, values: values)
+        switch report.outcome {
+        case .inserted(let method, let characters, _):
+            Diagnostics.record("filled in and inserted by \(method.rawValue)\(report.formatted ? " (formatted)" : "") chars=\(characters)")
+            inserted(report)
+        case .targetChanged:
+            if let resolved = report.resolved { copy(resolved) }
+            HUD.show("Copied: another app came to the front.", systemImage: "doc.on.clipboard")
+            Diagnostics.record("fill-in: target changed, copied")
+        case .blockedSecureInput, .blockedPasswordField:
+            HUD.show("Not inserted: a password field has the keyboard.", systemImage: "lock")
+            Diagnostics.record("fill-in blocked")
+        default:
+            Diagnostics.record("fill-in dropped")
+        }
+    }
+
+    // MARK: Search panel
+
+    func toggleSearch() { search.toggle() }
+
+    /// Inserts a snippet picked in the search panel into the app that was in front. Without
+    /// permission to type (or when Shorthand itself is in front) it's copied instead.
+    func insertFromSearch(_ id: UUID) async {
+        let front = environment.frontApp
+        guard canPost, front?.bundleID != selfBundleID || Diagnostics.insertOnlyInto != nil else {
+            copySnippet(id)
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(60))
+        let report = await expander.insert(id)
+        switch report.outcome {
+        case .inserted(let method, let characters, _):
+            Diagnostics.record("search inserted by \(method.rawValue)\(report.formatted ? " (formatted)" : "") chars=\(characters)")
+            inserted(report)
+        case .needsFillIn:
+            if let request = report.fillIn { presentFillIn(request) }
+        case .blockedSecureInput, .blockedPasswordField:
+            copySnippet(id)
+        default:
+            break
+        }
+    }
+
+    /// Puts a snippet on the clipboard (formatted ones with their formatting). Fill-ins take
+    /// their defaults.
+    func copySnippet(_ id: UUID) {
+        guard let snippet = library.snippet(id) else { return }
+        let values = FillValues.defaults(FillIn.fields(for: snippet, lookup: library.lookup))
+        guard let resolved = expander.resolved(id, values: values) else { return }
+        copy(resolved)
+        recordUse(id)
+        HUD.show("Copied", systemImage: "doc.on.clipboard")
+        Diagnostics.record("copied snippet")
+    }
+
+    private func copy(_ resolved: Resolved) {
+        if resolved.isFormatted {
+            let text = RichText.assemble(resolved) { [weak self] in self?.formattedText($0) }
+            RichClipboardPaster.write(RichText.pasteboardTypes(text, plain: resolved.text), to: pasteboard, transient: false)
+        } else {
+            ClipboardSnapshot.write(resolved.text, to: pasteboard, transient: false)
         }
     }
 

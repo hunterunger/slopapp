@@ -129,6 +129,7 @@ final class TapShared: @unchecked Sendable {
     func cancel(_ id: UInt64) { update { $0.cancel(id) } }
     func beginUndo() { update { $0.beginUndo() } }
     func finishUndo(abbreviation: String) { update { $0.finishUndo(abbreviation: abbreviation) } }
+    func inserted(tail: String) { update { $0.inserted(tail: tail) } }
 }
 
 private let keyTapCallback: CGEventTapCallBack = { _, type, event, userInfo in
@@ -197,4 +198,5 @@ final class TapController: TapControl {
     func cancel(_ id: UInt64) { shared.cancel(id) }
     func beginUndo() { shared.beginUndo() }
     func finishUndo(abbreviation: String) { shared.finishUndo(abbreviation: abbreviation) }
+    func inserted(tail: String) { shared.inserted(tail: tail) }
 }

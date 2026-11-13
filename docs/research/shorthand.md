@@ -939,3 +939,171 @@ Use the release build (`build/Shorthand.app`). Add a test snippet such as `;zz` 
 10. **H10 Dictate and Clips:** dictate into a field and paste from Clips as usual: same
     behaviour as before (they now use the shared SlopKit code). A dictated `;zz` must not
     expand.
+
+## Feature round: fill-ins, formatted snippets, nesting, quick search, imports (2026-11-12)
+
+The owner compared Shorthand with the apps it replaces and listed the gaps people notice:
+fill-ins, rich text and images, nested snippets, a quick insertion search, and importing
+existing libraries. All five are built into the existing placeholder system, library window
+and insertion path (inventory #23, #24, #25 partly, #27, #40, #42, #45 move from should/later
+to built).
+
+### How it fits
+
+- **One placeholder language.** New tokens sit next to `{date}`/`{cursor}`: `{field:Name}`,
+  `{field:Name=default}`, `{choice:Name|a|b}`, `{optional:Name}…{/optional}` (`=off`),
+  `{snippet:;abbr}`. They're in Insert Placeholder (with the name selected, ready to type
+  over; Optional Section wraps the selection), checked by the editor (`TemplateCheck`:
+  missing or cyclic references, stray or unclosed sections, one name for two kinds), and shown
+  in the preview with empty fields as ‹Name›.
+- **The parser now keeps UTF-16 source ranges** (`PlaceholderParser.tokens`) and the resolver
+  returns `pieces` (text + which snippet and range it came from). That one change carries
+  formatting through placeholders and nested snippets: literal text keeps its own runs,
+  placeholder output takes the token's formatting, plain snippets inside formatted ones get
+  the default document font (`RichText.assemble`).
+- **Expander flow.** A match whose snippet (or anything it includes) has fill-ins takes the
+  keys typed meanwhile, leaves the tap in its "posting" state and returns `.needsFillIn`.
+  The app shows the form; `complete` deletes the abbreviation (+ those keys), inserts,
+  retypes the keys; `cancel` leaves everything as typed. If another app came forward, nothing
+  is typed and the result is copied (`.targetChanged`), as flow 6 planned. The search panel
+  uses `insert(_:)`: no Backspaces, same guards, same form.
+- **Formatted snippets** store RTFD in `Snippet.richText` with `content` as its exact plain
+  mirror (images are U+FFFC), so matching, search, conflict checks and the old JSON all keep
+  working. They always paste (a formatted paste can't be typed), with RTFD, RTF, HTML (images
+  as data URLs) and plain text on one pasteboard item, plus PNG/TIFF when the snippet is just
+  an image. The clipboard is borrowed and restored exactly like text pastes.
+- **Imports** share one sheet and one model (`ImportEntry` → `ImportCandidate` → `apply`,
+  groups by name). The Text Replacements API is unchanged on top of it.
+
+### Decisions
+
+| Question | Decision | Why |
+|---|---|---|
+| Fill-in syntax | `{field:Name=default}`, `{choice:Name\|a\|b}`, `{optional:Name}…{/optional}` | Reads like the existing tokens; no new escaping rules. First choice is preselected (no default marker to learn); TextExpander's `default=` is moved to the front on import. |
+| Optional sections' default | On (`=off` to start unticked) | The usual P.S. or disclaimer is wanted most times; one key turns it off. |
+| Names | Case- and accent-insensitive, first occurrence defines the control and its default | "Reused names fill once" across nested snippets too; a second `{field:Name}` without a default takes the first one's. |
+| Form placement | Below the caret (Accessibility `AXBoundsForRange`), else below the focused field, else screen centre; kept on screen | "Near the insertion point" in Cocoa apps, Safari and Chromium; still sensible in apps that hide the caret. |
+| Form keyboard | Text fields take real focus; Tab/Shift-Tab move through every control; a focused choice or section shows the system focus-ring colour and takes ↑↓/←→, a letter (type to select) or Space | AppKit only lets popups and checkboxes take focus with Full Keyboard Access on, so SwiftUI focus alone couldn't Tab onto them (found in the walkthrough). |
+| Form dismissal | Esc, Cancel, a click in another app, another app coming forward. Not "lost key": the choice's own menu takes key status | The first build cancelled the form when ↓ opened the popup's menu (walkthrough). |
+| Fill-in values | Memory only, never stored or logged | Same promise as typed keys. |
+| Nested lookup | By exact abbreviation, any group (a group that's off is the place for parts); depth 8; cycles left out and flagged | Matches how people build signatures from parts; abbreviations are what they already know. |
+| Formatted text default font | `NSFont.userFont` (the system's document font) | What RTF readers assume; system UI font names don't travel to the web. Editor-added "text colour" attributes are stripped so text follows the target app and dark mode. |
+| Formatted + Always Type | Still pasted | Formatting can't be typed; Settings explains it. |
+| Pasted screenshots | TIFF attachments become PNG once, in the editor | TIFF made library files balloon. |
+| Search panel contents | Every snippet with text, groups that are off included, snippets without an abbreviation included; most used, then most recent, first | Picking by hand is deliberate; search-only snippets are a real use. |
+| Search ranking | Abbreviation (leading `;` ignored) exact, then prefix, then a title word, then anywhere | "sig" should find `;sigf` before a reply that mentions it (walkthrough). |
+| Search panel default shortcut | Unset (Settings › Shortcuts and the menu item) | Research doc: ⌘/ and ⌥Space collide with apps and input switching. |
+| Search with Shorthand in front or without Accessibility | Copy instead, with a HUD | It can't type; copying still gets the snippet out. |
+| Import formats | Text Replacements (this Mac, dragged plist), TextExpander `.textexpander` (XML plist), espanso YAML, CSV, Shorthand JSON | The brief's three plus two cheap, common ones. One drop zone; the format is detected from the contents. |
+| TextExpander rich text | Read when the plist has RTF/RTFD data next to the plain text (keys `richText`/`rtf…`, else any key containing "rich"/"rtf"); else plain with a note | TextExpander's schema isn't documented publicly and no TextExpander export was available to check; the plain path is certain. |
+| TextExpander script types | `snippetType` 2–7 or a `#!` first line: listed, can't be ticked | Scripts are out of scope (inventory #29). |
+| espanso extras | Extra `triggers` become snippets containing `{snippet:first}`; `markdown`, `html`, `image_path` come in formatted; `shell`/`script`/`random` vars and `regex` triggers reported | Keeps one abbreviation per snippet without losing the extra triggers. |
+| YAML | A small subset parser in core (`MiniYAML`), no dependency (brief) | Block maps/lists (incl. lists at the key's indent), all scalar styles, block scalars with chomping, flow `[…]`/`{…}`, comments, anchors. |
+| Export to other formats | Not built | Shorthand's JSON keeps everything (formatting included); other formats would lose fill-ins and formatting. |
+| Test-copy shortcuts | Test mode (and the smoke test) use `test.`-prefixed shortcut names | KeyboardShortcuts always reads `UserDefaults.standard`, which a test copy shares with the installed app (same bundle id). |
+| Smoke test | `SLOPAPP_SMOKE_TEST=1` is now a test mode: a throwaway data folder, the test defaults suite, no tap | It used to load the real library (and write that day's backup) with the real settings. |
+
+### Shared pieces built in the app (SlopKit candidates)
+
+- `Sources/Shorthand/RichClipboardPaster.swift`: `ClipboardPaster` for several types at once
+  (snapshot, transient write, ⌘V, restore unless something newer was copied, restore on quit).
+- `Sources/Shorthand/CaretLocator.swift` (+ `ShorthandCore/CaretPlacement.swift`, pure and
+  tested): the caret's screen rect through Accessibility and `FloatingPanel.show(near:)`.
+
+### Build notes
+
+- Tests: **125 in 20 suites** (76 before; new suites: fill-ins/sections/nesting, quick search,
+  formatted text, YAML subset, date codes, TextExpander, espanso, other imports; new expander
+  tests for the form, search insertion, target change and formatted pastes). The YAML,
+  date-code and macro converters, `RichText` (RTFD round trip, assembly, adapted case, HTML
+  with data-URL images, image-only pastes, Markdown and HTML import) are all covered.
+- Fixtures only under `/tmp/shorthand-test/`: a generated library (`fixtures/library.json`
+  with a fill-in reply, a formatted signature with a generated PNG, nested and cyclic
+  snippets), `Replies.textexpander`, `espanso/match/base.yml` (+ `$CONFIG/images`), a Text
+  Replacements plist and a CSV. Nothing from the owner's libraries was read.
+- New test hooks: `search`, `search-query`, `search-pick`, `search-copy`, `insert`, `fill`,
+  `fill-insert`, `fill-cancel`, `import-file` (paths under `/tmp/shorthand-test/` only),
+  `select` (it was documented but missing), `editor-select-all`.
+
+### Walkthrough (debug and release builds, `--direct` test copy, `SHORTHAND_NO_TAP=1`, keys only into a throwaway pad, private pasteboard)
+
+The screen was unlocked but someone was using the Mac (HID idle 0–9 s), so: no `--allow-mouse`,
+no `key --global`, no activating apps. Everything ran through Accessibility presses and keys
+posted to Shorthand's own pid. The system is in dark mode (not changed), so on-screen shots
+are dark; light mode is from the offscreen snapshots (`SHORTHAND_SNAPSHOT_DIR`).
+
+- **Fill-ins:** replayed ` ;reply` → the form opened under the pad's caret with Name focused;
+  typed a name, Tab, ↓ and a letter changed Tone, Tab, Space turned P.S. off (its Note field
+  dimmed), Return → the pad got `Hi slopapp-test Ann, … Talk soon.` plus the nested formatted
+  signature (23 bold characters and the image as an RTFD attachment), the abbreviation gone,
+  the private clipboard back to what it held (`clipboard restored`). Esc → `fill-in
+  cancelled`, `;reply` left as typed.
+- **Nesting:** `;nest` → `<slopapp-test hello>`; `;loop`/`;loop2` → `ab` (cycle stopped);
+  `;sigf` in a group that's off doesn't expand by itself but works when included. The editor
+  shows "“;loop2” would include itself…".
+- **Formatted:** the formatting bar's Bold (pressed through Accessibility) on the selected
+  signature → the next paste had 0 bold characters; again → all bold. Formatted editor and
+  preview checked in dark (adaptive text colour) and light (snapshot).
+- **Search panel:** opened centred; readable previews (dates resolved, fill-ins as ‹Name›);
+  "sig" ranks the signature first; Return pasted it formatted at the pad's caret (no
+  Backspaces) and restored the clipboard; ⌘2 typed the second row; ⌘C copied `<slopapp-test
+  hello>`; a fill-in snippet picked from search opened the form. With
+  `SHORTHAND_ASSUME_TRUSTED=0` a pick is copied instead and the menu offers the permission.
+- **Imports:** TextExpander (2 of 3 importable; "A key press (tab) was left out"; the shell
+  snippet can't be ticked), espanso (4 of 6; shell variable and regex trigger reported),
+  Text Replacements fixture (the spaced shortcut flagged), CSV. Imported snippets then
+  expanded in the pad: espanso date + cursor, image (attachment), Markdown bold, the Text
+  Replacement, the TextExpander fill-in with "Best" preselected.
+- **Try It:** typing ` ;reply` one key at a time opens the same form (as a sheet) and expands
+  with the values.
+- **`scripts/drive tree`:** 0 `[unlabeled]` in the library, editor (incl. format bar
+  segments Bold/Italic/Underline), search panel, fill-in form, import sheet and Settings.
+- Status menu: "Insert a Snippet…" between the status line and New Snippet….
+- Logs: only counts, timings and decisions (no snippet text, no typed text).
+- **Not tested: owner active** — the global "Insert a snippet" shortcut with a real key press
+  (needs recording a shortcut and `key --global`); the handler calls the same
+  `toggleSearch()` as the menu item and the hook. The real keyboard tap was not installed
+  in this round (replays only); the tap code didn't change apart from the panel gate.
+
+### Found and fixed in the walkthrough
+
+| Finding | Fix |
+|---|---|
+| The form opened with the Tone popup focused | `.defaultFocus` + focus set after the panel is key |
+| ↓ on the Tone popup cancelled the form (its menu took key status) | The form no longer closes on losing key; clicks in other apps and app switches cancel it |
+| Tab couldn't reach popups/checkboxes without Full Keyboard Access | Own focus handling for choices and sections, with the system focus-ring colour |
+| The form's preview collapsed to one line | Reserves four lines (no jump as values change) |
+| The search panel showed raw `{field:Name}` | Readable previews; titles from the resolved first line |
+| "sig" ranked a reply mentioning `;sigf` above `;sigf` | Ranking ignores the abbreviation's leading symbol; title words count |
+| "Tone, Tone" for VoiceOver | Picker labelled once |
+| Try It's popover didn't show when the field was scrolled away | Try It's form is a sheet |
+| Return in a sheet's text field didn't insert | `onSubmit` on the form's text fields |
+| Import column widths | Abbreviation column capped |
+
+### Gap review against the brief
+
+| Ask | Status |
+|---|---|
+| Fill-ins: text, choices, optional sections; keyboard-first form near the caret; reused names once | Built and walked through |
+| Rich text and images, rich where accepted, plain fallback | Built; RTFD/RTF/HTML/plain verified on the pasteboard and in a Cocoa text view. Browsers, Electron and plain-text apps: owner hand test (H11) |
+| Nested snippets with cycle detection | Built and walked through |
+| Quick insertion search with a global shortcut | Built; the shortcut's real key press is the one thing not tested (owner active) |
+| Import TextExpander, espanso, Text Replacements; report what didn't map; export if natural | Built (+ CSV, Shorthand JSON); export stays Shorthand JSON (decision above) |
+| Clipboard preserved; tests on a named pasteboard; owner's libraries never read | Yes |
+| Test copies never register the owner's shortcuts or expand in their apps | Test mode: `test.` shortcut names, `SHORTHAND_NO_TAP`, `SHORTHAND_INSERT_ONLY_INTO`; smoke runs are test mode now |
+
+Deferred: multi-line fill-in fields (imports become one line, with a note), key presses in
+snippets, exporting other formats, TextExpander's newer `.textexpandersettings` backups,
+remembering last fill-in values (would mean storing what was typed).
+
+### Owner hand tests added
+
+11. **H11 formatted paste targets:** expand the formatted signature in Mail, Gmail in Safari
+    and Chrome, Slack, and Terminal: formatting and logo where the app takes them, plain text
+    in Terminal.
+12. **H12 fill-in placement:** expand a fill-in snippet in TextEdit, Safari, Chrome, VS Code:
+    the form sits under the caret (or the field), and the text lands in the same field.
+13. **H13 search shortcut:** set Settings › Shortcuts › Insert a snippet, press it in any app,
+    pick with ↓ and Return.
+14. **H14 real exports:** import a real TextExpander group file (a rich snippet among them) and
+    an espanso `base.yml`, and check the preview's notes.

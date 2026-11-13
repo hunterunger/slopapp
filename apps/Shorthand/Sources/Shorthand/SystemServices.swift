@@ -96,6 +96,8 @@ final class SystemPoster: KeyPosting {
     private let environment: SystemEnvironment
     /// Called when a borrowed clipboard was put back (or not), for the log.
     var onPasteFinished: ((ClipboardPaster.Outcome) -> Void)?
+    /// A formatted snippet's text, by id (nil for plain ones).
+    var formattedText: (UUID) -> NSAttributedString? = { _ in nil }
 
     init(pasteboard: NSPasteboard, environment: SystemEnvironment) {
         self.pasteboard = pasteboard
@@ -122,6 +124,17 @@ final class SystemPoster: KeyPosting {
         let done = onPasteFinished
         await withCheckedContinuation { continuation in
             paster.paste(text, restore: restore, onPasted: { continuation.resume() }, completion: { done?($0) })
+        }
+    }
+
+    func pasteFormatted(_ resolved: Resolved, restore: Bool) async {
+        let text = RichText.assemble(resolved, formatted: formattedText)
+        let types = RichText.pasteboardTypes(text, plain: resolved.text)
+        let keyboard = self.keyboard
+        let paster = RichClipboardPaster(pasteboard: pasteboard) { keyboard.paste() }
+        let done = onPasteFinished
+        await withCheckedContinuation { continuation in
+            paster.paste(types, restore: restore, onPasted: { continuation.resume() }, completion: { done?($0) })
         }
     }
 }

@@ -31,10 +31,12 @@ public struct TapGate: Sendable, Equatable {
     public var inputMethod = false
     /// Secure event input is on (macOS delivers nothing anyway).
     public var secureInput = false
+    /// Shorthand's own search or fill-in panel has the keyboard (its keys aren't the app's).
+    public var ownPanel = false
 
     public init() {}
 
-    public var isOpen: Bool { !paused && !excludedApp && !inputMethod && !secureInput }
+    public var isOpen: Bool { !paused && !excludedApp && !inputMethod && !secureInput && !ownPanel }
 }
 
 /// The decision logic of the keyboard tap: the rolling buffer, the matcher, the gate, and
@@ -84,6 +86,8 @@ public struct TapEngine: Sendable {
 
     public mutating func handle(_ input: KeyInput, now: UInt64) -> TapDecision {
         if input.origin == .ours || input.kind == .ignored { return .none }
+        // Keys typed into Shorthand's own panel belong to it, not to the app behind.
+        if gate.ownPanel { return .none }
         switch phase {
         case .posting:
             // A real key landed while we were posting: it may sit inside our text. Count it.
@@ -214,6 +218,13 @@ public struct TapEngine: Sendable {
         phase = .idle
         clearPending()
         reset()
+    }
+
+    /// Text went in without a typed abbreviation (the search panel): `tail` is now before the caret.
+    public mutating func inserted(tail: String) {
+        guard phase == .idle else { return }
+        undoable = nil
+        seed(tail)
     }
 
     /// Undo is being posted (Backspaces + the abbreviation): ignore keys until it's done.
