@@ -5,7 +5,7 @@ Pick any color on screen and copy it in the format you need.
 Part of [Slopapp](../../README.md), a free, open-source collection of Mac apps.
 An open alternative to Sip.
 
-**Status:** beta (0.2.0)
+**Status:** beta (0.2.1)
 
 ## What it does
 
