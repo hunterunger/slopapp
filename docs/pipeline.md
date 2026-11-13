@@ -242,9 +242,13 @@ node scripts/feed.mjs --stdout         # print it
 create the GitHub Release with `<Name>.zip` and `<Name>-icon.png`, then call `feed.yml`, which
 downloads the newest release zip of every app, runs `feed.mjs`, and commits `feed.json` to the
 `gh-pages` branch. `feed.yml` also runs when the app list changes on `main`, and by hand
-(`gh workflow run Feed`). Releases (`concurrency: release`) and feed runs (`concurrency: feed`)
-are serialized so the feed never races. One-time
-setup: Settings > Pages > Deploy from a branch > `gh-pages` / root.
+(`gh workflow run Feed`). Each tag releases in its own queue (`concurrency: release-<tag>`),
+so tags pushed together build, sign and notarize at the same time. Feed runs
+(`concurrency: feed`) go one at a time so `gh-pages` never races. GitHub keeps only one
+waiting run per group, so when several releases finish close together the older waiting
+feed jobs show as cancelled. That's expected: their releases are published, and the feed run
+that goes reads every app's newest release. One-time setup: Settings > Pages > Deploy from a
+branch > `gh-pages` / root.
 
 ### Testing the launcher against a local feed
 

@@ -41,9 +41,12 @@ on:
 permissions:
   contents: write
 
-# One release at a time, so two tags pushed together can't race on the feed.
+# Each tag gets its own queue, so several apps release at once. Only the feed step at the end
+# goes one at a time (feed.yml's `feed` group). GitHub keeps one waiting run per group, so
+# when releases finish close together the older waiting feed job is cancelled: its release
+# is already published, and the feed run that does go reads every app's newest release.
 concurrency:
-  group: release
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
