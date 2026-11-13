@@ -17,7 +17,7 @@ final class HistoryController {
     var retention: HistoryRetention {
         didSet {
             guard retention != oldValue else { return }
-            UserDefaults.standard.set(retention.rawValue, forKey: Self.retentionKey)
+            Preferences.store.set(retention.rawValue, forKey: Self.retentionKey)
             prune()
         }
     }
@@ -27,8 +27,8 @@ final class HistoryController {
     @ObservationIgnored private var timer: Timer?
     /// The capture whose card closed last ("Reopen Last Capture"), kept across launches.
     @ObservationIgnored private var lastClosedID: UUID? {
-        get { UserDefaults.standard.string(forKey: Self.lastClosedKey).flatMap(UUID.init) }
-        set { UserDefaults.standard.set(newValue?.uuidString, forKey: Self.lastClosedKey) }
+        get { Preferences.store.string(forKey: Self.lastClosedKey).flatMap(UUID.init) }
+        set { Preferences.store.set(newValue?.uuidString, forKey: Self.lastClosedKey) }
     }
 
     static let retentionKey = "historyRetention"
@@ -44,7 +44,7 @@ final class HistoryController {
     init(model: AppModel) {
         self.model = model
         store = HistoryStore(root: Self.rootURL)
-        retention = UserDefaults.standard.string(forKey: Self.retentionKey).flatMap(HistoryRetention.init) ?? .default
+        retention = Preferences.store.string(forKey: Self.retentionKey).flatMap(HistoryRetention.init) ?? .default
     }
 
     var isOn: Bool { retention.keepsCaptures }
@@ -113,6 +113,22 @@ final class HistoryController {
             replace(entry)
             if item.image === image { item.historyFile = store.fileURL(for: entry) }
         }
+    }
+
+    /// A trimmed video: the entry's file becomes `media` (the untrimmed one is kept).
+    func replaceMedia(_ item: CaptureItem, with media: MediaFile, poster: CGImage) async throws -> HistoryEntry? {
+        guard let id = item.historyID else { return nil }
+        guard let entry = try await store.replaceMedia(id, with: media.url, duration: media.duration, poster: poster) else { return nil }
+        replace(entry)
+        return entry
+    }
+
+    /// Undoes a video's trims.
+    func restoreUntrimmed(_ item: CaptureItem, duration: Double, poster: CGImage) async throws -> HistoryEntry? {
+        guard let id = item.historyID else { return nil }
+        guard let entry = try await store.restoreUntrimmed(id, duration: duration, poster: poster) else { return nil }
+        replace(entry)
+        return entry
     }
 
     func saved(_ item: CaptureItem, to url: URL) {

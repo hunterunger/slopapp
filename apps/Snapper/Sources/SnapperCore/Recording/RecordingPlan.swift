@@ -3,19 +3,20 @@ import Foundation
 
 /// What a screen recording records: the stream source and the rect within it.
 ///
-/// Test mode (`SNAPPER_TEST_SCENE`) records the test scene *window* on its own (a
-/// desktop-independent window stream), clipped to the part of the selection inside it, so
-/// nothing else on screen can reach a test recording, even surfaces no app owns. A
-/// selection that misses the scene is refused.
+/// Test mode (`SNAPPER_TEST_SCENE`) records only Snapper's own windows: the test scene and
+/// the recording's overlays (camera bubble, clicks, keystrokes), as a display stream that
+/// *includes* just those windows, clipped to the part of the selection inside the scene. No
+/// other app's window, and no surface no app owns, can reach a test recording. A selection
+/// that misses the scene is refused.
 public struct RecordingPlan: Equatable, Sendable {
     public enum Source: Equatable, Sendable {
         case display(CGDirectDisplayID)
-        case window(CGWindowID)
+        /// Test mode: only our own windows (the scene `window` and the overlays) on `display`.
+        case testScene(window: CGWindowID, display: CGDirectDisplayID)
     }
 
     public var source: Source
-    /// The recorded rect in the source's own points, top-left origin (display-local or
-    /// window-local).
+    /// The recorded rect in display-local points, top-left origin.
     public var sourceRect: CGRect
     /// The same rect on screen (Quartz global points, top-left origin), for the frame drawn
     /// around it while recording.
@@ -31,8 +32,8 @@ public struct RecordingPlan: Equatable, Sendable {
         if let scene = testScene {
             let inside = selection.intersection(scene.frame).intersection(display.frame)
             guard let rect = usable(inside) else { return nil }
-            return RecordingPlan(source: .window(scene.id),
-                                 sourceRect: rect.offsetBy(dx: -scene.frame.minX, dy: -scene.frame.minY),
+            return RecordingPlan(source: .testScene(window: scene.id, display: display.id),
+                                 sourceRect: rect.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY),
                                  screenRect: rect)
         }
         guard let rect = usable(selection.intersection(display.frame)) else { return nil }
@@ -68,14 +69,47 @@ public struct RecordingOptions: Equatable, Sendable {
     public var frameRate: Int
     public var showsCursor: Bool
     public var scaleToOneX: Bool
+    public var audio: RecordingAudio
 
-    public init(frameRate: Int = 30, showsCursor: Bool = true, scaleToOneX: Bool = false) {
+    public init(frameRate: Int = 30, showsCursor: Bool = true, scaleToOneX: Bool = false, audio: RecordingAudio = .none) {
         self.frameRate = frameRate
         self.showsCursor = showsCursor
         self.scaleToOneX = scaleToOneX
+        self.audio = audio
     }
 
     public static let frameRates = [15, 24, 30, 60]
+
+    /// What a recording actually uses: a GIF has no sound, so it never opens the microphone.
+    public func forRecording(gif: Bool) -> RecordingOptions {
+        var options = self
+        if gif { options.audio = .none }
+        return options
+    }
+
+    /// Video keyframes once a second, so a trim without re-encoding starts close to where
+    /// it was asked to (the few frames before it stay in the file, hidden by an edit list).
+    public var keyframeInterval: Int { max(1, frameRate) }
+}
+
+/// Which sounds a recording keeps. Each one is its own AAC track while recording; with both,
+/// they're mixed into one track when the recording stops (players and chat apps play only the
+/// first track).
+public struct RecordingAudio: Equatable, Sendable {
+    /// The Mac's own sound (apps, alerts), through ScreenCaptureKit. Snapper's own sounds are
+    /// left out.
+    public var computer: Bool
+    public var microphone: Bool
+
+    public init(computer: Bool = false, microphone: Bool = false) {
+        self.computer = computer
+        self.microphone = microphone
+    }
+
+    public static let none = RecordingAudio()
+    public var isSilent: Bool { !computer && !microphone }
+    public var trackCount: Int { (computer ? 1 : 0) + (microphone ? 1 : 0) }
+    public var needsMixing: Bool { trackCount > 1 }
 }
 
 /// Elapsed recording time as "0:07" / "1:02:03".

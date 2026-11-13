@@ -82,6 +82,13 @@ final class CardController {
                  codes: shownCodes[item.id] ?? [], model: model, controller: self)
     }
 
+    /// Redraws a card whose capture changed (a trimmed video's new poster and length).
+    func refresh(_ item: CaptureItem) {
+        guard let card = cards[item.id] else { return }
+        card.panel.setContent { content(for: item) }
+        relayout()
+    }
+
     // MARK: QR codes
 
     /// Reads the QR codes in a card's capture once it's on screen (so the card never waits

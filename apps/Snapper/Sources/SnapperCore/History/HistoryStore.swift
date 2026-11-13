@@ -47,6 +47,7 @@ public struct HistoryCapture: Sendable {
 ///     root/<id>/original.png                            (as captured, for editable edits)
 ///     root/<id>/annotations.json                        (the edits, when edited)
 ///     root/<id>/poster.png                              (recordings)
+///     root/<id>/untrimmed.mp4                           (a trimmed recording as it was)
 ///     root/.deleted/<id>/                               (deleted, until purged: undo)
 public actor HistoryStore {
     public nonisolated let root: URL
@@ -169,6 +170,66 @@ public actor HistoryStore {
         return index.entry(id)
     }
 
+    /// After a trim: `file` becomes the recording, with its new poster and duration. The first
+    /// time, the recording as it was is kept as `untrimmed.<ext>` (the entry's original), so
+    /// the trim can be undone with `restoreUntrimmed`.
+    @discardableResult
+    public func replaceMedia(_ id: UUID, with file: URL, duration: Double, poster: CGImage) throws -> HistoryEntry? {
+        var index = load()
+        guard let old = index.entry(id), old.kind.isMedia else { return nil }
+        let folder = folder(for: id)
+        let current = folder.appendingPathComponent(old.fileName)
+        var originalName = old.originalFileName
+        if originalName == nil {
+            let name = "untrimmed." + current.pathExtension.lowercased()
+            let kept = folder.appendingPathComponent(name)
+            try? fileManager.removeItem(at: kept)
+            try fileManager.moveItem(at: current, to: kept)
+            originalName = name
+        } else {
+            try? fileManager.removeItem(at: current)
+        }
+        try fileManager.copyItem(at: file, to: current)
+        try ImageEncoder.data(for: poster, format: .png).write(to: folder.appendingPathComponent("poster.png"), options: .atomic)
+        index.update(id) { entry in
+            entry.originalFileName = originalName
+            entry.posterFileName = "poster.png"
+            entry.duration = duration
+            entry.pixelWidth = poster.width
+            entry.pixelHeight = poster.height
+            entry.byteSize = Self.size(of: folder)
+        }
+        self.index = index
+        save()
+        return index.entry(id)
+    }
+
+    /// Undoes trims: the untrimmed recording is the entry's file again.
+    @discardableResult
+    public func restoreUntrimmed(_ id: UUID, duration: Double, poster: CGImage) throws -> HistoryEntry? {
+        var index = load()
+        guard let old = index.entry(id), old.kind.isMedia, let originalName = old.originalFileName else { return nil }
+        let folder = folder(for: id)
+        let current = folder.appendingPathComponent(old.fileName)
+        try? fileManager.removeItem(at: current)
+        try fileManager.moveItem(at: folder.appendingPathComponent(originalName), to: current)
+        try ImageEncoder.data(for: poster, format: .png).write(to: folder.appendingPathComponent("poster.png"), options: .atomic)
+        index.update(id) { entry in
+            entry.originalFileName = nil
+            entry.duration = duration
+            entry.byteSize = Self.size(of: folder)
+        }
+        self.index = index
+        save()
+        return index.entry(id)
+    }
+
+    /// A recording's untrimmed file, if it was trimmed.
+    public nonisolated func untrimmedURL(for entry: HistoryEntry) -> URL? {
+        guard entry.kind.isMedia else { return nil }
+        return originalURL(for: entry)
+    }
+
     public func setSavedPath(_ id: UUID, _ path: String) {
         var index = load()
         index.update(id) { $0.savedPath = path }
@@ -268,7 +329,7 @@ public actor HistoryStore {
     public static func safeName(_ name: String) -> String {
         let cleaned = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: ".")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let reserved: Set<String> = ["", "original", "poster", "annotations", "index"]
+        let reserved: Set<String> = ["", "original", "poster", "annotations", "index", "untrimmed"]
         return reserved.contains(cleaned.lowercased()) ? "Capture" : cleaned
     }
 

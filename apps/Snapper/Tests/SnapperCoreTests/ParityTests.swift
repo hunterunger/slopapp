@@ -214,12 +214,12 @@ struct RecordingTests {
         let scene = (id: CGWindowID(77), frame: CGRect(x: 200, y: 100, width: 1000, height: 680))
         // A selection that spills over the menu bar, the Dock and other windows…
         let plan = try #require(RecordingPlan.make(selection: CGRect(x: 0, y: 0, width: 1440, height: 900), display: display, testScene: scene))
-        // …records the scene window alone, and only the part inside it.
-        #expect(plan.source == .window(77))
-        #expect(plan.sourceRect == CGRect(x: 0, y: 0, width: 1000, height: 680))
+        // …records only our own windows (the scene), and only the part inside the scene.
+        #expect(plan.source == .testScene(window: 77, display: 1))
+        #expect(plan.sourceRect == CGRect(x: 200, y: 100, width: 1000, height: 680))
         #expect(scene.frame.contains(plan.screenRect))
         let partial = try #require(RecordingPlan.make(selection: CGRect(x: 1100, y: 50, width: 300, height: 200), display: display, testScene: scene))
-        #expect(partial.sourceRect == CGRect(x: 900, y: 0, width: 100, height: 150))
+        #expect(partial.sourceRect == CGRect(x: 1100, y: 100, width: 100, height: 150))
         #expect(scene.frame.contains(partial.screenRect))
         // Missing the scene entirely: refused, never "record the display instead".
         #expect(RecordingPlan.make(selection: CGRect(x: 0, y: 0, width: 150, height: 90), display: display, testScene: scene) == nil)

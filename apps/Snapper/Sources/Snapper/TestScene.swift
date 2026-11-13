@@ -44,6 +44,31 @@ enum TestScene {
         scrollView.reflectScrolledClipView(clip)
     }
 
+    private static var tone: NSSound?
+    /// The test scene's sound (440 Hz): what a test recording's computer sound should hold.
+    static let toneFrequency: Double = 440
+
+    /// Plays a quiet 440 Hz tone from Snapper (for computer-sound recording tests: the test
+    /// stream holds only our own windows, so this is the only sound it can hear).
+    static func playTone(seconds: Double) {
+        guard isActive else { return }
+        var generator = ToneGenerator(frequency: toneFrequency, amplitude: 0.2, sampleRate: 48_000)
+        let samples = generator.next(Int(seconds * 48_000))
+        var data = Data()
+        func append<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) } }
+        let bytes = UInt32(samples.count * 2)
+        data.append(contentsOf: Array("RIFF".utf8)); append(UInt32(36) + bytes)
+        data.append(contentsOf: Array("WAVEfmt ".utf8)); append(UInt32(16)); append(UInt16(1)); append(UInt16(1))
+        append(UInt32(48_000)); append(UInt32(96_000)); append(UInt16(2)); append(UInt16(16))
+        data.append(contentsOf: Array("data".utf8)); append(bytes)
+        for sample in samples { append(Int16(max(-1, min(1, sample)) * Float(Int16.max))) }
+        tone?.stop()
+        tone = NSSound(data: data)
+        tone?.volume = 0.3
+        tone?.play()
+        Diagnostics.record("scene tone playing seconds=\(seconds)")
+    }
+
     static func showIfRequested() {
         guard let mode = Diagnostics.testScene else { return }
         let screen = NSScreen.underPointer ?? NSScreen.main

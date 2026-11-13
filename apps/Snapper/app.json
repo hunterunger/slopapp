@@ -31,6 +31,8 @@
           "snapper"
         ]
       }
-    ]
+    ],
+    "NSMicrophoneUsageDescription": "Snapper records your voice with a screen recording when you turn the microphone on. The sound stays in the recording on this Mac.",
+    "NSCameraUsageDescription": "Snapper shows your camera in a bubble in a screen recording when you turn the camera on. Nothing else is recorded or kept."
   }
 }

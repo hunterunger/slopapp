@@ -107,6 +107,44 @@ final class AppModel {
     var recordCountdown: Bool {
         didSet { defaults.set(recordCountdown, forKey: Keys.recordCountdown) }
     }
+    /// Recordings keep the Mac's own sound.
+    var recordComputerAudio: Bool {
+        didSet { defaults.set(recordComputerAudio, forKey: Keys.recordComputerAudio) }
+    }
+    /// Recordings keep the microphone (`microphoneID`, nil = the system's default).
+    var recordMicrophone: Bool {
+        didSet { defaults.set(recordMicrophone, forKey: Keys.recordMicrophone) }
+    }
+    var microphoneID: String? {
+        didSet { defaults.set(microphoneID, forKey: Keys.microphoneID) }
+    }
+    /// Recordings show the camera in a bubble (`cameraID`, nil = the system's default).
+    var recordCamera: Bool {
+        didSet { defaults.set(recordCamera, forKey: Keys.recordCamera) }
+    }
+    var cameraID: String? {
+        didSet { defaults.set(cameraID, forKey: Keys.cameraID) }
+    }
+    var cameraShape: BubbleShape {
+        didSet { defaults.set(cameraShape.rawValue, forKey: Keys.cameraShape) }
+    }
+    var cameraWidth: Double {
+        didSet { defaults.set(cameraWidth, forKey: Keys.cameraWidth) }
+    }
+    var cameraCorner: BubbleCorner {
+        didSet { defaults.set(cameraCorner.rawValue, forKey: Keys.cameraCorner) }
+    }
+    /// A ring where you click, in recordings.
+    var recordShowClicks: Bool {
+        didSet { defaults.set(recordShowClicks, forKey: Keys.recordShowClicks) }
+    }
+    /// A caption of the keys you press, in recordings (needs Accessibility).
+    var recordShowKeys: Bool {
+        didSet { defaults.set(recordShowKeys, forKey: Keys.recordShowKeys) }
+    }
+    var keystrokeMode: KeystrokeMode {
+        didSet { defaults.set(keystrokeMode.rawValue, forKey: Keys.keystrokeMode) }
+    }
     var gifFrameRate: Int {
         didSet { defaults.set(gifFrameRate, forKey: Keys.gifFrameRate) }
     }
@@ -115,7 +153,8 @@ final class AppModel {
     }
 
     var recordingOptions: RecordingOptions {
-        RecordingOptions(frameRate: recordFrameRate, showsCursor: recordShowsCursor, scaleToOneX: recordScaleToOneX)
+        RecordingOptions(frameRate: recordFrameRate, showsCursor: recordShowsCursor, scaleToOneX: recordScaleToOneX,
+                         audio: RecordingAudio(computer: recordComputerAudio, microphone: recordMicrophone))
     }
 
     var gifOptions: GIFEncoder.Options {
@@ -155,7 +194,7 @@ final class AppModel {
     @ObservationIgnored var pendingSource: SourceApp?
     @ObservationIgnored let textRecognizer: TextRecognizing = VisionTextRecognizer()
     @ObservationIgnored let codeReader: CodeReading = VisionCodeReader()
-    @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored private let defaults = Preferences.store
 
     private enum Keys {
         static let afterCapture = "afterCapture"
@@ -189,6 +228,17 @@ final class AppModel {
         static let recordScaleToOneX = "recordScaleToOneX"
         static let recordDimScreen = "recordDimScreen"
         static let recordCountdown = "recordCountdown"
+        static let recordComputerAudio = "recordComputerAudio"
+        static let recordMicrophone = "recordMicrophone"
+        static let microphoneID = "microphoneID"
+        static let recordCamera = "recordCamera"
+        static let cameraID = "cameraID"
+        static let cameraShape = "cameraShape"
+        static let cameraWidth = "cameraWidth"
+        static let cameraCorner = "cameraCorner"
+        static let recordShowClicks = "recordShowClicks"
+        static let recordShowKeys = "recordShowKeys"
+        static let keystrokeMode = "keystrokeMode"
         static let gifFrameRate = "gifFrameRate"
         static let gifWidth = "gifWidth"
     }
@@ -196,7 +246,7 @@ final class AppModel {
     private init(capturer: ScreenCapturing = ScreenCaptureKitCapturer(), pasteboard: PasteboardWriting = SystemPasteboardWriter()) {
         self.capturer = capturer
         self.pasteboard = pasteboard
-        let d = UserDefaults.standard
+        let d = Preferences.store
         afterCapture = (d.object(forKey: Keys.afterCapture) as? Int).map(AfterCapture.init(rawValue:)) ?? .default
         cardCorner = d.string(forKey: Keys.cardCorner).flatMap(CardCorner.init) ?? .left
         autoClose = (d.object(forKey: Keys.autoClose) as? Int).flatMap(AutoClose.init) ?? .never
@@ -228,6 +278,17 @@ final class AppModel {
         recordScaleToOneX = d.object(forKey: Keys.recordScaleToOneX) as? Bool ?? false
         recordDimScreen = d.object(forKey: Keys.recordDimScreen) as? Bool ?? true
         recordCountdown = d.object(forKey: Keys.recordCountdown) as? Bool ?? false
+        recordComputerAudio = d.object(forKey: Keys.recordComputerAudio) as? Bool ?? false
+        recordMicrophone = d.object(forKey: Keys.recordMicrophone) as? Bool ?? false
+        microphoneID = d.string(forKey: Keys.microphoneID)
+        recordCamera = d.object(forKey: Keys.recordCamera) as? Bool ?? false
+        cameraID = d.string(forKey: Keys.cameraID)
+        cameraShape = d.string(forKey: Keys.cameraShape).flatMap(BubbleShape.init) ?? .circle
+        cameraWidth = d.object(forKey: Keys.cameraWidth) as? Double ?? BubbleGeometry.defaultWidth
+        cameraCorner = d.string(forKey: Keys.cameraCorner).flatMap(BubbleCorner.init) ?? .bottomLeft
+        recordShowClicks = d.object(forKey: Keys.recordShowClicks) as? Bool ?? false
+        recordShowKeys = d.object(forKey: Keys.recordShowKeys) as? Bool ?? false
+        keystrokeMode = d.string(forKey: Keys.keystrokeMode).flatMap(KeystrokeMode.init) ?? .shortcuts
         gifFrameRate = (d.object(forKey: Keys.gifFrameRate) as? Int) ?? 15
         gifWidth = (d.object(forKey: Keys.gifWidth) as? Int) ?? 800
         cards = CardController(model: self)
@@ -526,7 +587,7 @@ final class AppModel {
     }
 
     func annotate(_ item: CaptureItem) {
-        guard !item.isMedia else { return }
+        guard !item.isMedia else { openTrimmer(item); return }
         cards.close(item, remember: false)
         EditorWindowController.open(item, model: self)
     }
@@ -560,6 +621,80 @@ final class AppModel {
                 HUD.show("Couldn't make a GIF", systemImage: "exclamationmark.triangle")
             }
         }
+    }
+
+    /// Opens a video in the trim window.
+    func openTrimmer(_ item: CaptureItem) {
+        guard let media = item.media, !media.isGIF else { return }
+        TrimWindowController.show(item, model: self)
+    }
+
+    /// Keeps only `range` of a video (no re-encoding). The thumbnail stays where it is and
+    /// shows the shorter video; history gets it too. The untrimmed recording is kept so
+    /// `restoreUntrimmed` can undo it.
+    func trim(_ item: CaptureItem, to range: TrimRange) {
+        guard let media = item.media, !media.isGIF, !range.isWhole(of: media.duration) else { return }
+        let started = Diagnostics.now()
+        Task {
+            let folder = TemporaryFiles.root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let output = folder.appendingPathComponent(media.url.lastPathComponent)
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try await MediaEditor.trim(media.url, to: range, output: output)
+                let duration = await MediaEditor.duration(of: output)
+                guard let poster = await VideoFrames.poster(of: output) else { throw RecordingError.noFrames }
+                if item.untrimmed == nil, item.historyID == nil { item.untrimmed = media }
+                try await replaceMedia(of: item, with: MediaFile(url: output, duration: duration), poster: poster)
+                Diagnostics.record("trimmed seconds=\(String(format: "%.1f", duration)) from=\(String(format: "%.1f", media.duration)) ms=\(Diagnostics.milliseconds(since: started))")
+                HUD.show("Trimmed to \(Elapsed.string(duration))", systemImage: "scissors")
+            } catch {
+                try? FileManager.default.removeItem(at: folder)
+                Diagnostics.record("trim failed error=\(error)")
+                HUD.show("Couldn't trim the recording", systemImage: "exclamationmark.triangle")
+            }
+        }
+    }
+
+    /// Whether a video was trimmed and can go back to the whole recording.
+    func canRestoreUntrimmed(_ item: CaptureItem) -> Bool {
+        if item.untrimmed != nil { return true }
+        guard let entry = history.entry(item.historyID) else { return false }
+        return history.store.untrimmedURL(for: entry) != nil
+    }
+
+    /// Undoes trims: the whole recording again.
+    func restoreUntrimmed(_ item: CaptureItem) {
+        Task {
+            do {
+                if let entry = history.entry(item.historyID), let url = history.store.untrimmedURL(for: entry) {
+                    let duration = await MediaEditor.duration(of: url)
+                    guard let poster = await VideoFrames.poster(of: url) else { throw RecordingError.noFrames }
+                    guard let updated = try await history.restoreUntrimmed(item, duration: duration, poster: poster) else { return }
+                    item.replaceMedia(MediaFile(url: history.store.fileURL(for: updated), duration: duration), poster: poster)
+                } else if let original = item.untrimmed {
+                    guard let poster = await VideoFrames.poster(of: original.url) else { throw RecordingError.noFrames }
+                    item.untrimmed = nil
+                    item.replaceMedia(original, poster: poster)
+                } else {
+                    return
+                }
+                cards.refresh(item)
+                Diagnostics.record("trim restored")
+                HUD.show("Restored the whole recording", systemImage: "arrow.uturn.backward")
+            } catch {
+                HUD.show("Couldn't restore the recording", systemImage: "exclamationmark.triangle")
+            }
+        }
+    }
+
+    private func replaceMedia(of item: CaptureItem, with media: MediaFile, poster: CGImage) async throws {
+        if item.historyID != nil, let updated = try await history.replaceMedia(item, with: media, poster: poster) {
+            try? FileManager.default.removeItem(at: media.url.deletingLastPathComponent())
+            item.replaceMedia(MediaFile(url: history.store.fileURL(for: updated), duration: media.duration), poster: poster)
+        } else {
+            item.replaceMedia(media, poster: poster)
+        }
+        cards.refresh(item)
     }
 
     func showInFinder(_ item: CaptureItem) {

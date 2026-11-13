@@ -82,7 +82,9 @@ struct CardView: View {
             }
             Spacer(minLength: 0)
             HStack {
-                if item.isMedia {
+                if item.media?.isGIF == false {
+                    CornerButton("Trim", systemImage: "scissors") { model.openTrimmer(item) }
+                } else if item.isMedia {
                     CornerButton("Open", systemImage: "play.fill") { model.openMedia(item) }
                 } else {
                     CornerButton("Annotate", systemImage: "pencil") { model.annotate(item) }
@@ -112,6 +114,10 @@ struct CardView: View {
         if item.isMedia {
             Button("Open") { model.openMedia(item) }
             if item.media?.isGIF == false {
+                Button("Trim…") { model.openTrimmer(item) }
+                if model.canRestoreUntrimmed(item) {
+                    Button("Restore Untrimmed Recording") { model.restoreUntrimmed(item) }
+                }
                 Button("Export as GIF") { model.exportGIF(item) }
             }
         } else {
@@ -287,7 +293,7 @@ final class DragSourceView: NSView, NSDraggingSource {
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
         setAccessibilityLabel(item.isMedia ? "Recording" : "Capture, \(item.pixelSizeDescription) pixels")
-        setAccessibilityHelp("Drag it into another app, or double-click to annotate.")
+        setAccessibilityHelp(item.isMedia ? "Drag it into another app, or double-click to play it." : "Drag it into another app, or double-click to annotate.")
     }
 
     /// Fills the card: a capture taller than the card shows its top (where a page or a
@@ -303,10 +309,10 @@ final class DragSourceView: NSView, NSDraggingSource {
         }
     }
 
-    /// VoiceOver's "press" opens the editor, like a double-click.
+    /// VoiceOver's "press" opens the editor (a recording plays), like a double-click.
     override func accessibilityPerformPress() -> Bool {
         guard let item, let model else { return false }
-        model.annotate(item)
+        if item.isMedia { model.openMedia(item) } else { model.annotate(item) }
         return true
     }
 

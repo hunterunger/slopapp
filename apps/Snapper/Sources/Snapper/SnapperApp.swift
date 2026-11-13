@@ -44,7 +44,7 @@ extension KeyboardShortcuts.Name {
 @main
 struct SnapperApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @AppStorage(MenuBarIcon.storageKey) private var showMenuBarIcon = true
+    @AppStorage(MenuBarIcon.storageKey, store: Preferences.store) private var showMenuBarIcon = true
     @State private var model = AppModel.shared
     private let info = AppInfo.current(fallbackName: "Snapper")
 
@@ -222,7 +222,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppPresence.start()
         AppModel.shared.history.start()
         let model = AppModel.shared
-        Self.migrateShortcuts()
+        // Shortcuts live in the app's own defaults: a test copy with its own suite leaves them be.
+        if Diagnostics.defaultsSuite == nil { Self.migrateShortcuts() }
+        if !Diagnostics.noShortcuts { installShortcuts(model) }
+        if Diagnostics.testHooks { installTestHooks(model) }
+        TestScene.showIfRequested()
+        if let scene = Showcase.scene { ShowcaseScenes.run(scene, model: model) }
+        Diagnostics.record("launched permission=\(model.hasPermission) shortcuts=\(!Diagnostics.noShortcuts)")
+    }
+
+    /// The global shortcuts (not in test copies with `SNAPPER_NO_SHORTCUTS`).
+    private func installShortcuts(_ model: AppModel) {
         for mode in CaptureMode.allCases {
             KeyboardShortcuts.onKeyDown(for: .forMode(mode)) { model.capture(mode, started: Diagnostics.now()) }
         }
@@ -234,10 +244,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         KeyboardShortcuts.onKeyDown(for: .reopenLast) { model.reopenLastCapture() }
         KeyboardShortcuts.onKeyDown(for: .closeAllCards) { model.cards.closeAll() }
         KeyboardShortcuts.onKeyDown(for: .openHistory) { HistoryWindowController.show() }
-        if Diagnostics.testHooks { installTestHooks(model) }
-        TestScene.showIfRequested()
-        if let scene = Showcase.scene { ShowcaseScenes.run(scene, model: model) }
-        Diagnostics.record("launched permission=\(model.hasPermission)")
     }
 
     /// Finder ▸ Open With, `open -a Snapper image.png`, or a drop on the Dock icon: each
@@ -266,8 +272,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// picking). Once, free the old default so the two don't collide.
     private static func migrateShortcuts() {
         let key = "migratedShortcuts.v3"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-        UserDefaults.standard.set(true, forKey: key)
+        guard !Preferences.store.bool(forKey: key) else { return }
+        Preferences.store.set(true, forKey: key)
         let old = KeyboardShortcuts.Shortcut(.five, modifiers: [.option, .shift, .command])
         if KeyboardShortcuts.getShortcut(for: .captureWindow) == old {
             KeyboardShortcuts.setShortcut(nil, for: .captureWindow)
@@ -322,6 +328,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "recordStop": { model.recording.stop() },
             "recordPause": { model.recording.togglePause() },
             "recordDiscard": { model.recording.discard() },
+            // Recording extras (test mode uses the test microphone and camera; nothing real).
+            "recordMicOn": { model.recording.chooseMicrophone(FakeMediaDevices.microphone.id) },
+            "recordMicOff": { model.recording.chooseMicrophone(nil) },
+            "recordComputerAudioOn": { model.recordComputerAudio = true },
+            "recordComputerAudioOff": { model.recordComputerAudio = false },
+            "recordCameraOn": { model.recording.chooseCamera(FakeMediaDevices.camera.id) },
+            "recordCameraOff": { model.recording.chooseCamera(nil) },
+            "recordCameraLarger": { if let width = model.recording.camera.frame?.width { model.recording.camera.resize(to: width * 1.3) } },
+            "recordCameraRounded": { model.recording.camera.setShape(.roundedRectangle) },
+            "recordCameraCircle": { model.recording.camera.setShape(.circle) },
+            "recordClicksOn": { model.recordShowClicks = true },
+            "recordClicksOff": { model.recordShowClicks = false },
+            "recordKeysOn": { model.recording.toggleKeys(on: true) },
+            "recordKeysOff": { model.recordShowKeys = false },
+            "recordKeysAll": { model.keystrokeMode = .allKeys },
+            "recordKeysShortcuts": { model.keystrokeMode = .shortcuts },
+            "recordClick": {
+                // A synthetic click in the middle of the scene (no real mouse).
+                guard let region = TestScene.region() else { return }
+                InputOverlay.current?.showClick(at: CGPoint(x: region.global.midX, y: region.global.midY))
+            },
+            "recordKeyShortcut": { InputOverlay.current?.show(KeyStroke(keyCode: 21, key: "4", typed: "$", modifiers: [.command, .shift])) },
+            "recordKeyTyping": {
+                for (index, key) in "hello".enumerated() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.08) {
+                        InputOverlay.current?.show(KeyStroke(keyCode: 0, key: String(key)))
+                    }
+                }
+            },
+            "snapshotRecordingUI": { Task { await RecordingSnapshots.write(model: model) } },
+            "cardFromTestVideo": {
+                // `SNAPPER_TEST_VIDEO`: a generated video becomes a recording's thumbnail, as if
+                // just recorded (trim tests while the display can't be recorded).
+                guard let path = ProcessInfo.processInfo.environment["SNAPPER_TEST_VIDEO"] else { return }
+                Task {
+                    let folder = TemporaryFiles.root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    let url = folder.appendingPathComponent("Test Recording.mp4")
+                    guard (try? FileManager.default.copyItem(at: URL(fileURLWithPath: path), to: url)) != nil,
+                          let poster = await VideoFrames.poster(of: url) else { return }
+                    let duration = await MediaEditor.duration(of: url)
+                    model.deliver(poster, scale: 2, displayID: nil, started: Diagnostics.now(), kind: "video", media: MediaFile(url: url, duration: duration))
+                }
+            },
+            "sceneTone": { TestScene.playTone(seconds: 2.5) },
+            "trimWindowLast": { if let item = model.cards.newest { model.openTrimmer(item) } },
+            "trimMiddleLast": {
+                // The middle half of the newest video, the way the trim window's Trim does it.
+                guard let item = model.cards.newest, let media = item.media,
+                      let range = TrimRange(start: media.duration / 4, end: media.duration * 3 / 4, duration: media.duration) else { return }
+                if let window = TrimWindowController.front { window.trim(to: range) } else { model.trim(item, to: range) }
+            },
+            "restoreUntrimmedLast": { if let item = model.cards.newest { model.restoreUntrimmed(item) } },
             "countdownCancel": { Countdown.cancel() },
             "allInOneClose": { AllInOneBar.close() },
             "copyTextLast": { if let item = model.cards.newest { model.copyText(item) } },
@@ -438,7 +497,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        standard.applicationDidBecomeActive(notification)
         AppModel.shared.refreshPermission()
     }
 

@@ -28,6 +28,8 @@ final class CaptureItem: Identifiable {
     /// A screen recording (MP4 or GIF). `image` is then its first frame (the poster).
     var media: MediaFile?
     var isMedia: Bool { media != nil }
+    /// A trimmed video's whole recording, while it isn't in history (history keeps its own).
+    var untrimmed: MediaFile?
     /// QR codes found in `image` (filled in after the card appears).
     var codes: [ScannedCode] = []
     /// The image `codes` were read from, so a scan of an older version is dropped.
@@ -72,6 +74,13 @@ final class CaptureItem: Identifiable {
         codes = []
         codesScanned = nil
         invalidateTemporaryFile()
+    }
+
+    /// A trimmed (or restored) video: its new file and first frame.
+    func replaceMedia(_ media: MediaFile, poster: CGImage) {
+        self.media = media
+        image = poster
+        savedURL = nil
     }
 
     // MARK: Temporary file
@@ -156,8 +165,8 @@ final class CaptureItem: Identifiable {
 
 /// Snapper's temporary folder. Emptied at launch and quit; captures never outlive the session.
 enum TemporaryFiles {
-    nonisolated static let root: URL = FileManager.default.temporaryDirectory
-        .appendingPathComponent("app.slopapp.snapper", isDirectory: true)
+    nonisolated static let root: URL = Diagnostics.temporaryDirectory.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        ?? FileManager.default.temporaryDirectory.appendingPathComponent("app.slopapp.snapper", isDirectory: true)
 
     static func clear() {
         try? FileManager.default.removeItem(at: root)
