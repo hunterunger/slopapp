@@ -11,6 +11,7 @@ struct BrowsersTab: View {
     @State private var selection: UUID? = Showcase.isActive ? ShowcaseFixtures.selectedTarget : nil
     @Environment(\.undoManager) private var undoManager
     @State private var profileSheetFor: InstalledApp?
+    @State private var safariProfileSheetFor: InstalledApp?
     @State private var pendingRemoval: Target?
     @State private var showUndo = false
 
@@ -34,7 +35,7 @@ struct BrowsersTab: View {
             } else {
                 List(selection: $selection) {
                     ForEach(model.config.targets) { target in
-                        TargetRow(target: target, number: pickerNumber(of: target), isInstalled: model.isInstalled(target))
+                        TargetListRow(target: target, number: pickerNumber(of: target), isInstalled: model.isInstalled(target))
                             .tag(target.id)
                             .listRowSeparator(.hidden)
                             .contextMenu { contextMenu(for: target) }
@@ -64,6 +65,13 @@ struct BrowsersTab: View {
             }
         }
         .padding(Spacing.xl)
+        .onReceive(NotificationCenter.default.publisher(for: .switchboardOpenSheet)) { note in
+            switch note.object as? String {
+            case "safari-profile": safariProfileSheetFor = model.installedBrowsers.first { $0.bundleID == "com.apple.Safari" }
+            case "select-private": selection = model.config.targets.first { $0.privateWindow }?.id
+            default: break
+            }
+        }
         .confirmationDialog(
             pendingRemoval.map { removalTitle(for: $0) } ?? "",
             isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
@@ -76,6 +84,11 @@ struct BrowsersTab: View {
         }
         .sheet(item: $profileSheetFor) { app in
             ProfileSheet(app: app, model: model) { added in
+                if let added { selection = added }
+            }
+        }
+        .sheet(item: $safariProfileSheetFor) { app in
+            SafariProfileSheet(app: app, model: model) { added in
                 if let added { selection = added }
             }
         }
@@ -117,7 +130,9 @@ struct BrowsersTab: View {
             if !profileBrowsers.isEmpty {
                 Section("Profiles") {
                     ForEach(profileBrowsers, id: \.bundleID) { app in
-                        Button("\(app.name) Profiles…") { profileSheetFor = app }
+                        Button("\(app.name) Profiles…") {
+                            if BrowserCatalog.family(for: app.bundleID) == .safari { safariProfileSheetFor = app } else { profileSheetFor = app }
+                        }
                     }
                 }
             }
@@ -243,7 +258,7 @@ struct BrowsersTab: View {
     }
 }
 
-private struct TargetRow: View {
+struct TargetListRow: View {
     let target: Target
     let number: Int?
     let isInstalled: Bool
@@ -296,7 +311,7 @@ private struct TargetOptions: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
                 Text(target.displayName)
                     .font(.headline)
-                if let folder = target.profile?.directory {
+                if let folder = target.profile?.directory, family != .safari {
                     Text("Folder: \(folder)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -313,6 +328,9 @@ private struct TargetOptions: View {
             }
             if family.supportsPrivateWindow {
                 Toggle("Private window", isOn: $target.privateWindow)
+            }
+            if family.windowsNeedAccessibility, target.privateWindow || target.profile != nil {
+                AccessibilityNote()
             }
         }
         .toggleStyle(.checkbox)

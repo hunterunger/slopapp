@@ -9,6 +9,9 @@ public struct LaunchPlan: Equatable, Sendable {
         /// Launch (a new instance of) the app with arguments. Needed for profiles and private
         /// windows: the browser's running instance picks the arguments up and opens the URL.
         case launchWithArguments([String])
+        /// Safari: open this kind of window from its File menu (needs Accessibility), then
+        /// hand it the link, which opens in that new front window.
+        case safariWindow(SafariWindowRequest, URL)
     }
 
     public var appPath: String
@@ -21,9 +24,31 @@ public struct LaunchPlan: Equatable, Sendable {
         self.activates = activates
     }
 
+    /// The link the target actually gets: webmail turns a mailto link into its compose page.
+    public var url: URL? {
+        switch method {
+        case .openURL(let url), .safariWindow(_, let url): url
+        case .launchWithArguments(let arguments): arguments.last.flatMap(URL.init(string:))
+        }
+    }
+
+    /// Whether this plan needs Accessibility (Safari windows).
+    public var needsAccessibility: Bool {
+        if case .safariWindow = method { return true }
+        return false
+    }
+
     /// - Parameter background: open without bringing the browser forward (target option, or ⇧ in the picker).
-    public static func make(for target: Target, url: URL, background: Bool = false) -> LaunchPlan {
+    /// - Returns: nil when the link can't go to this target: a webmail target given something
+    ///   that isn't a mailto link, or a custom compose address that doesn't work. Never falls
+    ///   back to giving a browser the mailto link (it would hand it straight back to us).
+    public static func make(for target: Target, url: URL, background: Bool = false) -> LaunchPlan? {
         let activates = !(background || target.opensInBackground)
+        var url = url
+        if let webmail = target.webmail {
+            guard let mail = MailtoLink(url), let compose = webmail.composeURL(for: mail) else { return nil }
+            url = compose
+        }
         let family = BrowserCatalog.family(for: target.bundleID)
         var arguments: [String] = []
 
@@ -39,7 +64,15 @@ public struct LaunchPlan: Equatable, Sendable {
             if target.privateWindow {
                 arguments.append("-private-window")
             }
-        case .safari, .other:
+        case .safari:
+            // Private beats profile: Safari's private windows aren't tied to a profile.
+            if target.privateWindow {
+                return LaunchPlan(appPath: target.appPath, method: .safariWindow(.privateWindow, url), activates: true)
+            }
+            if let profile = target.profile {
+                return LaunchPlan(appPath: target.appPath, method: .safariWindow(.profile(profile.directory), url), activates: true)
+            }
+        case .other:
             break
         }
 

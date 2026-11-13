@@ -26,6 +26,9 @@ public struct Target: Codable, Identifiable, Hashable, Sendable {
     public var opensInBackground: Bool
     /// Hidden targets aren't offered in the picker, but rules can still use them.
     public var isHidden: Bool
+    /// Email targets only: write mailto links in this webmail, in this browser and profile.
+    /// nil for a browser, or for a mail app (which gets the mailto link itself).
+    public var webmail: Webmail?
 
     public init(
         id: UUID = UUID(),
@@ -35,7 +38,8 @@ public struct Target: Codable, Identifiable, Hashable, Sendable {
         profile: BrowserProfile? = nil,
         privateWindow: Bool = false,
         opensInBackground: Bool = false,
-        isHidden: Bool = false
+        isHidden: Bool = false,
+        webmail: Webmail? = nil
     ) {
         self.id = id
         self.bundleID = bundleID
@@ -45,14 +49,28 @@ public struct Target: Codable, Identifiable, Hashable, Sendable {
         self.privateWindow = privateWindow
         self.opensInBackground = opensInBackground
         self.isHidden = isHidden
+        self.webmail = webmail
     }
 
-    /// "Google Chrome", "Google Chrome (Work)", "Firefox (Private)".
+    /// "Google Chrome", "Google Chrome (Work)", "Firefox (Private)", "Gmail in Safari".
     public var displayName: String {
         var extras: [String] = []
         if let profile { extras.append(profile.name) }
         if privateWindow { extras.append("Private") }
-        return extras.isEmpty ? appName : "\(appName) (\(extras.joined(separator: ", ")))"
+        let browser = extras.isEmpty ? appName : "\(appName) (\(extras.joined(separator: ", ")))"
+        if let webmail { return "\(webmailTitle(webmail)) in \(browser)" }
+        return browser
+    }
+
+    /// The first line of a picker row: the app, or the webmail service.
+    public var pickerTitle: String {
+        webmail.map(webmailTitle) ?? appName
+    }
+
+    private func webmailTitle(_ webmail: Webmail) -> String {
+        let account = webmail.account.trimmingCharacters(in: .whitespaces)
+        guard webmail.provider.supportsAccount, !account.isEmpty else { return webmail.provider.shortTitle }
+        return account.allSatisfy(\.isNumber) ? "\(webmail.provider.shortTitle) (account \(account))" : "\(webmail.provider.shortTitle) (\(account))"
     }
 
     /// Short name for tight spaces (the picker): the profile name if any, else the app name.
@@ -65,6 +83,7 @@ public struct Target: Codable, Identifiable, Hashable, Sendable {
     /// or "" when there's nothing to add to the app name.
     public var pickerSubtitle: String {
         var parts: [String] = []
+        if webmail != nil { parts.append(appName) }
         if let profile { parts.append(profile.name) }
         if privateWindow { parts.append("Private") }
         if opensInBackground { parts.append("Background") }
@@ -74,12 +93,13 @@ public struct Target: Codable, Identifiable, Hashable, Sendable {
     /// Which browser, profile and window kind this is, ignoring id and options. Used to bring
     /// back a removed target's identity when the same browser is added again.
     public var destinationKey: String {
-        "\(bundleID.lowercased())|\(profile?.directory ?? "")|\(privateWindow)"
+        "\(bundleID.lowercased())|\(profile?.directory ?? "")|\(privateWindow)" + (webmail.map { "|\($0.provider.rawValue)|\($0.account)|\($0.template)" } ?? "")
     }
 
     /// Same destination, ignoring id and visibility. Used to avoid duplicate entries.
     public func isSameDestination(as other: Target) -> Bool {
         bundleID == other.bundleID && profile?.directory == other.profile?.directory
             && privateWindow == other.privateWindow && opensInBackground == other.opensInBackground
+            && webmail == other.webmail
     }
 }

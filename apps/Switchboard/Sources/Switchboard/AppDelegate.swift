@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import SlopKit
 import SwitchboardCore
 
@@ -42,6 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Diagnostics.record("appearance flipped to \(isDark ? "light" : "dark")")
             }
         }
+        TestInbox.startIfRequested()
+        if let probe = Diagnostics.menuProbeBundleID { Self.probeMenu(of: probe) }
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { AppModel.shared.refreshDefaultStatus() }
@@ -73,6 +76,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// `SWITCHBOARD_MENU_PROBE`: log a running app's File menu as Accessibility reads it, and
+    /// what the Safari matcher would press there. Reads only; presses nothing.
+    private static func probeMenu(of bundleID: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else {
+                Diagnostics.record("menu probe: \(bundleID) isn't running")
+                return
+            }
+            guard AXIsProcessTrusted(), let bar = AXMenuReader.menuBar(of: app.processIdentifier), bar.count > 2 else {
+                Diagnostics.record("menu probe: no menu bar (accessibility=\(AXIsProcessTrusted()))")
+                return
+            }
+            // The File menu as the Safari opener finds it; without one, the menu after the
+            // app menu, which still shows titles, shortcuts and modifiers come through.
+            let file = AXMenuReader.fileMenuItems(in: bar)
+            Diagnostics.record("menu probe: file menu \(file == nil ? "not found, showing menu 3" : "found")")
+            let snapshot = AXMenuReader.snapshot(file ?? AXMenuReader.items(ofMenuBarItem: bar[2]))
+            for line in AXMenuReader.describe(snapshot) { Diagnostics.record("menu probe: \(line)") }
+            Diagnostics.record("menu probe: private window item path=\(SafariMenu.path(for: .privateWindow, inFileMenu: snapshot).map { "\($0)" } ?? "none")")
+            Diagnostics.record("menu probe: windows=\(AXMenuReader.windowCount(of: app.processIdentifier))")
+        }
+    }
+
     // MARK: - SlopKit standard behavior
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -80,7 +106,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        standard.applicationDidBecomeActive(notification)
         AppModel.shared.refreshDefaultStatus()
     }
 

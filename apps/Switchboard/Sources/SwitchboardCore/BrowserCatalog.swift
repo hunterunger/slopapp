@@ -10,17 +10,26 @@ public enum BrowserFamily: Equatable, Sendable {
     /// A browser with no command-line profile or private support we know of.
     case other
 
+    /// Chromium: profiles read from its "Local State". Safari: profiles by the name in its
+    /// File menu (needs Accessibility).
     public var supportsProfiles: Bool {
-        if case .chromium(let dir) = self { return dir != nil }
-        return false
+        switch self {
+        case .chromium(let dir): dir != nil
+        case .safari: true
+        case .firefox, .other: false
+        }
     }
 
     public var supportsPrivateWindow: Bool {
         switch self {
-        case .chromium, .firefox: true
-        case .safari, .other: false
+        case .chromium, .firefox, .safari: true
+        case .other: false
         }
     }
+
+    /// Safari has no command line or scripting for profiles and private windows: Switchboard
+    /// uses its File menu, which needs Accessibility.
+    public var windowsNeedAccessibility: Bool { self == .safari }
 }
 
 /// A browser we recognise by bundle ID. Apps that merely register `https` (terminals, IDEs,
@@ -88,6 +97,49 @@ public enum BrowserCatalog {
 
     public static func rank(of bundleID: String) -> Int {
         known.firstIndex { $0.bundleID.caseInsensitiveCompare(bundleID) == .orderedSame } ?? Int.max
+    }
+}
+
+/// Mail apps we recognise. Other apps that register mailto: (terminals, some browsers) are
+/// offered under "Other Apps".
+public enum MailAppCatalog {
+    public static let known: [String] = [
+        "com.apple.mail",
+        "com.microsoft.Outlook",
+        "com.readdle.SparkDesktop",
+        "com.readdle.smartemail-Mac",
+        "com.mimestream.Mimestream",
+        "it.bloop.airmail2",
+        "io.canarymail.mac",
+        "com.superhuman.electron",
+        "org.mozilla.thunderbird",
+        "com.freron.MailMate",
+        "com.postbox-inc.postbox",
+        "ch.protonmail.desktop",
+        "com.fastmail.mac.Fastmail",
+        "com.hey.app.desktop",
+    ]
+
+    public static func rank(of bundleID: String) -> Int? {
+        known.firstIndex { $0.caseInsensitiveCompare(bundleID) == .orderedSame }
+    }
+
+    /// Splits apps that can open mailto: links into mail apps (known list order) and others,
+    /// without Switchboard and other link routers.
+    public static func classify(_ apps: [InstalledApp], excluding ownBundleID: String?)
+        -> (mailApps: [InstalledApp], others: [InstalledApp])
+    {
+        var seen = Set<String>()
+        let unique = apps.filter { app in
+            let key = app.bundleID.lowercased()
+            if let own = ownBundleID, key == own.lowercased() { return false }
+            if BrowserCatalog.isLinkRouter(app.bundleID) { return false }
+            return seen.insert(key).inserted
+        }
+        let mail = unique.filter { rank(of: $0.bundleID) != nil }.sorted { rank(of: $0.bundleID)! < rank(of: $1.bundleID)! }
+        let others = unique.filter { rank(of: $0.bundleID) == nil }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return (mail, others)
     }
 }
 

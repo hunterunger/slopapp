@@ -20,8 +20,10 @@ public struct IncomingLink: Equatable, Sendable {
 
 /// What to do with a URL that arrived, before any routing.
 public enum LinkIntake: Equatable, Sendable {
-    /// A web link (or local HTML file) to route.
+    /// A web link, email link or file to route.
     case route(URL, forcePicker: Bool)
+    /// A web location file (.webloc, .url): read it and route the link inside.
+    case readLinkFile(URL)
     /// Not something Switchboard handles.
     case reject(reason: String)
 }
@@ -29,8 +31,13 @@ public enum LinkIntake: Equatable, Sendable {
 public enum LinkParser {
     public static let ownScheme = "switchboard"
 
-    /// Validates an incoming URL. Accepts http(s), local .html/.htm/.xhtml files, and our own
-    /// `switchboard://open?url=<encoded>&pick=1` scheme (for scripts and testing).
+    /// Web location files, whose link is routed instead of the file.
+    public static let linkFileExtensions: Set<String> = ["webloc", "url", "inetloc"]
+
+    /// Validates an incoming URL. Accepts http(s), mailto, files macOS asked us to open
+    /// (web pages open in browsers; web locations are read for their link), and our own
+    /// `switchboard://open?url=<encoded>&pick=1` scheme (for scripts and testing), which only
+    /// takes web and email links.
     public static func intake(_ url: URL) -> LinkIntake {
         let scheme = url.scheme?.lowercased() ?? ""
         switch scheme {
@@ -39,10 +46,13 @@ public enum LinkParser {
                 return .reject(reason: "The link has no web address.")
             }
             return .route(url, forcePicker: false)
+        case "mailto":
+            return .route(url, forcePicker: false)
         case "file":
             let ext = url.pathExtension.lowercased()
-            guard ["html", "htm", "xhtml", "shtml"].contains(ext) else {
-                return .reject(reason: "Switchboard only opens web pages.")
+            if linkFileExtensions.contains(ext) { return .readLinkFile(url) }
+            guard !url.hasDirectoryPath, !url.path.isEmpty else {
+                return .reject(reason: "Switchboard opens files, not folders.")
             }
             return .route(url, forcePicker: false)
         case ownScheme:
@@ -53,10 +63,12 @@ public enum LinkParser {
                 return .reject(reason: "Expected switchboard://open?url=<link>.")
             }
             let pick = components.queryItems?.contains { $0.name == "pick" && $0.value != "0" } ?? false
-            if inner.scheme?.lowercased() != ownScheme, case .route(let innerURL, _) = intake(inner) {
+            let innerScheme = inner.scheme?.lowercased() ?? ""
+            let isWebPage = innerScheme == "file" && LinkKind.webPageExtensions.contains(inner.pathExtension.lowercased())
+            if ["http", "https", "mailto"].contains(innerScheme) || isWebPage, case .route(let innerURL, _) = intake(inner) {
                 return .route(innerURL, forcePicker: pick)
             }
-            return .reject(reason: "Switchboard only opens web pages.")
+            return .reject(reason: "Switchboard only opens web and email links from switchboard: links.")
         default:
             return .reject(reason: "Switchboard doesn't handle \(scheme.isEmpty ? "this kind of" : scheme + ":") links.")
         }
@@ -115,9 +127,15 @@ public enum LinkParser {
 
 /// How a link is shown to people: Unicode host, and short paths.
 public enum LinkText {
-    /// The host as people read it ("bücher.de"), without "www.". Files show their name.
+    /// The host as people read it ("bücher.de"), without "www.". Files show their name,
+    /// email links who they're to.
     public static func host(of url: URL) -> String {
         if url.isFileURL { return url.lastPathComponent }
+        if let mail = MailtoLink(url) {
+            guard let first = mail.to.first ?? mail.cc.first ?? mail.bcc.first else { return "New email" }
+            let others = mail.recipients.count - 1
+            return others > 0 ? "\(first) + \(others) more" : first
+        }
         guard let host = url.host, !host.isEmpty else { return url.absoluteString }
         var display = Punycode.displayHost(host.lowercased())
         if display.hasPrefix("www.") { display.removeFirst(4) }
@@ -128,6 +146,7 @@ public enum LinkText {
     /// Path + query, middle-truncated, or "" for a bare host.
     public static func detail(of url: URL, maxLength: Int = 48) -> String {
         if url.isFileURL { return truncateMiddle(url.deletingLastPathComponent().path, maxLength: maxLength) }
+        if let mail = MailtoLink(url) { return truncateMiddle(mail.subject, maxLength: maxLength) }
         var rest = url.path
         if let query = url.query, !query.isEmpty { rest += "?" + query }
         if rest == "/" { rest = "" }

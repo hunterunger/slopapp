@@ -57,11 +57,20 @@ struct SwitchboardMenu: View {
                 .keyboardShortcut("z")
         }
 
-        if model.isDefaultBrowser, !model.installedBrowsers.isEmpty {
+        if (model.isDefaultBrowser && !model.installedBrowsers.isEmpty) || (model.isDefaultEmailApp && !model.installedMailApps.isEmpty) {
             Divider()
+        }
+        if model.isDefaultBrowser, !model.installedBrowsers.isEmpty {
             Menu("Stop Being Default Browser") {
                 ForEach(model.installedBrowsers, id: \.bundleID) { app in
                     Button("Use \(app.name) Instead…") { model.handBack(to: app) }
+                }
+            }
+        }
+        if model.isDefaultEmailApp, !model.installedMailApps.isEmpty {
+            Menu("Stop Being Default Email App") {
+                ForEach(model.installedMailApps, id: \.bundleID) { app in
+                    Button("Use \(app.name) Instead…") { model.handBackEmail(to: app) }
                 }
             }
         }

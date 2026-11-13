@@ -24,6 +24,13 @@
         ]
       },
       {
+        "CFBundleURLName": "Email address",
+        "CFBundleTypeRole": "Viewer",
+        "CFBundleURLSchemes": [
+          "mailto"
+        ]
+      },
+      {
         "CFBundleURLName": "Switchboard URL",
         "CFBundleTypeRole": "Viewer",
         "CFBundleURLSchemes": [
@@ -39,6 +46,31 @@
         "LSItemContentTypes": [
           "public.html",
           "public.xhtml"
+        ]
+      },
+      {
+        "CFBundleTypeName": "PDF document",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "None",
+        "LSItemContentTypes": [
+          "com.adobe.pdf"
+        ]
+      },
+      {
+        "CFBundleTypeName": "Web location",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "None",
+        "LSItemContentTypes": [
+          "com.apple.web-internet-location",
+          "com.microsoft.internet-shortcut"
+        ]
+      },
+      {
+        "CFBundleTypeName": "Other file",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "None",
+        "LSItemContentTypes": [
+          "public.data"
         ]
       }
     ]

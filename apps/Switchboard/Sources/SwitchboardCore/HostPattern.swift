@@ -37,8 +37,15 @@ public struct HostPattern: Equatable, Sendable {
     }
 
     public func matches(_ url: URL) -> Bool {
-        guard let rawHost = url.host?.lowercased(), !rawHost.isEmpty else { return false }
-        if let port, url.port != port { return false }
+        guard let rawHost = url.host else { return false }
+        return matches(host: rawHost, port: url.port)
+    }
+
+    /// Matches a bare host (an email address's domain, or a URL's host).
+    public func matches(host rawHost: String, port linkPort: Int?) -> Bool {
+        let rawHost = rawHost.lowercased()
+        guard !rawHost.isEmpty else { return false }
+        if let port, linkPort != port { return false }
         let target = Self.asciiHost(rawHost)
         if host == "*" { return true }
         if host.hasPrefix("*."), !host.dropFirst(2).contains("*") {

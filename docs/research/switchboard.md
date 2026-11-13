@@ -393,6 +393,172 @@ a rule while typing (now ⌘⌫); deletions now undoable (⌘Z).
   manual folder entry is the fallback.
 - Safari-in-front activation from the picker was inconclusive (Safari was already in front during tests).
 
+## Feature round: profiles, email, files, rewrites, backups (2026-11-11)
+
+Owner request after comparing with the original: Safari profiles and private windows, email
+links to a mail app or webmail, routing chosen file types, URL rewriting with native-app
+handoff, and import/export of the configuration. Everything fits the existing model (ordered
+rules, first match wins, targets carry their options) instead of new parallel systems.
+
+### Research: what's possible on this macOS (27.2, Safari 26)
+
+- **Safari profiles / private windows.** Safari's scripting dictionary (`sdef`, read-only) has
+  no profile or private-window support; `open` has no option either; Apple's docs only offer
+  Safari's own per-website "Open Links With Profiles" setting. Links from other apps open in
+  the most recently used profile, and an opened link lands in the **front** window. The
+  established workaround (Jeff Johnson's PrivateWindow/PublicWindow, OpenIn's helper) is GUI
+  scripting of Safari's File menu. We do the same with the Accessibility API directly (no
+  Apple Events, so no Automation prompt): press File ▸ New Private Window (found by its ⇧⌘N
+  shortcut, which doesn't depend on the language) or File ▸ New Window ▸ "New <profile>
+  Window" (found by the profile's name), wait for the new window, then hand Safari the link.
+  No private APIs.
+- **Webmail compose URLs** (public docs and handler registrations): Gmail
+  `mail.google.com/mail/?view=cm&fs=1&to=&cc=&bcc=&su=&body=` (account via `/u/N/` or
+  `authuser=`); Outlook `outlook.office.com/mail/deeplink/compose?to=&subject=&body=` and the
+  `outlook.live.com/mail/0/…` equivalent (cc/bcc not documented); Yahoo
+  `compose.mail.yahoo.com/?to=…`; Proton `mail.proton.me/inbox/#mailto=<mailto>` (Proton's own
+  handler docs); Fastmail `app.fastmail.com/action/compose/?mailto=<mailto>` (**unverified**:
+  not found in Fastmail's public docs). Plus a custom template with `{to}` `{cc}` `{bcc}`
+  `{subject}` `{body}` `{mailto}`.
+- **Native app links**: Zoom `zoommtg://<host>/join?action=join&confno=&pwd=`, Teams `msteams:/l/…`,
+  Music/Podcasts/App Store swap the scheme (`music://`, `podcasts://`, `macappstore://`),
+  Spotify `spotify:<type>:<id>`, Figma `figma://<path>`, Slack `slack://channel?team=&id=`,
+  Notion `notion://www.notion.so/…`, Linear `linear://…`, Discord `discord://discord.com/…`.
+- **Handlers**: `mailto` and content types use the same `NSWorkspace.setDefaultApplication`
+  calls as the browser role. Read-only check on this Mac: PDF opens in Preview, `.webloc`/`.url`
+  in Safari, mailto in Mail. Chrome declares PDF as Viewer with rank None and is still offered
+  as a PDF app, so new types are declared the same way (macOS never picks Switchboard for them
+  by itself).
+
+### Decisions (made autonomously; why)
+
+1. **One rule list, three link kinds.** Rules gain a kind (web, email, file). Web is the
+   default, so every existing rule migrates as it was. Email rules match any recipient's
+   address (`example.com`, `*.example.com`, `name@example.com`); file rules match extensions.
+   Why: users already know the rule editor; a second engine would double the UI and the bugs.
+2. **Email targets are their own ordered list** (Email tab) with their own picker, number
+   keys and "when no rule matches". A webmail target is a browser target plus a service, so it
+   gets profiles, private windows and Safari profiles for free ("Gmail in Chrome (Work)").
+   Becoming the email app offers the previous app (Mail) as the first target.
+3. **File types remember their previous app**, which stays the default destination, so taking
+   over PDFs changes nothing until a rule says otherwise. Web locations route the link inside
+   (a `.webloc` is a link). Web pages stay part of the browser role, as before. Any type can be
+   added by choosing a sample file.
+4. **Order of work before rules: tracking removal → rewrites → app handoffs → rules.** Rewrites
+   change web links (plain or regex with `$1`); a result that is another app's link opens that
+   app (this is also how users add their own handoffs). Built-in handoffs are **off until turned
+   on**, never send a link back to the app it came from (an app's "Open in Browser" would loop),
+   and holding the picker key (⌥) or a forced pick shows the browsers instead.
+5. **Safari windows need Accessibility, and fail closed.** Without it, or when the profile or
+   menu item can't be found, the link isn't opened anywhere (a private link must never open in
+   a normal window); a HUD says why and Reopen brings it back. Settings shows the state where
+   those targets are set up, with Allow…, and updates by itself.
+6. **Import previews first, then merges or replaces, undoably.** Merge keeps all current
+   settings and order, appends what's new, matches browsers by app/profile/options and
+   reconnects the file's rules to them, and skips duplicates. The file is pretty-printed JSON
+   with a format marker; a plain `config.json` imports too.
+7. **Tracking removal moved to the Rewrite tab**, since it's the first of the steps there.
+8. **Settings stays at the standard 480 pt width with seven tabs** (they fit).
+
+### Build notes
+
+- Core (pure, tested): `LinkKind`/`MailtoLink`/`AddressPattern` (`LinkKind.swift`), `Webmail`,
+  `Rewrite` + `LinkPreparation`, `Handoffs`, `FileType` + `InternetLocation`, `SafariMenu`
+  (menu matching on snapshots), `HandlerRoles` + `DefaultAppRegistry` (with `MemoryAppRegistry`
+  as the fake and dry-run copy), `SettingsTransfer`. Config version 2; version 1 files load
+  unchanged; a rule kind from a newer version loads turned off instead of failing the file.
+- App: Email, Files and Rewrite tabs; Safari profile sheet and Accessibility note; settings
+  file row and import preview in General; picker headers for email ("ann@… + 1 more", subject)
+  and files; "Always Open Email to example.com Here" / ".pdf Files"; Stop Being Default Email
+  App in the menu.
+- Bundle: `mailto` URL type; PDF, web location and generic data document types at rank None
+  (app.json, like the http declaration).
+- New test hooks: `SWITCHBOARD_INBOX` (route `*.link` files as if macOS sent them, with
+  simulated keys and source app: no `open`, so nothing reaches the installed copy),
+  `SWITCHBOARD_RENDER_DIR` (draw our windows to PNGs in-process; works while the screen is
+  locked), `SWITCHBOARD_MENU_PROBE`. Dry runs use an in-memory copy of the default-app settings.
+
+### Gates and walkthrough (2026-11-11/12)
+
+- **Unit tests: 148 in 32 suites pass** (56 new: mailto parsing, address patterns, every
+  webmail URL builder, email routing and learned rules, rewrites (plain, regex captures,
+  scoping, refused results, ordering, app links), every handoff transform, the loop guard and
+  precedence, file intake/routing/rules, `.webloc`/`.url` parsing, Safari menu matching
+  (English and German menus, profiles, missing items), roles with a fake registry (browser =
+  http+https+html, email = mailto only, file types = all their identifiers, hand back),
+  import/export round trip, merge/replace/dedupe/id remapping, 0.2.0 migration and unchanged
+  routing of old rules).
+- **Routing walkthrough** on an isolated copy of the release build (bundle id
+  `app.slopapp.switchboard.featuretest`, in `/tmp/switchboard-test/`, `--direct`, dry run,
+  made-up config), links sent through the inbox: tracking removed then rule → Chrome profile;
+  reddit rewritten to old.reddit then picker; `vscode.dev` rewritten to `vscode://` → VS Code;
+  Music link → Music (decided in 0.4 ms); App Store link from the App Store not sent back;
+  Zoom (not installed here) → picker; Music with ⌥ → browser picker; email to example.com →
+  "Gmail in Chrome (Demo Work)" with the right compose URL and `--profile-directory`; email with
+  no rule → email picker (Mail, Gmail, Outlook), 3 → Outlook compose URL with cc/subject/body;
+  ⌘1 learned `Email to other.org → Mail`, next email went there; PDF → Preview (fallback); PDF
+  from Slack → Chrome rule; ⌥ PDF → picker (Preview first, then browsers), ⌘2 learned a `.pdf`
+  rule placed below the more specific Slack one; `.webloc` → its link's rule; `.url` holding a
+  mailto → email rule; Safari Private and Safari profile targets → `safariWindow` plans with
+  Accessibility granted; `tel:` refused; forced email pick works.
+- **Screens**: the Mac was locked for most of the round, which hides windows from both
+  Accessibility and capture, and AppKit's sheet animation waits for display refreshes that
+  don't come then. Every tab, sheet and picker was rendered in-process in light and dark
+  (`/tmp/switchboard-test/render/{light,dark}/`) and reviewed: seven tabs fit at 480 pt; the
+  Rewrite tab was reordered to run order (rewrites were below the fold); the Files intro moved
+  to the top. In-process rendering can't draw the picker's glass vibrancy (its dark rows render
+  with dark text); the picker's colours are unchanged from the Golden Gate pass.
+- **Accessibility pass** (screen unlocked later, owner active): a test-only inbox command
+  opens Settings behind other windows without activating, so nothing took the owner's
+  keyboard. `drive tree`: **0 `[unlabeled]`** in all six tabs and all seven new sheets (Safari
+  profiles, Gmail, other webmail, email rule, file rule, rewrite, import preview).
+- **Import / export through the app**: importing an overlapping file added 1 rule, 1 rewrite and
+  Spotify and skipped the 5 rules already there; the export is the readable marked format. ⌘Z
+  posted to the background window didn't reach it (a menu bar app's Edit menu is never
+  visible, as found in round 2), so General now shows **Undo Import** for 10 s, like the lists'
+  Undo buttons; pressing it restored the settings exactly.
+- **Menu reader probe found a real bug**: Accessibility's menu bar starts with the Apple menu,
+  so "index 1" was the app menu, not File; Safari's New Private Window would never have been
+  found. File is now the first menu after the Apple and app menus with a ⌘N or ⇧⌘N item.
+  Verified read-only on Finder's File menu (⌘N found, ⇧ read as 1, ⌃ as 4, disabled items
+  flagged). One Finder item's title contained a file name from the owner's selection: that
+  log was deleted unread beyond the shape, and the probe now logs positions and shortcuts only,
+  never titles.
+- **Perf**: `perf.sh` launches without `--direct`, and LaunchServices hands it the installed
+  copy (verified: its launch returns the installed copy's pid). Both gate runs therefore
+  measured the owner's 0.2.0 (53.5 MB after 30 h; 239 MB at a moment the owner was using it;
+  48 MB later), and failed the 50 MB budget on that copy. This build, measured by pid on the
+  isolated copy launched through LaunchServices with a fresh config: launch 149–172 ms (median
+  of 3), first menu bar icon 333–418 ms, footprint 28–31 MB idle, 51–58 MB with Settings open,
+  idle CPU 0.003 %. **Worth a look later:** the installed copy's footprint after long uptime.
+
+### Design checklist (§10), this round's surfaces
+
+Pass: native controls and system colours only (`scripts/lint.sh` clean); light and dark
+reviewed on renders of every tab, sheet and picker; every action reachable by keyboard (sheets
+take Return/Esc; pickers keep 1–9, ⌘ = always, ⇧ = background); empty Email list explains
+itself with one action; permissions only when needed (Accessibility, only for Safari
+profile/private targets, with a reason, Allow… and live update); destructive actions undoable
+(removals, rewrite deletion, Undo Import); no network; perf within budget (above); 0
+`[unlabeled]`. Not checked this round: on-screen pixel measurements (`scripts/measure`) and real
+light/dark screenshots, because the screen was locked or the owner was at the Mac.
+
+### Not done (and why)
+
+- **Safari profile/private windows against the real Safari: not tested.** It would act on the
+  owner's Safari (and could read their profile names); the owner was also active whenever the
+  screen was unlocked. The menu logic is unit-tested on made-up menus; the plan and permission
+  path were walked in dry run.
+- **Becoming the default email app / a file type's app for real: not tested** (never on the
+  owner's Mac). The code path runs on the in-memory registry in dry runs and is unit-tested
+  with a fake. Whether macOS lists Switchboard as a PDF app couldn't be checked either: the
+  installed copy answers for the bundle id, and apps under `/tmp` are never offered.
+- **Webmail with signed-in accounts and real handoffs** (opening Zoom, Music, App Store): not
+  tried; URL building is unit-tested. Fastmail's compose URL is unverified.
+- Real on-screen screenshots and the picker's on-screen look in dark mode: not taken (locked
+  screen, then owner active). In-process renders were reviewed instead.
+- Rebindable picker keys, link history, Shortcuts, Share menu, `tel:`: unchanged deferrals.
+
 ## Sources
 
 - OpenIn product page and FAQ: https://loshadki.app/openin4/
@@ -405,6 +571,11 @@ a rule while typing (now ⌘⌫); deletions now undoable (⌘Z).
 - Apple: `setDefaultApplication(at:toOpenURLsWithScheme:completion:)` https://developer.apple.com/documentation/appkit/nsworkspace/setdefaultapplication(at:toopenurlswithscheme:completion:)
 - Chromium `shell_integration_mac.mm` (default-browser consent dialog): https://chromium.googlesource.com/chromium/src/+/main/chrome/browser/shell_integration_mac.mm
 - Safari private/profile scripting limits: https://mjtsai.com/blog/2023/12/11/opening-urls-in-private-safari-windows , https://forum.popclip.app/t/support-for-safari-profiles/2186
+- Safari scripting limits and the File-menu technique: https://mjtsai.com/blog/2023/12/11/opening-urls-in-private-safari-windows ,
+  https://forum.popclip.app/t/support-for-safari-profiles/2186 , Apple "Use profiles in Safari on Mac" https://support.apple.com/105100
+- Outlook web compose URLs: https://gist.github.com/katrinafyi/806fe51b8a6cd109b4f0689717b8034c ,
+  https://learn.microsoft.com/en-us/answers/questions/4619953/want-to-pre-populate-to-cc-subject-body-by-passing
+- Proton mailto handler: https://proton.me/support/set-default-email-handler ; Fastmail: https://www.fastmail.help/hc/en-us/articles/360058753694-Open-mailto-links-in-Fastmail
 - Installed OpenIn 4.3.5: Info.plist, entitlements, App Intents metadata, Settings panes via
   `scripts/drive` (read-only).
 
