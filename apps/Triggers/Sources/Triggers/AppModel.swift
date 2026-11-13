@@ -68,7 +68,9 @@ final class AppModel {
     let engine: TriggerEngine
     let touch: MultitouchSource
     let tap: MouseTap
+    let keyboard: KeyboardTap
     let performer: SystemPerformer
+    let systemState = LiveSystemState()
     private let hotkeys: CarbonHotkeys
     private let front = FrontAppTracker()
     private let storage: FileConfigStorage
@@ -81,17 +83,26 @@ final class AppModel {
         storage = FileConfigStorage(url: directory.appendingPathComponent("Triggers.json"))
         touch = MultitouchSource()
         tap = MouseTap()
+        keyboard = KeyboardTap()
         hotkeys = CarbonHotkeys()
         performer = SystemPerformer()
-        engine = TriggerEngine(touch: touch, mouse: tap, hotkeys: hotkeys, performer: performer,
-                               modifiers: SystemModifiers(), clock: { Diagnostics.now() })
+        engine = TriggerEngine(touch: touch, mouse: tap, keyboard: keyboard, hotkeys: hotkeys, performer: performer,
+                               state: systemState, modifiers: SystemModifiers(), scheduler: MainScheduler(),
+                               clock: { Diagnostics.now() })
         gestureProblem = touch.unavailableReason
         touch.tuning = settings.tuning
     }
 
+    /// The hyper key's state changed (Settings shows it).
+    private(set) var hyperRevision = 0
+
     func start() {
         load()
         isTrusted = AccessibilityTrust.isTrusted
+        keyboard.onChange = { [weak self] in self?.hyperRevision += 1 }
+        // A remap left from a crash whose watchdog didn't run: undo it, off the launch path.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { MainActor.assumeIsolated { AppModel.shared.keyboard.cleanUpLeftovers() } }
+        engine.hyperKeyEnabled = settings.hyperKey
         engine.isAccessibilityTrusted = isTrusted && !Diagnostics.noInput
         engine.onFired = { [weak self] binding, app, result in self?.fired(binding, app: app, result: result) }
         engine.onRecord = { [weak self] trigger in self?.recorded(trigger) }
@@ -174,7 +185,8 @@ final class AppModel {
         guard !query.isEmpty else { return all }
         return all.filter { binding in
             KeyDisplay.title(binding.trigger).localizedCaseInsensitiveContains(query)
-                || KeyDisplay.title(binding.action).localizedCaseInsensitiveContains(query)
+                || KeyDisplay.summary(binding).localizedCaseInsensitiveContains(query)
+                || binding.conditions.summary.localizedCaseInsensitiveContains(query)
         }
     }
 
@@ -317,13 +329,17 @@ final class AppModel {
         if !Diagnostics.noInput { systemShortcuts = SystemShortcuts.current() }
     }
 
-    /// Accessibility is needed if any enabled binding posts, clicks, moves windows or swallows buttons.
+    /// Accessibility is needed if any enabled binding posts, clicks, moves windows, swallows
+    /// buttons or watches key sequences, or the hyper key is on.
     var needsAccessibility: Bool {
-        config.enabledBindings.contains { $0.action.needsAccessibility || $0.trigger.family == .mouse }
+        settings.hyperKey || config.enabledBindings.contains(where: Self.bindingNeedsAccessibility)
     }
 
-    func needsAccessibility(_ binding: TriggerBinding) -> Bool {
-        !isTrusted && (binding.action.needsAccessibility || binding.trigger.family == .mouse)
+    func needsAccessibility(_ binding: TriggerBinding) -> Bool { !isTrusted && Self.bindingNeedsAccessibility(binding) }
+
+    private static func bindingNeedsAccessibility(_ binding: TriggerBinding) -> Bool {
+        if case .keySequence = binding.trigger { return true }
+        return binding.needsAccessibility
     }
 
     func needsGestures(_ binding: TriggerBinding) -> Bool { gestureProblem != nil && binding.trigger.family == .trackpad }
@@ -377,7 +393,7 @@ final class AppModel {
         switch result {
         case .done:
             if settings.showsConfirmation {
-                HUD.show("\(KeyDisplay.title(binding.trigger)): \(KeyDisplay.title(binding.action))", systemImage: binding.trigger.systemImage)
+                HUD.show("\(KeyDisplay.title(binding.trigger)): \(KeyDisplay.summary(binding))", systemImage: binding.trigger.systemImage)
             }
         case .skipped(let reason):
             outcome = reason
@@ -467,6 +483,7 @@ final class AppModel {
         frame_interval \(frames.intervals.summary)
         recognizer_cost \(frames.cost.summary)
         tap_installed=\(tap.isInstalled) tap_callback \(tap.callbackLatency.summary)
+        keyboard_tap_installed=\(keyboard.isInstalled) hyper_key=\(keyboard.isHyperActive) keyboard_callback \(keyboard.callbackLatency.summary)
         window_server \(EventTapStats.summary())
         dispatch \(engine.dispatchLatency.summary)
         posts \(performer.postLatency.summary)
@@ -512,6 +529,13 @@ final class UserSettings {
     var didShowFirstRun: Bool {
         didSet { defaults.set(didShowFirstRun, forKey: "didShowFirstRun") }
     }
+    /// Caps Lock as ⌃⌥⇧⌘ when held, Escape when tapped. Off by default.
+    var hyperKey: Bool {
+        didSet {
+            defaults.set(hyperKey, forKey: "hyperKey")
+            AppModel.shared.engine.hyperKeyEnabled = hyperKey
+        }
+    }
 
     var tuning: GestureTuning { GestureTuning(tap: tapSensitivity, swipe: swipeDistance) }
 
@@ -520,5 +544,6 @@ final class UserSettings {
         tapSensitivity = defaults.string(forKey: "tapSensitivity").flatMap(GestureTuning.TapSensitivity.init(rawValue:)) ?? .standard
         swipeDistance = defaults.string(forKey: "swipeDistance").flatMap(GestureTuning.SwipeDistance.init(rawValue:)) ?? .standard
         didShowFirstRun = defaults.bool(forKey: "didShowFirstRun")
+        hyperKey = defaults.bool(forKey: "hyperKey")
     }
 }

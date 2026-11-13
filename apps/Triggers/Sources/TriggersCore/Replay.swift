@@ -87,6 +87,116 @@ public enum SyntheticTouches {
         return frames
     }
 
+    /// Any supported gesture, as a recorded hand would make it.
+    public static func frames(for gesture: Gesture, at start: Double = 0) -> [TouchFrame] {
+        switch gesture.kind {
+        case .tap: return tap(fingers: gesture.fingers, at: start)
+        case .doubleTap:
+            let first = tap(fingers: gesture.fingers, at: start)
+            return first + tap(fingers: gesture.fingers, at: (first.last?.timestamp ?? start) + 0.08)
+        case .swipe: return swipe(fingers: gesture.fingers, direction: gesture.direction ?? .left, at: start)
+        case .pinchIn, .pinchOut: return pinch(fingers: gesture.fingers, spreading: gesture.kind == .pinchOut, at: start)
+        case .rotateLeft, .rotateRight: return rotate(clockwise: gesture.kind == .rotateRight, at: start)
+        case .cornerTap: return cornerTap(gesture.corner ?? .topLeft, at: start)
+        case .edgeSwipe: return edgeSwipe(gesture.edge ?? .left, at: start)
+        case .tipTap: return tipTap(side: gesture.direction ?? .right, at: start)
+        }
+    }
+
+    /// Pad size the generators assume (millimetres), the recognizer's default.
+    static let padWidth: Float = 156
+    static let padHeight: Float = 96
+
+    /// Fingers around a centre, `radius` millimetres out, starting at `angle` radians.
+    private static func ring(_ fingers: Int, radius: Float, angle: Float, centreX: Float = 78, centreY: Float = 48) -> [TouchFrame.Contact] {
+        (0..<fingers).map { index in
+            let a = angle + Float(index) * 2 * .pi / Float(fingers)
+            return TouchFrame.Contact(id: Int32(index + 1), x: (centreX + radius * cos(a)) / padWidth,
+                                      y: (centreY + radius * sin(a)) / padHeight)
+        }
+    }
+
+    /// Fingers land together and pinch in (or spread out) by half their spread.
+    public static func pinch(fingers: Int, spreading: Bool, at start: Double = 0, duration: Double = 0.25) -> [TouchFrame] {
+        let steps = max(2, Int(duration / frameInterval))
+        let (from, to): (Float, Float) = spreading ? (14, 30) : (30, 14)
+        var frames: [TouchFrame] = []
+        for step in 0...steps {
+            let progress = Float(step) / Float(steps)
+            frames.append(TouchFrame(timestamp: start + Double(step) * frameInterval,
+                                     contacts: ring(fingers, radius: from + (to - from) * progress, angle: 0.3)))
+        }
+        frames.append(TouchFrame(timestamp: start + Double(steps + 1) * frameInterval, contacts: []))
+        return frames
+    }
+
+    /// Two fingers turn 60° around their centre.
+    public static func rotate(clockwise: Bool, at start: Double = 0, duration: Double = 0.3) -> [TouchFrame] {
+        let steps = max(2, Int(duration / frameInterval))
+        let turn: Float = (clockwise ? -1 : 1) * .pi / 3
+        var frames: [TouchFrame] = []
+        for step in 0...steps {
+            let progress = Float(step) / Float(steps)
+            frames.append(TouchFrame(timestamp: start + Double(step) * frameInterval,
+                                     contacts: ring(2, radius: 20, angle: 0.4 + turn * progress)))
+        }
+        frames.append(TouchFrame(timestamp: start + Double(steps + 1) * frameInterval, contacts: []))
+        return frames
+    }
+
+    /// One finger taps near a corner.
+    public static func cornerTap(_ corner: Gesture.Corner, at start: Double = 0) -> [TouchFrame] {
+        let x: Float = corner == .topLeft || corner == .bottomLeft ? 0.07 : 0.93
+        let y: Float = corner == .topLeft || corner == .topRight ? 0.92 : 0.08
+        var frames: [TouchFrame] = []
+        for step in 0..<10 {
+            frames.append(TouchFrame(timestamp: start + Double(step) * frameInterval, contacts: [TouchFrame.Contact(id: 1, x: x, y: y)]))
+        }
+        frames.append(TouchFrame(timestamp: start + 10 * frameInterval, contacts: []))
+        return frames
+    }
+
+    /// Two fingers land at an edge and move into the pad.
+    public static func edgeSwipe(_ edge: Gesture.Edge, at start: Double = 0, distance: Float = 0.3, duration: Double = 0.2) -> [TouchFrame] {
+        let steps = max(2, Int(duration / frameInterval))
+        var frames: [TouchFrame] = []
+        for step in 0...steps {
+            let travel = distance * Float(step) / Float(steps)
+            let contacts: [TouchFrame.Contact]
+            switch edge {
+            case .left: contacts = [TouchFrame.Contact(id: 1, x: 0.03 + travel, y: 0.45), TouchFrame.Contact(id: 2, x: 0.04 + travel, y: 0.6)]
+            case .right: contacts = [TouchFrame.Contact(id: 1, x: 0.97 - travel, y: 0.45), TouchFrame.Contact(id: 2, x: 0.96 - travel, y: 0.6)]
+            case .top: contacts = [TouchFrame.Contact(id: 1, x: 0.45, y: 0.97 - travel), TouchFrame.Contact(id: 2, x: 0.55, y: 0.96 - travel)]
+            case .bottom: contacts = [TouchFrame.Contact(id: 1, x: 0.45, y: 0.03 + travel), TouchFrame.Contact(id: 2, x: 0.55, y: 0.04 + travel)]
+            }
+            frames.append(TouchFrame(timestamp: start + Double(step) * frameInterval, contacts: contacts))
+        }
+        frames.append(TouchFrame(timestamp: start + Double(steps + 1) * frameInterval, contacts: []))
+        return frames
+    }
+
+    /// One finger rests; a second taps on its left or right; the first lifts after.
+    public static func tipTap(side: Gesture.Direction, at start: Double = 0, rest: Double = 0.3) -> [TouchFrame] {
+        let resting = TouchFrame.Contact(id: 1, x: 0.5, y: 0.45)
+        let tapper = TouchFrame.Contact(id: 2, x: side == .left ? 0.38 : 0.62, y: 0.5)
+        var frames: [TouchFrame] = []
+        var time = start
+        while time - start < rest {
+            frames.append(TouchFrame(timestamp: time, contacts: [resting]))
+            time += frameInterval
+        }
+        for _ in 0..<8 {
+            frames.append(TouchFrame(timestamp: time, contacts: [resting, tapper]))
+            time += frameInterval
+        }
+        for _ in 0..<10 {
+            frames.append(TouchFrame(timestamp: time, contacts: [resting]))
+            time += frameInterval
+        }
+        frames.append(TouchFrame(timestamp: time, contacts: []))
+        return frames
+    }
+
     /// Two-finger scrolling, for the CPU benchmark (never a gesture).
     public static func scroll(seconds: Double, at start: Double = 0) -> [TouchFrame] {
         var frames: [TouchFrame] = []
@@ -126,9 +236,14 @@ public struct ReplayTimeline: Codable, Sendable, Equatable {
         public var modifiers: Int?
         /// Two-finger scrolling for this many seconds (CPU measurement; never a gesture).
         public var scrollSeconds: Double?
+        /// Any gesture, as synthetic touches (`{"kind": "pinchOut", "fingers": 2}`).
+        public var gesture: Gesture?
+        /// Key presses for key sequences, fed into the real sequence matcher.
+        public var keys: [ReplayKey]?
 
         public init(after: Double? = nil, tap: Int? = nil, swipe: SwipeStep? = nil, frames: [TouchFrame]? = nil,
-                    mouseButton: Int? = nil, keyCode: Int? = nil, modifiers: Int? = nil, scrollSeconds: Double? = nil) {
+                    mouseButton: Int? = nil, keyCode: Int? = nil, modifiers: Int? = nil, scrollSeconds: Double? = nil,
+                    gesture: Gesture? = nil, keys: [ReplayKey]? = nil) {
             self.after = after
             self.tap = tap
             self.swipe = swipe
@@ -137,6 +252,24 @@ public struct ReplayTimeline: Codable, Sendable, Equatable {
             self.keyCode = keyCode
             self.modifiers = modifiers
             self.scrollSeconds = scrollSeconds
+            self.gesture = gesture
+            self.keys = keys
+        }
+    }
+
+    /// One press for a key sequence: a key (`keyCode` with `modifiers`) or a lone modifier tap
+    /// (`modifierTap`, raw `Modifiers`), `after` seconds after the previous press.
+    public struct ReplayKey: Codable, Sendable, Equatable {
+        public var keyCode: Int?
+        public var modifiers: Int?
+        public var modifierTap: Int?
+        public var after: Double?
+
+        public init(keyCode: Int? = nil, modifiers: Int? = nil, modifierTap: Int? = nil, after: Double? = nil) {
+            self.keyCode = keyCode
+            self.modifiers = modifiers
+            self.modifierTap = modifierTap
+            self.after = after
         }
     }
 
@@ -158,6 +291,7 @@ public struct ReplayTimeline: Codable, Sendable, Equatable {
 
     /// The touch frames a step produces, starting at `time`.
     public static func frames(for step: Step, at time: Double) -> [TouchFrame] {
+        if let gesture = step.gesture { return SyntheticTouches.frames(for: gesture, at: time) }
         if let fingers = step.tap { return SyntheticTouches.tap(fingers: fingers, at: time) }
         if let swipe = step.swipe { return SyntheticTouches.swipe(fingers: swipe.fingers, direction: swipe.direction, at: time) }
         if let seconds = step.scrollSeconds { return SyntheticTouches.scroll(seconds: seconds, at: time) }

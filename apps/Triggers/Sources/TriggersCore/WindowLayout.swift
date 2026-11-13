@@ -37,19 +37,13 @@ public enum WindowLayout {
     /// Returns nil for moves that aren't a frame (`.minimize`) or can't happen.
     public static func target(for move: WindowMove, window: CGRect, visible: CGRect, nextVisible: CGRect? = nil) -> CGRect? {
         let v = visible.integral
-        let half = (v.width / 2).rounded(.down)
-        let halfHeight = (v.height / 2).rounded(.down)
+        if let area = move.area { return rect(area, in: v) }
         switch move {
-        case .leftHalf: return CGRect(x: v.minX, y: v.minY, width: half, height: v.height)
-        case .rightHalf: return CGRect(x: v.minX + half, y: v.minY, width: v.width - half, height: v.height)
-        case .topHalf: return CGRect(x: v.minX, y: v.minY, width: v.width, height: halfHeight)
-        case .bottomHalf: return CGRect(x: v.minX, y: v.minY + halfHeight, width: v.width, height: v.height - halfHeight)
-        case .maximize: return v
         case .center:
             let size = CGSize(width: min(window.width, v.width), height: min(window.height, v.height))
             return CGRect(x: (v.midX - size.width / 2).rounded(), y: (v.midY - size.height / 2).rounded(),
                           width: size.width, height: size.height)
-        case .minimize:
+        case .minimize, .fullScreen:
             return nil
         case .nextDisplay:
             guard let next = nextVisible?.integral, next != v else { return nil }
@@ -62,7 +56,23 @@ public enum WindowLayout {
             let x = next.minX + ((window.minX - v.minX) * scaleX).rounded()
             let y = next.minY + ((window.minY - v.minY) * scaleY).rounded()
             return clamp(CGRect(x: x, y: y, width: width, height: height), into: next)
+        default:
+            return nil
         }
+    }
+
+    /// A fraction of the usable area in points. Inner edges round down, so neighbouring areas
+    /// (left and right half, the three thirds) meet exactly with no gap or overlap.
+    public static func rect(_ area: UnitRect, in visible: CGRect) -> CGRect {
+        let v = visible.integral
+        func edge(_ fraction: Double, _ length: CGFloat) -> CGFloat {
+            fraction >= 0.9999 ? length : (length * CGFloat(fraction)).rounded(.down)
+        }
+        let left = edge(area.x, v.width)
+        let right = edge(area.x + area.width, v.width)
+        let top = edge(area.y, v.height)
+        let bottom = edge(area.y + area.height, v.height)
+        return CGRect(x: v.minX + left, y: v.minY + top, width: max(right - left, 1), height: max(bottom - top, 1))
     }
 
     /// Within a couple of points of filling the usable area.
@@ -75,20 +85,26 @@ public enum WindowLayout {
     /// the edge the move was about (left half stays on the left edge, and so on) and keep the
     /// window on screen.
     public static func settle(actual size: CGSize, target: CGRect, move: WindowMove, visible: CGRect) -> CGRect {
+        settle(actual: size, target: target, area: move.area, visible: visible)
+    }
+
+    /// The same for any area: a window that touches only the right (bottom) edge keeps that
+    /// edge, one that touches only the left (top) keeps that, and anything else stays centred
+    /// on the target. Nil `area` (center, next display) centres.
+    public static func settle(actual size: CGSize, target: CGRect, area: UnitRect?, visible: CGRect) -> CGRect {
         var frame = CGRect(origin: target.origin, size: size)
+        let full = area.map { $0.width >= 0.9999 && $0.height >= 0.9999 } ?? true
         if size.width > target.width {
-            switch move {
-            case .rightHalf: frame.origin.x = target.maxX - size.width
-            case .center, .topHalf, .bottomHalf, .maximize, .nextDisplay: frame.origin.x = target.midX - size.width / 2
-            default: break
-            }
+            let touchesLeft = area.map { $0.x <= 0.0001 } ?? false
+            let touchesRight = area.map { $0.x + $0.width >= 0.9999 } ?? false
+            if touchesRight && !touchesLeft { frame.origin.x = target.maxX - size.width }
+            else if full || !(touchesLeft && !touchesRight) { frame.origin.x = target.midX - size.width / 2 }
         }
         if size.height > target.height {
-            switch move {
-            case .bottomHalf: frame.origin.y = target.maxY - size.height
-            case .center, .leftHalf, .rightHalf, .maximize, .nextDisplay: frame.origin.y = target.midY - size.height / 2
-            default: break
-            }
+            let touchesTop = area.map { $0.y <= 0.0001 } ?? false
+            let touchesBottom = area.map { $0.y + $0.height >= 0.9999 } ?? false
+            if touchesBottom && !touchesTop { frame.origin.y = target.maxY - size.height }
+            else if full || !(touchesTop && !touchesBottom) { frame.origin.y = target.midY - size.height / 2 }
         }
         return clamp(frame.integral, into: visible)
     }

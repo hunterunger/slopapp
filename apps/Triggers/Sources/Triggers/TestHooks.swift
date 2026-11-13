@@ -8,7 +8,8 @@ import TriggersTouchShim
 enum TestHooks {
     private static let prefix = "app.slopapp.triggers.test."
 
-    /// Hooks: editor, settings <tab>, newTrigger, replay <path>, stats <path>, pause 1|0,
+    /// Hooks: editor, settings <tab>, newTrigger, edit <index>, select <bundle id|allApps|browsers>,
+    /// replay <path>, stats <path>, pause 1|0,
     /// allApps on|off (for the front app), record start|stop, tapSelfTest <count>.
     static func install(model: AppModel) {
         let center = DistributedNotificationCenter.default()
@@ -34,6 +35,14 @@ enum TestHooks {
             if let path { try? report.write(toFile: path, atomically: true, encoding: .utf8) }
         }
         on("pause") { value in model.isPaused = value != "0" }
+        on("select") { place in
+            model.selection = place == nil || place == "allApps" ? .allApps : place == "browsers" ? .browsers : .app(place!)
+        }
+        on("edit") { index in
+            guard let index = Int(index ?? ""), model.config.bindings.indices.contains(index) else { return }
+            EditorWindow.show()
+            model.beginEdit(model.config.bindings[index].id)
+        }
         on("allApps") { value in
             guard let app = model.menuTargetApp, let id = app.bundleID else { return }
             model.setUsesAllAppsTriggers(value != "off", in: id, name: app.name, undo: nil)
@@ -79,6 +88,30 @@ enum TestHooks {
                         Diagnostics.record("replay button \(button) -> \(decision)")
                         if case .swallowAndFire(let id) = decision {
                             model.engine.receive(mouseBinding: id, trigger: .mouseButton(button, modifiers: modifiers))
+                        }
+                    }
+                }
+                if let keys = step.keys {
+                    // Through the real sequence matcher, with the front app's sequences, as the
+                    // keyboard tap would see the presses. Nothing is posted.
+                    var matcher = KeySequenceMatcher()
+                    matcher.set(model.isRecording || model.isPaused ? [] : model.engine.table.keySequences(frontApp: model.engine.frontApp?.bundleID))
+                    var time = Diagnostics.now()
+                    for key in keys {
+                        if let after = key.after {
+                            try? await Task.sleep(for: .seconds(after))
+                            time += after
+                        }
+                        var fired: KeySequence?
+                        if let tap = key.modifierTap {
+                            _ = matcher.flagsChanged(Modifiers(rawValue: tap), time: time)
+                            fired = matcher.flagsChanged([], time: time + 0.05)
+                        } else if let code = key.keyCode {
+                            fired = matcher.keyDown(keyCode: code, modifiers: Modifiers(rawValue: key.modifiers ?? 0), isRepeat: false, time: time)
+                        }
+                        if let fired {
+                            Diagnostics.record("replay sequence \(fired.fallbackTitle)")
+                            model.engine.receive(.keySequence(fired))
                         }
                     }
                 }

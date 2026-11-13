@@ -31,6 +31,8 @@ enum Snapshots {
                 render(TriggerSheet(model: model, draft: model.newDraft(in: .allApps)), "sheet-new-\(name)", directory)
                 render(TriggerSheet(model: model, draft: Draft(binding: model.config.bindings[2], isNew: false)), "sheet-edit-\(name)", directory)
                 render(TriggerSheet(model: model, draft: Draft(binding: model.config.bindings[4], isNew: false)), "sheet-menu-\(name)", directory)
+                render(TriggerSheet(model: model, draft: Draft(binding: model.config.bindings[8], isNew: false)), "sheet-steps-\(name)", directory)
+                render(StepsPreview(model: model, binding: model.config.bindings[8]), "sheet-steps-lower-\(name)", directory)
                 model.isPaused = true
                 render(InfoBars(model: model).frame(width: 560), "infobars-\(name)", directory)
                 model.isPaused = false
@@ -52,6 +54,15 @@ enum Snapshots {
             TriggerBinding(trigger: .mouseButton(3, modifiers: []), action: .pressKeys(KeyCombo(keyCode: KeyNames.leftBracket, modifiers: cmd)), scope: .app(bundleID: "com.example.harbor")),
             TriggerBinding(trigger: .gesture(.tap(3), modifiers: []), action: .passThrough, scope: .app(bundleID: "com.example.harbor")),
             TriggerBinding(trigger: .gesture(.tap(4), modifiers: []), action: .runShortcut("Log Water"), scope: .allApps),
+            TriggerBinding(trigger: .keySequence(.doubleTap(.command)), steps: [
+                .action(.open(.app(bundleID: "com.example.atlas", name: "Atlas Notes"))),
+                .waitUntil(.frontApp(bundleID: "com.example.atlas", name: "Atlas Notes", isFront: true), timeout: 5),
+                .delay(0.25),
+                .action(.pressKeys(KeyCombo(keyCode: 45, modifiers: cmd))),
+            ], conditions: ConditionSet(match: .all, [.days([2, 3, 4, 5, 6]), .time(from: 9 * 60, to: 18 * 60)]), scope: .allApps),
+            TriggerBinding(trigger: .gesture(.pinchOut(4), modifiers: []), action: .system(.missionControl), scope: .allApps),
+            TriggerBinding(trigger: .gesture(.cornerTap(.topRight), modifiers: []), action: .media(.playPause),
+                           conditions: ConditionSet([.power(.charger)]), scope: .allApps),
         ])
         config.addApp(bundleID: "com.example.harbor", name: "Harbor Browser")
         config.addApp(bundleID: "com.example.ledger", name: "Ledger")
@@ -81,5 +92,21 @@ enum Snapshots {
         hosting.cacheDisplay(in: bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent(name + ".png"))
         window.close()
+    }
+}
+
+/// The lower half of the trigger sheet (conditions and steps), for review without scrolling.
+private struct StepsPreview: View {
+    let model: AppModel
+    @State var binding: TriggerBinding
+
+    var body: some View {
+        Form {
+            ConditionsSection(model: model, conditions: $binding.conditions)
+            StepsEditor(model: model, steps: $binding.steps, scope: binding.scope)
+        }
+        .formStyle(.grouped)
+        .scrollDisabled(true)
+        .frame(width: 540, height: 820)
     }
 }

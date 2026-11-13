@@ -7,7 +7,15 @@ import os
 ///
 /// - `TRIGGERS_DATA_DIR=/tmp/triggers-test/data`: keep triggers there and settings in the
 ///   `app.slopapp.triggers.test` defaults domain.
-/// - `TRIGGERS_NO_INPUT=1`: no MultitouchSupport, no event tap, no hotkeys. Only replays.
+/// - `TRIGGERS_NO_INPUT=1`: no MultitouchSupport, no event taps, no hotkeys. Only replays.
+///   This is the default in test mode (`TRIGGERS_DATA_DIR` set): a test copy never watches
+///   the owner's input unless `TRIGGERS_LIVE_INPUT=1` asks for it.
+/// - `TRIGGERS_LIVE_INPUT=1`: in test mode, install the real sources anyway (tap self-test).
+///   The hyper key's Caps Lock remap is never applied in test mode, live input or not.
+/// - `TRIGGERS_DRY_RUN=1`: every action is logged, never performed (nothing posted, opened
+///   or run).
+/// - `TRIGGERS_RUN_SCRIPTS=1`: in test mode, shell scripts and AppleScripts run for real (for
+///   walkthroughs whose scripts only touch /tmp). Otherwise test mode only logs them.
 /// - `TRIGGERS_REPLAY=/path/timeline.json`: feed touch frames, button presses and key combos
 ///   (our own JSON, `ReplayTimeline`) into the real recognizer and router, in-process only.
 /// - `TRIGGERS_ACT_ONLY_IN=<bundle id>`: act only while that app is in front; anything else is
@@ -16,7 +24,8 @@ import os
 /// - `TRIGGERS_FAKE_APPS=1`: app and Shortcut pickers list made-up apps and Shortcuts, so
 ///   screenshots never show what's installed. Open and Run Shortcut only log what they'd do.
 /// - `TRIGGERS_TEST_HOOKS=1`: distributed notifications `app.slopapp.triggers.test.<name>`:
-///   `editor`, `settings` (object: tab), `replay` (object: path), `newTrigger`, `record`
+///   `editor`, `settings` (object: tab), `replay` (object: path), `newTrigger`, `edit` (object:
+///   the binding's index), `select` (object: a bundle id, `allApps` or `browsers`), `record`
 ///   (object: a trigger description for the recognize pad), `tapStats`, `tapSelfTest`.
 /// - `TRIGGERS_TEST_QUIET=1`: windows opened by hooks don't take focus.
 /// - `TRIGGERS_ASSUME_TRUSTED=0|1`: pretend Accessibility is (not) granted (screenshots).
@@ -37,7 +46,12 @@ nonisolated enum Diagnostics {
     }
 
     static let dataDirectory = path("TRIGGERS_DATA_DIR")
-    static let noInput = environment["TRIGGERS_NO_INPUT"] == "1"
+    static let liveInput = environment["TRIGGERS_LIVE_INPUT"] == "1"
+    /// The smoke test (`scripts/smoke.sh`) runs the bare binary against the person's real
+    /// settings for a few seconds: it never watches input, remaps keys or acts.
+    static let noInput = environment["TRIGGERS_NO_INPUT"] == "1" || (dataDirectory != nil && !liveInput) || isSmokeTest
+    static let dryRun = environment["TRIGGERS_DRY_RUN"] == "1" || isSmokeTest
+    static let runScripts = environment["TRIGGERS_RUN_SCRIPTS"] == "1"
     static let replayFile = path("TRIGGERS_REPLAY")
     static let actOnlyIn = environment["TRIGGERS_ACT_ONLY_IN"].flatMap { $0.isEmpty ? nil : $0 }
     static let fakeApps = environment["TRIGGERS_FAKE_APPS"] == "1"
@@ -61,7 +75,15 @@ nonisolated enum Diagnostics {
     static var isTestMode: Bool { dataDirectory != nil }
 
     /// Actions that would reach the person's own apps (open, run Shortcut) are logged instead.
-    static var fakesOutsideEffects: Bool { fakeApps || actOnlyIn != nil }
+    static var fakesOutsideEffects: Bool { fakeApps || actOnlyIn != nil || dryRun }
+
+    /// Actions that change the whole Mac (media keys, volume, brightness, sleeping or locking
+    /// the screen, Mission Control, dark mode) are only ever logged in test mode: there's no
+    /// test target to keep them in.
+    static var fakesSystemEffects: Bool { isTestMode || fakesOutsideEffects }
+
+    /// Whether the hyper key may really remap Caps Lock: never in test mode or a dry run.
+    static var mayRemapKeys: Bool { !isTestMode && !noInput && !dryRun && !isSmokeTest }
 
     nonisolated(unsafe) static let defaults: UserDefaults = isTestMode
         ? UserDefaults(suiteName: "app.slopapp.triggers.test") ?? .standard : .standard

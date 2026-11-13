@@ -141,7 +141,7 @@ import Testing
         #expect(mouse.isApplied(in: config))
         #expect(mouse.apply(to: &config).isEmpty, "a second click adds nothing")
         let table = RoutingTable(config: config)
-        #expect(table.resolve(.mouseButton(3, modifiers: []), frontApp: "com.apple.Safari").binding?.action == .pressKeys(cmdLeftBracket))
+        #expect(table.resolve(.mouseButton(3, modifiers: []), frontApp: "com.apple.Safari").binding?.firstAction == .pressKeys(cmdLeftBracket))
         #expect(table.resolve(.mouseButton(3, modifiers: []), frontApp: "com.apple.finder").binding != nil)
         #expect(table.resolve(.mouseButton(3, modifiers: []), frontApp: "com.apple.Notes") == .none)
     }
@@ -150,7 +150,7 @@ import Testing
         var config = Config()
         _ = Starter.all.first { $0.id == "swipe-back-forward" }!.apply(to: &config)
         let table = RoutingTable(config: config)
-        #expect(table.resolve(.gesture(.swipe(4, .right), modifiers: []), frontApp: "com.apple.Safari").binding?.action == .pressKeys(cmdLeftBracket))
+        #expect(table.resolve(.gesture(.swipe(4, .right), modifiers: []), frontApp: "com.apple.Safari").binding?.firstAction == .pressKeys(cmdLeftBracket))
     }
 
     @Test func recentKeepsTheLastTwenty() {
@@ -187,7 +187,12 @@ import Testing
         #expect(Trigger.mouseButton(7, modifiers: []).fallbackTitle == "Button 8")
         #expect(Action.pressKeys(cmdLeftBracket).fallbackTitle == "Press ⌘[")
         #expect(Action.menuItem(["File", "Export…"]).fallbackTitle == "File › Export…")
-        #expect(Gesture.supported.count == 10)
+        #expect(Gesture.supported.count == 40)
+        #expect(Trigger.keySequence(.doubleTap(.command)).fallbackTitle == "⌘ twice")
+        #expect(Trigger.keySequence(KeySequence([.modifierTap(.option)])).fallbackTitle == "Tap ⌥ alone")
+        #expect(Trigger.keySequence(KeySequence([.key(KeyCombo(keyCode: 5, modifiers: [])), .key(KeyCombo(keyCode: 4, modifiers: []))])).fallbackTitle == "G then H")
+        #expect(Gesture.pinchOut(2).title == "Two-finger spread")
+        #expect(Gesture.cornerTap(.topRight).title == "Tap in the top-right corner")
     }
 
     @Test func actionsNeedingAccessibility() {
