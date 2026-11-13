@@ -33,6 +33,21 @@ import QuartzCore
 /// - `SNAPPER_PASTEBOARD=<name>`: Copy (images, recognized text, recordings) writes to a
 ///   private named pasteboard instead of the real clipboard, so tests can read it back
 ///   without touching the owner's clipboard.
+/// - `SNAPPER_DEFAULTS_SUITE=<name>`: settings live in that defaults suite instead of the
+///   app's own, so a test copy never changes the installed copy's settings.
+/// - `SNAPPER_TEMP_DIR=/tmp/snapper-test/tmp`: the temporary folder (emptied at launch and
+///   quit) lives here, so a test copy never empties a running copy's folder.
+/// - `SNAPPER_NO_SHORTCUTS=1`: no global shortcuts, so a test copy never takes the installed
+///   copy's keys.
+/// - `SNAPPER_FAKE_MEDIA=granted|denied|undetermined`: camera and microphone permission as
+///   given, with a generated test camera and a test microphone (a tone) instead of the real
+///   devices. Test mode (`SNAPPER_TEST_SCENE`) always uses them (granted unless set), so a
+///   test recording never contains a real camera or microphone, and never asks for either.
+/// - `SNAPPER_FAKE_ACCESSIBILITY=granted|denied`: what the keystroke display sees as the
+///   Accessibility permission.
+/// - `SNAPPER_TEST_REAL_INPUT=1`: in test mode, show real clicks and keys too (normally test
+///   mode shows only the synthetic ones from the `recordClick` / `recordKey*` hooks, so the
+///   owner's typing can never reach a test recording).
 /// - Test mode also covers the newer captures: scrolling captures and self-timer captures go
 ///   through the same filtered + masked snapshots, and recordings stream only the test scene
 ///   window (a single-window stream), clipped to the selection inside it.
@@ -53,6 +68,13 @@ enum Diagnostics {
     /// `SNAPPER_SNAPSHOT_DIR`: where the `snapshotWindows` hook writes its PNGs.
     static let snapshotDirectory = environment["SNAPPER_SNAPSHOT_DIR"].flatMap { $0.isEmpty ? nil : $0 }
     private static let logFile = environment["SNAPPER_LOG"].map { URL(fileURLWithPath: $0) }
+    static let defaultsSuite = environment["SNAPPER_DEFAULTS_SUITE"].flatMap { $0.isEmpty ? nil : $0 }
+    static let temporaryDirectory = environment["SNAPPER_TEMP_DIR"].flatMap { $0.isEmpty ? nil : $0 }
+    static let noShortcuts = environment["SNAPPER_NO_SHORTCUTS"] == "1"
+    /// Camera and microphone: a fake permission and generated devices (always in test mode).
+    static let fakeMedia: String? = environment["SNAPPER_FAKE_MEDIA"].flatMap { $0.isEmpty ? nil : $0 } ?? (testScene != nil ? "granted" : nil)
+    static let fakeAccessibility = environment["SNAPPER_FAKE_ACCESSIBILITY"].flatMap { $0.isEmpty ? nil : $0 }
+    static let realInputInTestMode = environment["SNAPPER_TEST_REAL_INPUT"] == "1"
 
     /// Seconds since boot, monotonic. For latency measurements.
     static func now() -> TimeInterval { CACurrentMediaTime() }
@@ -74,4 +96,10 @@ enum Diagnostics {
             try? Data(stamped.utf8).write(to: logFile)
         }
     }
+}
+
+/// Where Snapper keeps its settings: the app's own defaults, or `SNAPPER_DEFAULTS_SUITE`
+/// for test copies.
+enum Preferences {
+    nonisolated(unsafe) static let store: UserDefaults = Diagnostics.defaultsSuite.flatMap(UserDefaults.init(suiteName:)) ?? .standard
 }

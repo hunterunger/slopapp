@@ -29,6 +29,17 @@ An open alternative to CleanShot X.
   Record GIF (⌥Return). A small bar shows the time with Stop, Pause and Discard; the rest of
   the screen dims (optional), and the record shortcut or the menu bar icon stops it. Videos
   are H.264 MP4 (15–60 fps, cursor optional); any video can be exported as a GIF later.
+- **Sound, camera, clicks and keys** in recordings, from the record bar (and Settings →
+  Recording): pick a **microphone** (its symbol fills with your voice level), record the
+  **computer's sound**, or both (mixed into one track when you stop). Show your **camera**
+  in a round or rounded bubble that's part of the video: drag it anywhere, drag its edge,
+  pinch or scroll to resize it, right-click for sizes and the shape. **Show clicks** draws a
+  ring where you click; **Show keystrokes** puts the shortcuts you press (or, if you choose,
+  all keys) in a caption at the bottom. All off until you turn them on; GIFs are silent.
+- **Trim a video**: Trim on its thumbnail (or ⌘E) opens it with the Mac's own trimming bar.
+  Drag the handles, press Trim: the part you keep is copied without re-encoding, and the
+  thumbnail and history get the shorter video. "Restore Untrimmed Recording" in the
+  thumbnail's menu undoes it.
 - After each capture a **thumbnail** appears in a bottom corner. Hover it: Copy and Save in
   the middle, Close and Pin in the top corners, Annotate and Share in the bottom ones
   (⌥-click Save: Save As…). Drag it straight into another app; right-click for more (Copy
@@ -67,12 +78,13 @@ An open alternative to CleanShot X.
 
 | Where | Keys |
 |---|---|
-| Anywhere | ⌥⇧⌘5 All-in-One, ⌥⇧⌘4 area, ⌥⇧⌘3 full screen, ⌥⇧⌘2 text, ⌥⇧⌘6 record (again: stop). Window, previous area, scrolling, self-timer, toggle desktop icons, pin file, reopen last capture and close all thumbnails can get shortcuts in Settings → Shortcuts |
+| Anywhere | ⌥⇧⌘5 All-in-One, ⌥⇧⌘4 area, ⌥⇧⌘3 full screen, ⌥⇧⌘2 text, ⌥⇧⌘6 record (again: stop). Window, previous area, scrolling, self-timer, toggle desktop icons, pin file, reopen last capture, close all thumbnails and Capture History can get shortcuts in Settings → Shortcuts |
 | Selecting | Space area/window, Shift square, Option from center, arrows nudge, Return whole screen / highlighted window, Esc cancel |
 | All-in-One bar | 1–7 pick a mode, Esc close |
 | Recording | Return record video, ⌥Return record GIF, Esc cancel (before recording) |
 | Scrolling capture | Return start / done, Esc cancel |
-| Thumbnail (after clicking it) | ⌘C copy, ⌘S save, ⇧⌘S save as, ⌘E annotate, ⇧⌘P pin, ⌘W or ⌫ close |
+| Thumbnail (after clicking it) | ⌘C copy, ⌘S save, ⇧⌘S save as, ⌘E annotate (a video: trim), ⇧⌘P pin, ⌘W or ⌫ close |
+| Trimming | Return trim, Esc cancel, Space play, arrows step |
 | Editor tools | V select, R rectangle, F filled rectangle, E ellipse, L line, A arrow, T text, D pencil, M highlighter, P blur/pixelate, H spotlight, C counter, K crop, B background; ] / [ line width (= / − too) |
 | Editor | ⌘C copy object (or the image), ⌘V paste object, ⌘D duplicate, ⇧⌘C copy image, ⌘S save, ⇧⌘S save as, ⌘P print, ⇧⌘P pin, ⌘= / ⌘− / ⌘0 / ⌘9 zoom, pinch or ⌘-scroll zoom, scroll pans, ⌫ delete, arrows move, ⌘Z / ⇧⌘Z, Return applies a crop, ⌥Return new line in text |
 | Capture History | arrows move, ⇧-arrows extend, ⌘A select all, Return restore, double-click or ⌘E annotate, Space Quick Look, ⌘C copy, ⇧⌘S save as, ⇧⌘P pin, ⌘R show in Finder, ⌫ delete, ⌘Z undo |
@@ -90,11 +102,16 @@ they stay clear of macOS's own shortcuts (⇧⌘3/4/5, ⌃⇧⌘3/4) and of thos
 
 **Screen Recording**, to take screenshots and recordings. Snapper asks the first time you
 capture, with a button to the right System Settings pane; macOS applies it after Snapper
-restarts. Recordings are silent (no microphone, so no microphone permission).
+restarts. Only when you turn them on for a recording: the **Microphone** and the **Camera**
+(macOS asks the first time; if they're off, Snapper says where to turn them on and records
+without them), and **Accessibility** for Show keystrokes (to see keys pressed in other
+apps). Clicks and computer sound need nothing more than Screen Recording.
 
 ## Privacy
 
-No network, no accounts. Text recognition runs on your Mac.
+No network, no accounts. Text recognition runs on your Mac. The microphone and camera are
+on only while a recording is set up or running, and go nowhere but the recording. Pressed
+keys are shown on screen and never logged or kept.
 
 **Capture History** keeps each capture in its own folder in
 `~/Library/Application Support/app.slopapp.snapper/History/`: the image (or recording), the
@@ -109,9 +126,8 @@ them.
 
 ## Not there yet
 
-Audio in recordings (microphone, system audio), webcam overlay, click and keystroke
-display, a video trimmer, auto-scrolling for scrolling capture, cloud upload (left out on
-purpose).
+Auto-scrolling for scrolling capture, editing a video beyond trimming (cuts in the middle,
+zoom), a camera-only recording, cloud upload (left out on purpose).
 
 ## Develop
 
@@ -125,7 +141,8 @@ Logic lives in `Sources/SnapperCore` (tested). Views and wiring live in `Sources
 The capture overlay, screen capture service and geometry come from SlopKit
 (`SlopKit/Capture`). Candidates to move there next: `ScrollStitcher`, `RecordingPlan` +
 `StreamRecorder`, `GIFEncoder`, `TextRecognizer`, `RegionFrame`/`Countdown` and the
-sidebar Settings layout.
+sidebar Settings layout, `RecordingSink` + `RecordingTimeline` + `MediaEditor`, and the
+camera/microphone permission pieces (`MediaKind`, `MediaPermissionWindow`).
 
 Test hooks (environment variables, all off by default): `SNAPPER_SAVE_DIR`,
 `SNAPPER_HISTORY_DIR` (Capture History lives there instead),
@@ -133,7 +150,13 @@ Test hooks (environment variables, all off by default): `SNAPPER_SAVE_DIR`,
 every capture is filtered to the scene window *and* masked to its frame minus the menu bar,
 so nothing else on screen can end up in a test capture),
 `SNAPPER_TEST_HOOKS=1`, `SNAPPER_LOG`, `SNAPPER_APPEARANCE`, `SNAPPER_SILENT`,
-`SNAPPER_PASTEBOARD=<name>` (Copy goes to a private pasteboard, never the real clipboard).
+`SNAPPER_PASTEBOARD=<name>` (Copy goes to a private pasteboard, never the real clipboard),
+`SNAPPER_DEFAULTS_SUITE=<name>` (settings in their own suite), `SNAPPER_TEMP_DIR`,
+`SNAPPER_NO_SHORTCUTS=1` (a test copy never touches an installed copy's settings, temporary
+folder or hotkeys), `SNAPPER_FAKE_MEDIA=granted|denied|undetermined` (a generated test
+camera and a tone as the microphone; always on in test mode, so a test recording never
+opens a real camera or microphone), `SNAPPER_FAKE_ACCESSIBILITY=granted|denied`,
+`SNAPPER_TEST_REAL_INPUT=1` (show real clicks and keys in test mode).
 Test mode covers every capture kind: self-timer and scrolling captures use the same filtered,
 masked snapshots; recordings stream only the test scene window, clipped to the selection
 inside it, and refuse anything else. See `Sources/Snapper/Diagnostics.swift`.

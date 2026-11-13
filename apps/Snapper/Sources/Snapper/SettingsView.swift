@@ -107,7 +107,7 @@ struct Pane<Content: View>: View {
 struct GeneralPane: View {
     @Bindable var model: AppModel
     let info: AppInfo
-    @AppStorage(MenuBarIcon.storageKey) private var showMenuBarIcon = true
+    @AppStorage(MenuBarIcon.storageKey, store: Preferences.store) private var showMenuBarIcon = true
 
     var body: some View {
         Pane {
@@ -325,12 +325,76 @@ struct ScreenshotsPane: View {
 
 struct RecordingPane: View {
     @Bindable var model: AppModel
+    /// Re-read when the pane appears (devices come and go; permissions change in System Settings).
+    @State private var microphones: [MediaDevice] = []
+    @State private var cameras: [MediaDevice] = []
+    @State private var keysAllowed = true
 
     var body: some View {
         Pane {
             Section("General") {
                 Toggle("Dim screen while recording", isOn: $model.recordDimScreen)
                 Toggle("Show countdown", isOn: $model.recordCountdown)
+            }
+            Section {
+                Picker("Microphone", selection: deviceBinding(.microphone)) {
+                    Text("None").tag(String?.none)
+                    ForEach(microphones) { Text($0.name).tag(String?.some($0.id)) }
+                }
+                Toggle(isOn: $model.recordComputerAudio) {
+                    Text("Record computer sound")
+                    Text("Apps and alerts. Snapper's own sounds are left out.")
+                }
+            } header: {
+                Text("Sound")
+            } footer: {
+                Text("With both, they're mixed into one track when the recording stops. GIFs have no sound.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Camera") {
+                Picker("Camera", selection: deviceBinding(.camera)) {
+                    Text("None").tag(String?.none)
+                    ForEach(cameras) { Text($0.name).tag(String?.some($0.id)) }
+                }
+                Picker("Shape", selection: $model.cameraShape) {
+                    ForEach(BubbleShape.allCases) { Text($0.title).tag($0) }
+                }
+            }
+            Section {
+                Toggle(isOn: $model.recordShowClicks) {
+                    Text("Show clicks")
+                    Text("A ring where you click.")
+                }
+                Toggle(isOn: Binding(get: { model.recordShowKeys }, set: { on in
+                    if on, !KeyAccess.isGranted {
+                        MediaPermissionWindow.show(.accessibility) { model.recordShowKeys = true; keysAllowed = true }
+                    } else {
+                        model.recordShowKeys = on
+                    }
+                })) {
+                    Text("Show keystrokes")
+                    Text("The keys you press, as a caption at the bottom. Never kept.")
+                }
+                if model.recordShowKeys {
+                    Picker("Keystrokes", selection: $model.keystrokeMode) {
+                        ForEach(KeystrokeMode.allCases) { Text($0.title).tag($0) }
+                    }
+                    if !keysAllowed {
+                        LabeledContent {
+                            Button("Open System Settings") { Permission.accessibility.request() }
+                        } label: {
+                            Text("Needs Accessibility")
+                            Text("Turn on Snapper under Privacy & Security → Accessibility.")
+                        }
+                    }
+                }
+            } header: {
+                Text("Clicks and Keys")
+            } footer: {
+                Text("Shortcuts Only never shows what you type, like passwords or messages.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Video") {
                 Picker("Frame rate", selection: $model.recordFrameRate) {
@@ -348,10 +412,27 @@ struct RecordingPane: View {
                 }
             }
             Section {
-                Text("Recordings are silent MP4 (H.264) videos or animated GIFs.")
+                Text("Videos are MP4 (H.264 with AAC sound); GIFs are silent. Trim a video from its thumbnail.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .onAppear {
+            microphones = MediaEnvironment.devices.devices(.microphone)
+            cameras = MediaEnvironment.devices.devices(.camera)
+            keysAllowed = KeyAccess.isGranted
+        }
+    }
+
+    /// None, or the chosen device (the default one when the choice is gone). Picking one asks
+    /// for permission if macOS hasn't yet.
+    private func deviceBinding(_ kind: MediaKind) -> Binding<String?> {
+        Binding {
+            let on = kind == .camera ? model.recordCamera : model.recordMicrophone
+            guard on else { return nil }
+            return kind == .camera ? model.recording.currentCameraID : model.recording.currentMicrophoneID
+        } set: { id in
+            if kind == .camera { model.recording.chooseCamera(id) } else { model.recording.chooseMicrophone(id) }
         }
     }
 }

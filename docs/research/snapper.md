@@ -830,3 +830,127 @@ thumbnail.
   codes at 160 and 240 pt, light and dark. Fixed from them: links wrapped inside the domain
   at 160 pt (now one line, and the glyph is dropped below 200 pt).
 - Not yet looked at on screen with the real glass (the owner was at the Mac).
+
+## Recording: sound, camera, clicks, keys and trim (2026-11-11)
+
+Owner request after comparing with the original: silent recordings can't replace narrated
+walkthroughs. Closes the "audio, webcam, click & keystroke overlays, trimmer" row of the
+parity gap table. Apple frameworks only (ScreenCaptureKit, AVFoundation, AVKit, CoreImage
+not needed); no new dependencies.
+
+### What was built
+
+- **The record bar grows a row of extras** before Record Video / Record GIF: Microphone
+  (menu: No Microphone or a device; the glyph fills with the voice level), Computer Sound
+  (toggle), Camera (menu: No Camera or a device, plus Shape), Show Clicks and Show
+  Keystrokes (toggles). On = accent symbol on a soft accent circle; off = secondary slashed
+  symbol; blocked by a permission = the same symbol in orange, and clicking it explains
+  how to allow it. All of them persist and are mirrored in Settings → Recording (new Sound,
+  Camera and Clicks and Keys sections). While recording, the bar shows a live microphone
+  meter next to the time.
+- **Sound** (`RecordingSink`, now in SnapperCore): computer sound through ScreenCaptureKit
+  (`capturesAudio`, 48 kHz stereo, Snapper's own sounds excluded) and the microphone
+  through an `AVCaptureSession` (48 kHz mono, restamped from the session clock onto the
+  host clock) as one AAC track each. Every sample (frames too) goes through one
+  `RecordingTimeline`: the file starts at the first frame, pauses are host-clock intervals,
+  so all tracks line up and a pause leaves no gap in any of them. With both sources, the
+  two tracks are mixed into one when the recording stops (`MediaEditor.mixAudio`: video
+  copied as is, sound mixed by `AVAssetReaderAudioMixOutput` → AAC), because browsers and
+  chat apps play only the first track. GIFs never open the microphone.
+- **Camera bubble** (`CameraBubbleWindow.swift`): a borderless non-activating panel above
+  the recording frame, in the corner of the area it was last left in (bottom left at
+  first), 200 pt. Drag to move; drag its rim, pinch or scroll to resize (96–480 pt, at most
+  half the area); right-click for Small/Medium/Large, Circle/Rounded Rectangle (4:3) and
+  Hide Camera; VoiceOver gets Make Larger/Smaller/Hide actions. It's our own window, so the
+  recorder keeps it in the stream exactly where it's shown. Mirrored, aspect-fill.
+- **Clicks and keys** (`InputOverlay.swift`): one transparent click-through window over the
+  recorded area, kept in the stream. Clicks draw an accent ring that grows and fades in
+  0.5 s (orange for right clicks; fade only with Reduce Motion). Keys show as a large
+  caption at the bottom center on the system glass (`KeystrokeCaption`): the last shortcut
+  ("⌘⇧4", "⌘Z ×3"), or with All Keys a run of typing; it clears 1.6 s after the last key.
+  The record shortcut itself is never shown.
+- **Trim** (`TrimWindow.swift`): a video thumbnail's bottom-left button is now Trim
+  (scissors; GIFs keep Open), also Trim… in its menu and ⌘E. It opens the video with AVKit's
+  own trimming bar (the QuickTime one: yellow handles, Trim and Cancel, Return/Esc). Trim
+  keeps the range **without re-encoding** (`AVAssetExportPresetPassthrough`): recordings now
+  get a keyframe every second, the cut starts at the keyframe before the start and the edit
+  list hides the rest, so players start exactly at the trim point. The card keeps its
+  place with the new poster and length; history gets the trimmed file. The untrimmed file
+  is kept (`untrimmed.mp4` in the entry's folder, or in memory when history is off) and
+  "Restore Untrimmed Recording" in the card's menu undoes it.
+- `app.json` gained `NSMicrophoneUsageDescription` and `NSCameraUsageDescription`;
+  `Snapper.entitlements` (new) has `device.audio-input` and `device.camera` for the
+  hardened runtime.
+
+### Decisions
+
+| Decision | Why |
+|---|---|
+| Microphone through AVCaptureSession, not ScreenCaptureKit's `captureMicrophone` | That needs macOS 15; we support 14. One path everywhere, and it lists devices the same way the camera does. |
+| One track per source while recording, mixed at stop | Mixing live means resampling two clocks in real time; a post-mix of sound only takes well under a second and the picture is copied untouched. If the mix ever fails, the two-track file is kept (QuickTime plays both). |
+| Camera as an on-screen bubble that's recorded, not composited into frames | What you see is what's recorded, it's movable while recording, costs nothing per frame, and it's how people expect it to work. |
+| Microphone and camera are menus (None or a device), sound/clicks/keys toggles | macOS's own screenshot toolbar picks the microphone from a menu; one control both turns it on and picks the device. |
+| Clicks and keys off by default; keystrokes default to Shortcuts Only | Typing (a password, a message) must never end up in a video by surprise. Secure input fields aren't delivered to monitors anyway. |
+| Keystrokes behind Accessibility, via SlopKit's `Permission.accessibility` and a PermissionGate-style window | It's the permission NSEvent's global key monitor needs. Clicks need none. Keys are never logged or stored (Diagnostics records only on/off). |
+| Permissions are asked only after the person's own click; a blocked source records without it | The bar never pops a system prompt by itself; a revoked microphone gives a silent recording and a HUD, not a failed one. |
+| Trim with AVKit's trimming bar | It's the Mac's own trimmer (QuickTime's), keyboard and VoiceOver included, nothing to invent. |
+| Trim replaces the recording in place, keeping the untrimmed file | The everyday flow is record → trim → drag into a chat; a second card would be clutter. Undo stays possible (design checklist 9). |
+| Test-copy isolation: `SNAPPER_DEFAULTS_SUITE`, `SNAPPER_TEMP_DIR`, `SNAPPER_NO_SHORTCUTS` | A test copy shares the bundle id with the installed copy: it used to write the same settings, empty the same temporary folder at launch (live captures with history off!) and register the same hotkeys. |
+| Test mode records a display stream that *includes* only our windows | The overlays are separate windows; a single-window stream can't contain them. `SCContentFilter(display:including:)` with only our own windows is just as closed (nothing else can appear). When the display isn't shareable (locked), it falls back to the scene window alone. |
+| Test mode never opens a real camera or microphone | `SNAPPER_FAKE_MEDIA` (default granted in test mode): a generated test camera and a 1 kHz test microphone; the scene plays a 440 Hz tone for computer sound. Real clicks/keys reach a test recording only with `SNAPPER_TEST_REAL_INPUT=1`. |
+
+### Tests
+
+120 tests in 31 suites (was 101). New: `RecordingTimeline` (start, pauses, drops),
+audio buffers/levels/meter/tone detection, keystroke labels, shortcut-vs-typing rules and
+the caption state machine, bubble geometry (corners, small areas, resizing, radius),
+options (GIFs silent, keyframe interval), test-mode plans on a second display, trim ranges,
+**real AVFoundation runs**: a two-track file mixes into one track with both tones; a
+passthrough trim keeps H.264 and the right length; the sink end to end (20 fps frames +
+both sound tracks for 3 s of host time with a 1 s pause → a 2.0 s file whose mix has both
+tones before and after the pause); history replace/restore of trimmed recordings.
+
+### Verified (debug bundle, `--direct`, test env, all under /tmp/snapper-test)
+
+The Mac was locked the whole session (owner away), so AX trees, on-screen window shots and
+ScreenCaptureKit streams were unavailable (SCK lists no displays and `startCapture` never
+returns while locked). What was verified instead:
+- Recording pipeline: the sink test above (real writer, real AAC, real mixdown).
+- Trim through the app (`cardFromTestVideo` hook with a generated 8 s video): history
+  saved, trim window shown with AVKit's trimming bar (offscreen snapshot), Trim of the
+  middle half → 4.00 s in 680 ms, first frame exactly the 2.0 s frame, `untrimmed.mp4`
+  kept; Restore Untrimmed → 8.00 s, untrimmed file gone.
+- Extras via hooks: test microphone starts with the bar and stops with it, test camera
+  bubble shows/hides, mic/camera/accessibility denied (`SNAPPER_FAKE_MEDIA=denied`,
+  `SNAPPER_FAKE_ACCESSIBILITY=denied`) → the permission window, nothing recorded from them.
+- Offscreen renders (`snapshotRecordingUI` hook), light and dark: the bar with extras off,
+  on (meter filled) and blocked; the recording bar with the meter; the three permission
+  windows; the caption; Settings → Recording. Fixed from them: menu buttons lacked the
+  on-state circle; the blocked camera symbol didn't exist (blank button); blocked states now
+  use each button's own symbol in orange.
+- A crash found and fixed: the test microphone's timer handler inherited main-actor
+  isolation (Swift 6 runtime check trapped on its queue).
+
+### Not verified, and why
+
+- **On screen**: a real recording with the bubble, rings and caption in the frames, the
+  glass, AX tree (`[unlabeled]` check), live drag/resize of the bubble. Needs an unlocked
+  screen. All new controls have labels and values in code.
+- **Real microphone and camera**: this terminal has neither permission (not determined), and
+  asking would show a prompt only a human can answer. The code paths are the standard
+  AVCaptureSession ones; needs one human run.
+- **Real global key monitor**: needs the owner away *and* an unlocked screen.
+
+### Gates
+
+- `scripts/test.sh`-equivalent: 120 tests in 31 suites pass; `scripts/lint.sh Snapper` passes.
+- `scripts/check.sh Snapper --perf`: lint, icon, test, bundle (release, universal), smoke
+  and catalog **pass**; perf reported launch 50 ms, first window 83 ms, idle CPU 0.002 %
+  but **footprint 178.6 MB (FAIL)**. That number is the owner's installed copy (pid 950,
+  running for a day): `perf.sh` launches without `--direct`, so `drive launch` hands back the
+  running instance with the same bundle id. Measured by pid on this round's release build
+  (`--direct`, isolated env): **footprint 24.0 MB / 23.4 MB after 20 s idle** (was 23.1 MB),
+  idle CPU 0.000 / 0.012 / 0.004 % over three 5 s windows (load ~11). The gate passes once
+  the installed copy isn't running; it wasn't quit (never quit the owner's copy).
+- check.sh regenerated `web/src/generated/catalog.json` with Snapper's two usage strings (and
+  another app's pending changes), so it's not a date-only change and was left as generated.

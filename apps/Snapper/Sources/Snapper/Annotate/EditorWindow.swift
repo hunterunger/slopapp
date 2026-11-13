@@ -25,21 +25,21 @@ final class EditorModel {
     var tool: Tool {
         didSet {
             guard tool != oldValue else { return }
-            UserDefaults.standard.set(tool.rawValue, forKey: "editorTool")
+            Preferences.store.set(tool.rawValue, forKey: "editorTool")
             canvas?.toolChanged(from: oldValue)
         }
     }
 
     var color: PaletteColor {
-        didSet { UserDefaults.standard.set(color.name, forKey: "editorColor") }
+        didSet { Preferences.store.set(color.name, forKey: "editorColor") }
     }
 
     var width: StrokeWidth {
-        didSet { UserDefaults.standard.set(width.rawValue, forKey: "editorWidth") }
+        didSet { Preferences.store.set(width.rawValue, forKey: "editorWidth") }
     }
 
     var redaction: RedactionStyle {
-        didSet { UserDefaults.standard.set(redaction.rawValue, forKey: "editorRedaction") }
+        didSet { Preferences.store.set(redaction.rawValue, forKey: "editorRedaction") }
     }
 
     /// The Background tool's sidebar is open.
@@ -61,7 +61,7 @@ final class EditorModel {
         var state = item.editorState ?? AnnotationEditor(document: item.document ?? AnnotationDocument(imageSize: renderer.imageSize))
         state.selection = nil
         editor = state
-        let defaults = UserDefaults.standard
+        let defaults = Preferences.store
         let savedTool = defaults.string(forKey: "editorTool").flatMap(Tool.init) ?? .arrow
         tool = savedTool == .crop ? .arrow : savedTool
         color = defaults.string(forKey: "editorColor").flatMap(PaletteColor.named) ?? .default

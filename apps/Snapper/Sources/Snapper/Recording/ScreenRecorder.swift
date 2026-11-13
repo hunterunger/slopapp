@@ -3,12 +3,16 @@ import CoreImage
 import ScreenCaptureKit
 import SnapperCore
 
-/// Records part of the screen to an H.264 MP4. Behind a protocol so the flow can be faked.
+/// Records part of the screen to an H.264 MP4, with the computer's sound and the microphone
+/// as AAC when asked. Behind a protocol so the flow can be faked.
 @MainActor
 protocol ScreenRecording: AnyObject {
     /// Starts streaming `plan` into a new MP4 at `url`. `keepWindows`: our own windows to
-    /// keep in a display recording (pins); every other window of ours is left out.
-    func start(plan: RecordingPlan, options: RecordingOptions, keepWindows: Set<CGWindowID>, to url: URL) async throws
+    /// keep in the recording (pins, the camera bubble, the click and key overlay); every other
+    /// window of ours is left out. `microphone`: where the microphone's samples come from when
+    /// `options.audio.microphone` is on.
+    func start(plan: RecordingPlan, options: RecordingOptions, keepWindows: Set<CGWindowID>,
+               microphone: SampleTap?, to url: URL) async throws
     func setPaused(_ paused: Bool)
     /// Stops and finishes the file. Returns the recorded duration in seconds.
     func stop() async throws -> TimeInterval
@@ -16,47 +20,53 @@ protocol ScreenRecording: AnyObject {
     func cancel() async
 }
 
-enum RecordingError: LocalizedError {
-    case sourceGone
-    case noFrames
-    case writerFailed(String)
-    case refusedInTestMode
-
-    var errorDescription: String? {
-        switch self {
-        case .sourceGone: "The screen or window to record isn't available anymore."
-        case .noFrames: "Nothing was recorded."
-        case .writerFailed(let reason): "Couldn't write the recording (\(reason))."
-        case .refusedInTestMode: "Test mode records only the test scene."
-        }
-    }
-}
-
-/// ScreenCaptureKit stream → AVAssetWriter.
+/// ScreenCaptureKit stream (+ microphone) → AVAssetWriter.
 @MainActor
 final class StreamRecorder: ScreenRecording {
     private var stream: SCStream?
     private var sink: RecordingSink?
+    private var output: StreamOutput?
+    private var microphone: SampleTap?
+    private var url: URL?
 
-    func start(plan: RecordingPlan, options: RecordingOptions, keepWindows: Set<CGWindowID>, to url: URL) async throws {
+    func start(plan: RecordingPlan, options: RecordingOptions, keepWindows: Set<CGWindowID>,
+               microphone: SampleTap?, to url: URL) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let ownPID = ProcessInfo.processInfo.processIdentifier
         let filter: SCContentFilter
+        var testMode = false
+        var sourceRect = plan.sourceRect
         switch plan.source {
         case .display(let id):
             guard let display = content.displays.first(where: { $0.displayID == id }) else { throw RecordingError.sourceGone }
-            let ownPID = ProcessInfo.processInfo.processIdentifier
             let own = content.applications.filter { $0.processID == ownPID }
             let keep = content.windows.filter { $0.owningApplication?.processID == ownPID && keepWindows.contains($0.windowID) }
             filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: keep)
-        case .window(let id):
-            // One window on its own: nothing else on screen can appear in the stream.
-            guard let window = content.windows.first(where: { $0.windowID == id }) else { throw RecordingError.sourceGone }
-            filter = SCContentFilter(desktopIndependentWindow: window)
+        case .testScene(let sceneID, let displayID):
+            // Only our own windows: the scene and the overlays. Nothing else on screen, not
+            // even surfaces no app owns, can be in the stream.
+            guard let scene = content.windows.first(where: { $0.windowID == sceneID && $0.owningApplication?.processID == ownPID }) else {
+                Diagnostics.record("test scene not shareable displays=\(content.displays.count) windows=\(content.windows.count)")
+                throw RecordingError.sourceGone
+            }
+            if let display = content.displays.first(where: { $0.displayID == displayID }) {
+                let windows = content.windows.filter {
+                    $0.owningApplication?.processID == ownPID && ($0.windowID == sceneID || keepWindows.contains($0.windowID))
+                }
+                filter = SCContentFilter(display: display, including: windows)
+            } else {
+                // The display isn't shareable (asleep or locked): the scene window on its own,
+                // without the overlays, so scripted tests of sound, pause and trim still run.
+                filter = SCContentFilter(desktopIndependentWindow: scene)
+                sourceRect = plan.screenRect.offsetBy(dx: -scene.frame.minX, dy: -scene.frame.minY)
+                Diagnostics.record("test scene recorded as a window (display not shareable)")
+            }
+            testMode = true
         }
         let scale = options.scaleToOneX ? 1 : CGFloat(filter.pointPixelScale)
-        let size = RecordingPlan.pixelSize(for: plan.sourceRect, scale: scale)
+        let size = RecordingPlan.pixelSize(for: sourceRect, scale: scale)
         let config = SCStreamConfiguration()
-        config.sourceRect = plan.sourceRect
+        config.sourceRect = sourceRect
         config.width = size.width
         config.height = size.height
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, options.frameRate)))
@@ -64,15 +74,39 @@ final class StreamRecorder: ScreenRecording {
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.colorSpaceName = CGColorSpace.sRGB
         config.queueDepth = 8
-        config.capturesAudio = false
         config.scalesToFit = false
+        config.capturesAudio = options.audio.computer
+        if options.audio.computer {
+            config.sampleRate = Int(RecordingSink.sampleRate)
+            config.channelCount = 2
+            // Snapper's own sounds stay out, except the test scene's tone in test mode (the
+            // stream there holds only our windows, so it's the only sound it can hear).
+            config.excludesCurrentProcessAudio = !testMode
+        }
 
-        let sink = try RecordingSink(url: url, width: size.width, height: size.height, frameRate: options.frameRate)
+        let sink = try RecordingSink(url: url, width: size.width, height: size.height, options: options)
+        let output = StreamOutput(sink: sink)
         let stream = SCStream(filter: filter, configuration: config, delegate: nil)
-        try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: sink.queue)
-        try await stream.startCapture()
+        try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sink.queue)
+        if options.audio.computer {
+            try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: sink.queue)
+        }
+        if options.audio.microphone, let microphone {
+            microphone.setConsumer { [sink] buffer in sink.appendMicrophone(buffer) }
+            self.microphone = microphone
+        }
+        do {
+            try await stream.startCapture()
+        } catch {
+            self.microphone?.setConsumer(nil)
+            self.microphone = nil
+            await sink.discard()
+            throw error
+        }
         self.stream = stream
         self.sink = sink
+        self.output = output
+        self.url = url
     }
 
     func setPaused(_ paused: Bool) {
@@ -80,140 +114,60 @@ final class StreamRecorder: ScreenRecording {
     }
 
     func stop() async throws -> TimeInterval {
-        guard let stream, let sink else { throw RecordingError.noFrames }
+        guard let stream, let sink, let url else { throw RecordingError.noFrames }
         self.stream = nil
         self.sink = nil
+        microphone?.setConsumer(nil)
+        microphone = nil
         try? await stream.stopCapture()
-        return try await sink.finish()
+        let duration = try await sink.finish()
+        // Two sound tracks (computer + microphone): mix them into one, since most players
+        // and chat apps play only the first. The picture is copied, not re-encoded.
+        if await MediaEditor.audioTrackCount(url) > 1 {
+            let started = Diagnostics.now()
+            let mixed = url.deletingLastPathComponent().appendingPathComponent(".mixing.mp4")
+            do {
+                try await MediaEditor.mixAudio(url, output: mixed)
+                _ = try FileManager.default.replaceItemAt(url, withItemAt: mixed)
+                Diagnostics.record("recording audio mixed ms=\(Diagnostics.milliseconds(since: started))")
+            } catch {
+                // The two-track file still plays everywhere QuickTime does: keep it.
+                try? FileManager.default.removeItem(at: mixed)
+                Diagnostics.record("recording audio mix failed error=\(error)")
+            }
+        }
+        return duration
     }
 
     func cancel() async {
         guard let stream, let sink else { return }
         self.stream = nil
         self.sink = nil
+        microphone?.setConsumer(nil)
+        microphone = nil
         try? await stream.stopCapture()
         await sink.discard()
     }
 }
 
-/// Receives frames on its own queue and appends them to the writer. Pausing drops frames
-/// and shifts later timestamps back, so the file has no gap.
-final class RecordingSink: NSObject, SCStreamOutput, @unchecked Sendable {
-    let queue = DispatchQueue(label: "app.slopapp.snapper.recording")
-    private let url: URL
-    private let writer: AVAssetWriter
-    private let input: AVAssetWriterInput
-    private let adaptor: AVAssetWriterInputPixelBufferAdaptor
-    // Touched only on `queue`.
-    private var startTime: CMTime?
-    private var lastTime: CMTime = .zero
-    private var lastBuffer: CVPixelBuffer?
-    private var paused = false
-    private var pausedAt: CMTime?
-    private var pausedTotal: CMTime = .zero
-    private var frames = 0
+/// Hands ScreenCaptureKit's frames and sound to the sink (on the sink's queue).
+final class StreamOutput: NSObject, SCStreamOutput, @unchecked Sendable {
+    let sink: RecordingSink
 
-    init(url: URL, width: Int, height: Int, frameRate: Int) throws {
-        self.url = url
-        try? FileManager.default.removeItem(at: url)
-        writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
-        let bitRate = max(1_000_000, width * height * 3)
-        input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: width,
-            AVVideoHeightKey: height,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: bitRate,
-                AVVideoExpectedSourceFrameRateKey: frameRate,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-            ],
-        ])
-        input.expectsMediaDataInRealTime = true
-        adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: nil)
-        guard writer.canAdd(input) else { throw RecordingError.writerFailed("no video input") }
-        writer.add(input)
-        super.init()
-    }
-
-    func setPaused(_ value: Bool) {
-        queue.async { [self] in
-            guard value != paused else { return }
-            paused = value
-            if value {
-                pausedAt = lastTime
-            } else if pausedAt != nil {
-                // The next frame decides how long the pause was (see `stream`).
-                pausedAt = .invalid
-            }
-        }
-    }
+    init(sink: RecordingSink) { self.sink = sink }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .screen, sampleBuffer.isValid, !paused else { return }
-        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
-              let rawStatus = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: rawStatus) == .complete,
-              let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let now = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        if startTime == nil {
-            guard writer.startWriting() else { return }
-            writer.startSession(atSourceTime: .zero)
-            startTime = now
-        }
-        guard let startTime else { return }
-        if pausedAt == .invalid {
-            // Resumed: the gap since the last kept frame (minus one frame) doesn't count.
-            let raw = CMTimeSubtract(CMTimeSubtract(now, startTime), pausedTotal)
-            let gap = CMTimeSubtract(raw, lastTime)
-            pausedTotal = CMTimeAdd(pausedTotal, CMTimeMaximum(.zero, CMTimeSubtract(gap, CMTime(value: 1, timescale: 30))))
-            pausedAt = nil
-        }
-        let time = CMTimeSubtract(CMTimeSubtract(now, startTime), pausedTotal)
-        guard time > lastTime || frames == 0, input.isReadyForMoreMediaData else { return }
-        if adaptor.append(buffer, withPresentationTime: time) {
-            lastTime = time
-            lastBuffer = buffer
-            frames += 1
-        }
-    }
-
-    /// Finishes the file and returns its duration.
-    func finish() async throws -> TimeInterval {
-        let result: Result<TimeInterval, Error> = await withCheckedContinuation { continuation in
-            queue.async { [self] in
-                guard frames > 0, writer.status == .writing else {
-                    writer.cancelWriting()
-                    try? FileManager.default.removeItem(at: url)
-                    continuation.resume(returning: .failure(RecordingError.noFrames))
-                    return
-                }
-                // The screen may have been still at the end: repeat the last frame so the
-                // file lasts until Stop was pressed.
-                if let startTime, let lastBuffer, !paused, input.isReadyForMoreMediaData {
-                    let now = CMTimeSubtract(CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), startTime), pausedTotal)
-                    if now > lastTime, adaptor.append(lastBuffer, withPresentationTime: now) { lastTime = now }
-                }
-                input.markAsFinished()
-                writer.endSession(atSourceTime: lastTime)
-                let duration = lastTime.seconds
-                writer.finishWriting { [writer] in
-                    if writer.status == .completed {
-                        continuation.resume(returning: .success(duration))
-                    } else {
-                        continuation.resume(returning: .failure(RecordingError.writerFailed(writer.error?.localizedDescription ?? "unknown")))
-                    }
-                }
-            }
-        }
-        return try result.get()
-    }
-
-    func discard() async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            queue.async { [self] in
-                if writer.status == .writing { writer.cancelWriting() }
-                try? FileManager.default.removeItem(at: url)
-                continuation.resume()
-            }
+        guard sampleBuffer.isValid else { return }
+        switch type {
+        case .screen:
+            guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+                  let rawStatus = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: rawStatus) == .complete,
+                  let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            sink.appendFrame(buffer, at: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+        case .audio:
+            sink.appendAudio(sampleBuffer, track: .computer)
+        default:
+            break
         }
     }
 }
