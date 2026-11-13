@@ -117,5 +117,8 @@ Test hooks (environment variables), so scripted runs never touch your clipboard 
   and dark, then quit. Only Devkit's own windows; works with the screen locked.
 
 ```sh
-scripts/drive launch build/Devkit.app --env DEVKIT_PASTEBOARD=devkit-test --env DEVKIT_DEFAULTS=devkit-test
+scripts/drive launch build/Devkit.app --env DEVKIT_PASTEBOARD=devkit-test --env DEVKIT_DEFAULTS=devkit-test --direct
 ```
+
+`--direct` starts a separate copy even while your own Devkit is running. Without it, `drive
+launch` attaches to the running copy and ignores `--env`.

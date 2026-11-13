@@ -3,7 +3,7 @@
 The plan for building out the suite, from today to the full catalog. The order follows
 the owner's favourite Setapp apps (ranked by real use), then groups apps that share
 capabilities, so each app makes the next one cheaper. Every app goes through the 5-step
-cycle in [`dev-cycle.md`](dev-cycle.md). Status as of 2026-11-03.
+cycle in [`dev-cycle.md`](dev-cycle.md). Status as of 2026-11-09.
 
 ## Phase 0: Foundation (done)
 
@@ -20,7 +20,7 @@ cycle in [`dev-cycle.md`](dev-cycle.md). Status as of 2026-11-03.
 ## Phase 1: Ship Switchboard (OpenIn)
 
 - [x] Research, build, self-test (57 tests, every v1 item)
-- [ ] Blind test rounds until clean (needs an unlocked Mac)
+- [x] Blind test rounds until clean (2 rounds, 2026-11-03); released as beta 0.2.0
 - [ ] Owner uses it as the default browser for a week, then beta
 
 Switchboard replaces the owner's most-used app, so a week of daily use is the real test.
@@ -36,7 +36,8 @@ The Slopapp app itself: the hub that installs and updates the rest, like Setapp'
   apps we don't rebuild (Rectangle, Maccy, IINA, Keka, AlDente).
 - Apps downloaded outside the launcher update through Sparkle (the standard open-source
   Mac updater), reading the same feed.
-- Blocked on a Developer ID for frictionless installs. It can be built and tested before then.
+- Status: the launcher is built and released (beta 0.2.2, 2026-11-09) as a `.dmg`, signed with
+  Developer ID and notarized in CI.
 
 ## Phase 3: The favourites, priority 1
 
@@ -47,6 +48,8 @@ The Slopapp app itself: the hub that installs and updates the rest, like Setapp'
 | 3 | Snapper | CleanShot X | L | **Screen capture + region overlay** (new shared component) |
 | 4 | Convert | Permute | M | File drop queue |
 | 5 | Tidy | CleanMyMac | L | Library window, file scanning |
+
+All five are built. Beta: Clips, Snapper, Tidy. Alpha: Squish, Convert.
 
 Squish moves ahead of Snapper: it's small, an early second release, and it builds the
 file drop queue that Convert, Iconsmith and Crate reuse. Snapper is split into v1
@@ -65,12 +68,17 @@ Cheaper once phase 3's shared components exist.
 | Crate | Archiver | M | File drop queue |
 | Specimen | Typeface | M | Library window |
 
+All six are built. Beta: Dropper, Zones, Crate. Alpha: Ruler, Iconsmith, Specimen.
+
 ## Phase 5: Later
 
 - Big favourites: Paper (Nitro PDF Pro), Commit (Gitfox). Each is a product of its own;
   scope each one carefully before starting.
 - Popular apps outside the favourites: Tally, Devkit, Focus, Gauge.
-- Awake predates the dev cycle: give it a research pass and blind test when there's time.
+- Awake predates the dev cycle: its research pass is done (2026-11-03); a blind test is still
+  owed.
+
+Built (alpha): Paper, Commit, Tally, Devkit, Focus, Gauge.
 
 ## Owner's picks (2026-11-07)
 
@@ -87,8 +95,10 @@ Skipped: **Tuck** (Bartender; hiding icons on macOS 27 needs private, fragile be
 downloaders (no legal risk wanted), Safari extensions and proxies. Removed from the roadmap (owner, 2026-11-07): Snip, Tiles,
 Switches, Quit, Shelf, Margin, Hours, Twins, Glance, Seek and Dual.
 
-Open owner decisions: Developer ID signing and notarization in CI (needs the certificate and a
-notary login as GitHub secrets), archiving Better Transcriber's repo after the switch-over.
+Done since: Developer ID signing and notarization in CI (GitHub secrets; notarized with an App
+Store Connect API key, 2026-11-09).
+
+Open owner decisions: archiving Better Transcriber's repo after the switch-over.
 
 ## Running alongside every phase
 
@@ -103,7 +113,7 @@ notary login as GitHub secrets), archiving Better Transcriber's repo after the s
 
 | Decision | Why it matters | Recommendation |
 |---|---|---|
-| Apple Developer ID ($99/yr) | Without it macOS warns on every download and the launcher can't install cleanly | Get it before phase 2 ships |
-| GitHub repo and domain | Bundle IDs (`app.slopapp.*`), the update feed and download links are hard to change after the first release | Settle before the first release |
-| Launcher before or after Clips | Launcher makes the suite feel real; Clips is another daily-use app | Launcher first, it's what makes this a suite |
+| Apple Developer ID ($99/yr) | Without it macOS warns on every download and the launcher can't install cleanly | Done: releases are signed and notarized in CI |
+| GitHub repo and domain | Bundle IDs (`app.slopapp.*`), the update feed and download links are hard to change after the first release | Done: `hunterunger/slopapp`, `app.slopapp.*`, feed on GitHub Pages |
+| Launcher before or after Clips | Launcher makes the suite feel real; Clips is another daily-use app | Done: both shipped as beta 0.2.0 |
 | Mac App Store | Sandboxing rules out several apps (Tidy, Snapper features, Switchboard's handoffs) | Skip; ship direct |

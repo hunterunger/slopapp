@@ -38,7 +38,9 @@ Pick one per app (an app can add a second, e.g. a menu bar app with a library wi
   brings it back and opens Settings (`SlopAppDelegate` does both), because macOS can hide the
   icon where the app can't see it (a full menu bar, System Settings › Menu Bar). An app whose
   reopen handler shows its own window wins; `opensSettingsOnReopen = false` turns it off.
-  From AppKit code, open Settings with `SettingsWindow.open()`.
+  Only a reopen (Finder, Spotlight, Raycast, the launcher) brings the icon back, never the app
+  becoming active: menu bar apps activate themselves to show a window, which would undo
+  "Show in menu bar" off. From AppKit code, open Settings with `SettingsWindow.open()`.
 
 ### b. Drop-in utility window (Squish, Convert, Iconsmith, Crate)
 - One `Window` scene (not `WindowGroup`), compact (about 520×420), resizable.
@@ -100,7 +102,7 @@ Pick one per app (an app can add a second, e.g. a menu bar app with a library wi
   all apps in the About tab.
 - **Help menu**: `HelpCommands(info:)` in every app's `.commands` (menu bar apps attach it to
   the Settings scene). It replaces SwiftUI's empty default Help item with the app's own help
-  items, if any (passed in the trailing closure), a divider, then Report a Problem… and
+  items, if any (passed in the trailing closure) and a divider, then Report a Problem… and
   Suggest an Improvement….
 - **Report a Problem…** (`IssueReport`): opens the GitHub issue form in the browser with the
   app, version (`0.1.0 (12)`) and macOS (`macOS 15.2 on Apple silicon`) filled in. Nothing is

@@ -103,5 +103,6 @@ pasteboard instead of the clipboard; `SQUISH_APPEARANCE=light|dark`;
 Code: `Sources/SquishCore` (compression, naming, settings, memory budget; tested) and
 `Sources/Squish` (app wiring and views). The file queue itself is SlopKit's `FileQueue`.
 
-Memory: files run 8 at a time within a 256 MB estimated budget. Apple's AVIF encoder needs
-about 400 MB for one 8 MP photo, so AVIF conversions run one at a time.
+Memory: files run up to 8 at a time (fewer on Macs with fewer cores) within a 256 MB
+estimated budget. Apple's AVIF encoder needs about 400 MB for one 8 MP photo, so AVIF
+conversions run one at a time.

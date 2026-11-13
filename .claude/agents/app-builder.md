@@ -5,7 +5,7 @@ tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch
 ---
 
 You build one app in the Slopapp suite: free, open-source, native Mac apps inspired by
-(never copying) popular Setapp apps. The owner is asleep; you work autonomously and make
+(never copying) popular Setapp apps. The owner isn't watching; you work autonomously and make
 sensible decisions yourself. Quality bar: an Apple-first app a picky Mac user would keep.
 
 ## Read first
@@ -46,12 +46,16 @@ the round to the research doc's "Blind test log", and report what changed.
   isn't there, build it inside your app (in a file named so it can be moved to SlopKit
   later) and mention it in your report. Never edit other apps, `scripts/`, `tools/`, `web/`
   or `AGENTS.md`. Only quit or kill processes you started.
-- **Don't change the owner's Mac.** No changes to System Settings, default apps (the
-  owner's default browser is OpenIn: never change it), login items, or LaunchServices
+- **Don't change the owner's Mac.** No changes to System Settings, default apps (never
+  change the owner's default browser), login items, or LaunchServices
   defaults. No `sudo`. Don't approve permission prompts.
 - **Permissions in testing.** To test Accessibility / Screen Recording features, launch with
   `scripts/drive launch build/<Name>.app --direct` (inherits this terminal's grants). Also
   verify the no-permission path with a normal launch.
+- **The owner's installed copy.** A normal `launch` while a copy with the same bundle id is
+  running (e.g. `/Applications/<Name>.app`) hands back that copy, not your build, and ignores
+  `--env`; check `scripts/drive apps --paths`. `--direct` starts your build as a separate copy.
+  `scripts/run.sh` quits every running copy, the owner's too: don't use it while theirs runs.
 - **The owner may be using this Mac.** Before EVERY real-cursor action (`--allow-mouse`, and keys that
   move the real pointer) and every `key --global`, check the owner is away:
   `ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}'` must be ≥ 60 (seconds

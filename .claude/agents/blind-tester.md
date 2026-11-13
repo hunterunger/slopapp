@@ -76,6 +76,9 @@ that matters.
   it with `scripts/drive launch /path/App.app --direct`: it then borrows this terminal's
   grants, so you never have to approve anything. Also try one plain `launch` (no `--direct`)
   to see how the app explains a missing permission, then quit it and relaunch with `--direct`.
+- **Another copy already running.** If `scripts/drive apps --paths` shows the app running from
+  somewhere else (e.g. `/Applications`), it's the owner's: a plain `launch` hands you that copy,
+  not the one in the brief. Leave it alone (don't quit it) and use `launch --direct`.
 - **Test files** go in `/tmp/blindtest/<app>/` only. You may create them with shell tools (e.g.
   `sips`, `python3`, `printf`) and hand them to the app with `open -a /path/to/App.app <file>`
   or its Open dialog. Never use the owner's own files.

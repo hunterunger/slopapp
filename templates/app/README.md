@@ -15,8 +15,8 @@ __SPEC__
 
 ```sh
 scripts/test.sh __NAME__     # unit tests
-scripts/run.sh __NAME__      # build a debug .app and open it
-scripts/check.sh __NAME__    # the full gate: tests, release bundle, launch smoke test
+scripts/run.sh __NAME__      # build a debug .app and open it (quits any running copy)
+scripts/check.sh __NAME__    # the full gate: lint, icon, tests, release bundle, launch smoke test
 ```
 
 Logic lives in `Sources/__NAME__Core` (tested). Views and wiring live in `Sources/__NAME__`.

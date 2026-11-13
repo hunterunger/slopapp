@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-09",
+  "generatedAt": "2026-11-13",
   "brand": {
     "name": "Slopapp",
     "tagline": "Native Mac apps, made with care.",
@@ -123,6 +123,13 @@
             ]
           },
           {
+            "CFBundleURLName": "Email address",
+            "CFBundleTypeRole": "Viewer",
+            "CFBundleURLSchemes": [
+              "mailto"
+            ]
+          },
+          {
             "CFBundleURLName": "Switchboard URL",
             "CFBundleTypeRole": "Viewer",
             "CFBundleURLSchemes": [
@@ -138,6 +145,31 @@
             "LSItemContentTypes": [
               "public.html",
               "public.xhtml"
+            ]
+          },
+          {
+            "CFBundleTypeName": "PDF document",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "None",
+            "LSItemContentTypes": [
+              "com.adobe.pdf"
+            ]
+          },
+          {
+            "CFBundleTypeName": "Web location",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "None",
+            "LSItemContentTypes": [
+              "com.apple.web-internet-location",
+              "com.microsoft.internet-shortcut"
+            ]
+          },
+          {
+            "CFBundleTypeName": "Other file",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "None",
+            "LSItemContentTypes": [
+              "public.data"
             ]
           }
         ]
@@ -322,7 +354,9 @@
               "snapper"
             ]
           }
-        ]
+        ],
+        "NSMicrophoneUsageDescription": "Snapper records your voice with a screen recording when you turn the microphone on. The sound stays in the recording on this Mac.",
+        "NSCameraUsageDescription": "Snapper shows your camera in a bubble in a screen recording when you turn the camera on. Nothing else is recorded or kept."
       },
       "dir": "apps/Snapper",
       "shots": [
@@ -911,6 +945,9 @@
       "build": 1,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.triggers",
+      "infoPlist": {
+        "NSAppleEventsUsageDescription": "Triggers runs your AppleScripts and switches dark mode through System Events, only when one of your triggers asks it to."
+      },
       "dir": "apps/Triggers",
       "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/triggers-v0.1.0/Triggers.zip"
     },

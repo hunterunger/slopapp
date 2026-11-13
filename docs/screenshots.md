@@ -46,8 +46,9 @@ but cleaner:
   `web/public/shots/<slug>/<id>-{light,dark}.webp` (plus `@1x` 1440 × 900) and a
   `manifest.json` (app version, date, showcase version). These are committed: small,
   hand-reviewed assets, not build output.
-- `scripts/catalog.mjs` adds each app's shots (paths, titles, captions) to the catalog
-  feed. The website deploy publishes the images next to the feed.
+- `scripts/catalog.mjs` (website) and `scripts/feed.mjs` (launcher) add each app's shots
+  (paths, titles, captions) through `scripts/shots-feed.mjs`. The website deploy publishes the
+  images next to the feed.
 
 ## In the launcher
 

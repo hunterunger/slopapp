@@ -4,9 +4,9 @@ Every Slopapp app, installed and up to date.
 
 Part of [Slopapp](../../README.md), a free, open-source collection of Mac apps. This is the
 hub: browse the catalog, install an app in one click, keep them all current, remove them
-cleanly. An open alternative to Setapp's own app, minus the account and the subscription.
+cleanly, with no account and no subscription.
 
-**Status:** beta (0.2.0)
+**Status:** beta (0.2.2)
 
 ## What it does
 
@@ -27,7 +27,8 @@ cleanly. An open alternative to Setapp's own app, minus the account and the subs
   and a Featured / Name sort. Search (⌘F) matches names, taglines, categories and the paid
   app each one replaces ("Paste" finds Clips).
 - **App page**: big icon, name and pitch, the state button with an arrow for everything else
-  (Reveal in Finder, Reinstall, Favorites, Move to Trash…), a heart and Share; a strip with
+  (Reveal in Finder, Reinstall, Favorites, Report a Problem…, Move to Trash…), a heart and
+  Share; screenshots, when the app has a set; a strip with
   version, size, minimum macOS, menu bar or window app, category and a link to the source;
   short highlights (what it replaces, where it lives, free and open source); What's New;
   every copy found on this Mac; and more apps from the same category.
@@ -93,7 +94,8 @@ and a generic `User-Agent: Slopapp`:
    choose Check for Updates, and in the background **at most once every 6 hours** while
    Slopapp is running (scheduled by macOS with `NSBackgroundActivityScheduler`, plus a
    check after wake if one is overdue). No polling.
-2. **The apps and icons you ask for** (GitHub Releases).
+2. **The apps and icons you ask for** (GitHub Releases), and an app page's screenshots when
+   you open it (from the same site as the feed).
 
 No analytics, telemetry, crash reporting or accounts. Nothing installs on its own: updates
 are only downloaded when you click Update.
@@ -113,7 +115,7 @@ install with a one-line reason, and nothing on disk changes (the old copy stays)
    - When `brand.json` has a `teamId` (compiled in as `SlopappTeamID`), the app must be
      signed by that Apple Developer team with a certificate that chains to Apple
      (`anchor apple generic`). A self-made certificate claiming the team doesn't pass.
-   - Without a `teamId` (today, before the Developer ID exists), ad-hoc signatures are
+   - Without a `teamId` (today: `brand.json` doesn't set one yet), ad-hoc signatures are
      accepted, and such copies are labelled **Unsigned development build** in the app.
      In this mode the feed's sha256 over HTTPS is what ties a download to the release.
    - An update can never change signer: if the installed copy is signed by team X, the
@@ -125,7 +127,8 @@ install with a one-line reason, and nothing on disk changes (the old copy stays)
 What this doesn't protect against: someone who controls both the feed's HTTPS host and the
 release downloads while no `teamId` is set (they can publish a matching checksum for their
 own ad-hoc build). Setting `teamId` closes that gap. Slopapp doesn't verify notarization
-itself; Gatekeeper still assesses apps on first launch.
+itself, and because it clears the quarantine flag, Gatekeeper doesn't check the apps it
+installs on first launch either.
 
 ## Settings
 
@@ -153,6 +156,9 @@ apps/Slopapp/test-feed.sh corrupt   # next Testbed as a damaged zip           ->
 apps/Slopapp/test-feed.sh offline   # stop the server (serve starts it again) -> cached catalog + banner
 apps/Slopapp/test-feed.sh clean     # stop, unregister the test apps from LaunchServices, delete /tmp/slopapp-test
 ```
+
+`launch` starts a separate copy (`scripts/drive launch --direct`), so it can run beside your
+own Slopapp.
 
 The overrides (testing only; they also allow `file://` and `http://localhost` URLs):
 
@@ -190,8 +196,8 @@ default browser).
 
 ### Not there yet
 
-- Slopapp doesn't update itself yet: a newer Slopapp shows in its menu bar menu, but you
-  download it from the website (self-replace and relaunch is next).
+- Slopapp doesn't update itself yet: a newer Slopapp shows in its menu bar menu, which opens
+  the GitHub releases page to download it (self-replace and relaunch is next).
 - No automatic installs, no update notifications (the menu bar count is the signal).
-- No screenshots or long descriptions on app pages (the feed has no fields for them yet).
-- Screenshots on app pages, ratings, beta channel.
+- No long descriptions on app pages (the feed has no field for them yet).
+- Ratings, beta channel.

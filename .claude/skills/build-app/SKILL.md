@@ -38,13 +38,14 @@ change scope to the owner before building.
 
 - `scripts/new-app.sh <slug>`, then build the v1 must-haves per the design system's
   archetype for this app. Core logic + tests first, UI second.
-- Keep using it as you go: `scripts/run.sh <Name>`.
+- Keep using it as you go: `scripts/run.sh <Name>` (it quits any running copy first, the
+  owner's installed one too).
 
 ## 4. Test
 
 Do all of it, fix, repeat until clean:
 
-- [ ] `scripts/check.sh <Name> --perf` green (tests, bundle, smoke, perf budgets)
+- [ ] `scripts/check.sh <Name> --perf` green (lint, icon, tests, bundle, smoke, perf budgets)
 - [ ] Scripted walkthrough of every v1 must-have with `scripts/drive` on the release build,
       screenshots reviewed (light and dark if relevant), the real system effect verified
 - [ ] `scripts/drive tree <Name>` (and `--menubar`) shows no `[unlabeled]` controls
@@ -74,6 +75,10 @@ Allowed:
 
 Use it like a first-time user and report in the format from your instructions.
 ```
+
+If the owner's installed copy of the app is running (`scripts/drive apps --paths`), a plain
+`scripts/drive launch` hands the tester that copy instead of the build. Say "launch it with
+scripts/drive launch --direct" in the brief then.
 
 Don't add hints, feature lists, known issues or "please check X". If a capability truly
 needs explaining (say, the app only reacts to links opened from other apps), describe

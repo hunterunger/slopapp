@@ -57,8 +57,8 @@ together into one file.
   archive is open. With Settings ▸ Advanced ▸ "Remember passwords in the Keychain" (or the
   same checkbox in the password sheet), passwords that work are saved in one Keychain item
   and tried first on the next locked archive. "Forget All…" removes them.
-- **"Move the archive to the Trash after extracting"** (off by default) only happens after a
-  complete extraction with nothing skipped, and Edit ▸ Undo puts it back. Crate never
+- **Move Archive to Trash** (Settings ▸ General ▸ After extracting, off by default) only happens
+  after a complete extraction with nothing skipped, and Edit ▸ Undo puts it back. Crate never
   extracts into a Trash: an archive opened from the Trash extracts to ~/Downloads, and
   trashed archives drop out of Open Recent.
 
@@ -144,8 +144,8 @@ Archives are read and written with the **system libarchive** (`/usr/lib/libarchi
 BSD-2-Clause), linked through the SDK's `libarchive.tbd`. Apple doesn't ship its headers, so
 `Sources/CArchive/crate_archive.h` declares the few functions Crate uses. Nothing is bundled.
 
-Test environment variables: `CRATE_TRASH_DIR=/some/folder` makes "Move the archive to the
-Trash" move archives into that folder instead (and treats it as a Trash);
+Test environment variables: `CRATE_TRASH_DIR=/some/folder` makes Move Archive to Trash
+move archives into that folder instead (and treats it as a Trash);
 `CRATE_DOWNLOADS_DIR=/some/folder` replaces ~/Downloads as the fallback for archives in the
 Trash; `CRATE_APPEARANCE=light|dark` forces the appearance for screenshots;
 `CRATE_PASSWORDS_FILE=/tmp/x.json` keeps remembered passwords in that file instead of the

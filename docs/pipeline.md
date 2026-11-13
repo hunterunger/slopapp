@@ -37,8 +37,10 @@ apps/Awake/
   Awake.entitlements  (optional) passed to codesign
 ```
 
-`apps/SlopKit` is shared by every app: brand colors, `AppInfo`, `LaunchAtLogin`,
-the standard menu footer (Launch at Login / About / Quit), and the About window.
+`apps/SlopKit` is shared by every app: brand colors, `AppInfo`, `LaunchAtLogin`, the app
+delegate (`SlopAppDelegate`), Settings (`SlopSettings`), the standard menu footer (Settings… /
+About / Report a Problem… / Quit), `HelpCommands`, the About window, panels, HUD, drop zone,
+permissions and shortcuts.
 
 ## Scripts
 
@@ -48,13 +50,18 @@ the standard menu footer (Launch at Login / About / Quit), and the About window.
 | `scripts/test.sh [Name...]` | `swift test` for SlopKit and each app. Quiet on success; prints the log tail on failure. |
 | `scripts/bundle.sh <Name> [--debug]` | Builds and assembles `build/<Name>.app`, signs it, zips it. |
 | `scripts/smoke.sh <Name> [--no-bundle]` | Launches the bundled app; fails if it crashes or exits within 3s. |
-| `scripts/run.sh <Name>` | Debug bundle, quit any running copy, open it. |
-| `scripts/check.sh [Name...]` | The full gate: lint + icon style check + tests + release bundle + smoke for every app, then catalog. CI runs this. |
+| `scripts/run.sh <Name>` | Debug bundle, quit any running copy (`pkill -x <Name>`, so an installed copy in `/Applications` too), open it. |
+| `scripts/check.sh [Name...] [--perf]` | The full gate: lint + icon style check + tests + release bundle + smoke for every app, then catalog. `--perf` adds `perf.sh` (not in CI). CI runs this. |
+| `scripts/lint.sh <Name>` | Design-system detail rules grep can catch: fails on corner-radius literals and hardcoded colours, warns on spacing literals. |
+| `scripts/perf.sh <Name>` | Launch time, idle CPU and memory footprint against the budgets (`docs/design-system.md` §8). Stops if another copy with the same bundle id is running, since a normal launch would measure that copy; `--direct` measures a separate copy beside it (it shares the running copy's data unless the app isolates itself). |
+| `scripts/drive help` | Drives a running app through Accessibility (`tools/SlopDrive`). |
+| `scripts/measure corners\|line\|color\|contrast <png>` | Pixel checks on a window screenshot (`tools/Measure`). |
+| `scripts/shots.sh <Name>` | Store screenshots (`docs/screenshots.md`). |
 | `node scripts/catalog.mjs` | Merges roadmap + every `app.json` into the website catalog. |
 | `python3 scripts/icons/herbarium.py check\|build\|render [Name...]` | App icons: style check, `AppIcon.icon` from `Icon.py` (`bundle.sh` calls `build`), review renders in `build/icons/`. See `brand/ICONS.md`. |
 | `python3 scripts/icons/export_web.py [Name...]` | The website's app icons and prints, rendered from each `AppIcon.icon`. |
 
-Logs go to `build/logs/<Name>-{build,test,sign,smoke}.log`.
+Logs go to `build/logs/<Name>-{build,test,sign,smoke,herbarium,icon}.log`.
 
 ### What `bundle.sh` produces
 
@@ -110,9 +117,11 @@ An app moves from `alpha` to `beta` in `app.json` when all of these hold:
 - [ ] Everything in the roadmap `spec` works, or the README says what's missing.
 - [ ] Logic lives in `<Name>Core` with real tests (happy path, edge cases, failure paths).
       System access is behind protocols and faked in tests.
-- [ ] `scripts/check.sh <Name>` passes: tests, universal release bundle, smoke test.
+- [ ] `scripts/check.sh <Name>` passes: lint, icon check, tests, universal release bundle,
+      smoke test.
 - [ ] Used for real via `scripts/run.sh <Name>`, including the system effect it promises.
-- [ ] Menu bar apps use `MenuFooter`; window apps put About in the app menu.
+- [ ] Menu bar apps use `MenuFooter`; window apps put About in the app menu. Every app adds
+      `HelpCommands` and `SlopAppDelegate`.
 - [ ] Any permission it needs (Accessibility, Screen Recording...) has a first-run screen
       explaining why, and the app behaves sensibly if it's denied.
 - [ ] No network calls, analytics or telemetry. Data stays on the Mac.
@@ -123,6 +132,23 @@ An app moves from `alpha` to `beta` in `app.json` when all of these hold:
 - [ ] `README.md` explains what it does, how to develop it, and the code layout.
 - [ ] `version` and `status` in `app.json` are current.
 
+## Beta to stable
+
+An app moves from `beta` to `stable` (and to version `1.0.0`) when all of these hold:
+
+- [ ] It's been a beta release that people used, and the version going stable is that beta
+      plus fixes, not new features.
+- [ ] A fresh blind-test round on that version found no accepted blocker or major findings
+      (`docs/dev-cycle.md` step 5), and every accepted minor is fixed or deferred in the README.
+- [ ] The owner's hand tests listed in its research doc are done (real hardware, permissions,
+      other apps), or the README says what wasn't tested.
+- [ ] `scripts/check.sh <Name> --perf` passes, with the owner's installed copy quit.
+- [ ] Settings and data from every earlier release load unchanged (a migration test).
+- [ ] The README's "Not there yet" is current.
+
+A stable app has no badge on the website. New features go out as a minor version bump and stay
+stable only if they pass the same checks; otherwise they wait in a beta.
+
 ## Gotchas
 
 - App names become Swift module names, so they must be UpperCamelCase letters and digits.
@@ -132,7 +158,7 @@ An app moves from `alpha` to `beta` in `app.json` when all of these hold:
   `${arr[@]+"${arr[@]}"}` form.
 - `smoke.sh` runs the binary directly, so window apps briefly show a window.
 - Timers don't count time the Mac spends asleep. Re-check the clock on
-  `NSWorkspace.didWakeNotification` (see `AwakeApp`).
+  `NSWorkspace.didWakeNotification` (see Awake's `AppController`).
 
 ## Releases and the feed
 
@@ -203,7 +229,9 @@ When you get a Developer ID, set `teamId` in both places and sign every app with
 ```sh
 node scripts/feed.mjs                  # build/*.zip -> build/feed.json + web/public/feed.json
 node scripts/feed.mjs --strict         # also fail when a zip's version != its app.json
-node scripts/feed.mjs --only Awake     # only these built apps (others left out)
+node scripts/feed.mjs --only Awake     # only these built apps (comma-separated; others left out)
+node scripts/feed.mjs --zips <dir>     # read the zips from <dir> instead of build/
+node scripts/feed.mjs --no-planned     # leave out roadmap apps that aren't built
 node scripts/feed.mjs --local <dir>    # self-contained test feed: copies zips + icons into <dir>
 node scripts/feed.mjs --stdout         # print it
 ```
@@ -211,9 +239,11 @@ node scripts/feed.mjs --stdout         # print it
 ### What a tagged release does
 
 `release.yml` (tag `<slug>-v<version>`): test, bundle, smoke, optional sign + notarize,
-create the GitHub Release with `<Name>.zip` and `<Name>-icon.png`, then download the newest
-release zip of every other app, run `feed.mjs`, and commit `feed.json` to the `gh-pages`
-branch. Releases are serialized (`concurrency: release`) so the feed never races. One-time
+create the GitHub Release with `<Name>.zip` and `<Name>-icon.png`, then call `feed.yml`, which
+downloads the newest release zip of every app, runs `feed.mjs`, and commits `feed.json` to the
+`gh-pages` branch. `feed.yml` also runs when the app list changes on `main`, and by hand
+(`gh workflow run Feed`). Releases (`concurrency: release`) and feed runs (`concurrency: feed`)
+are serialized so the feed never races. One-time
 setup: Settings > Pages > Deploy from a branch > `gh-pages` / root.
 
 ### Testing the launcher against a local feed
