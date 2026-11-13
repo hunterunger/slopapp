@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-13T06:06:07.560Z",
+  "generatedAt": "2026-11-13T06:11:37.620Z",
   "name": "Slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "apps": [
@@ -345,15 +345,15 @@
       "icon": "globe",
       "menuBarOnly": true,
       "status": "beta",
-      "version": "0.2.0",
-      "build": 2,
+      "version": "0.2.1",
+      "build": 3,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.zones",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/zones-v0.2.0/Zones.zip",
-      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/zones-v0.2.0/Zones-icon.png",
-      "sha256": "952e3dfb4945539b32ae6284d1b7af16b9bea34b02b524b1f195076d5659f6ac",
-      "size": 3885462,
-      "installedSize": 8943571,
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/zones-v0.2.1/Zones.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/zones-v0.2.1/Zones-icon.png",
+      "sha256": "7effd557b44ccfc614a6ff191ac0df3463ba43d68af77ad203c8ae9a89dfb242",
+      "size": 6587084,
+      "installedSize": 14175824,
       "releaseNotes": ""
     },
     {
