@@ -76,6 +76,12 @@ public enum AcroFormWriter {
                     if let name = kid["T"]?.textValue, name == field["T"]?.textValue { kid["T"] = nil }
                     for key in ["FT", "Ff", "DV", "TU"] where kid[key] != nil && field[key] != nil { kid[key] = nil }
                     if kid["V"] != nil { kid["V"] = nil }
+                    // A group another writer made (macOS 26's PDFKit does, once a button is on)
+                    // may lack the radio flags, so viewers would treat it as checkboxes.
+                    if widget.kind == .radio, (field["Ff"]?.intValue ?? 0) & radioFlag == 0 {
+                        field["FT"] = .name("Btn")
+                        field["Ff"] = .int((field["Ff"]?.intValue ?? 0) | radioFlag | noToggleToOff)
+                    }
                     if field["FT"]?.nameValue == "Btn" {
                         // The group's value is the state of whichever button is on.
                         let kids = (field["Kids"].flatMap { try? file.resolve($0).arrayValue } ?? []).compactMap(\.refValue)
