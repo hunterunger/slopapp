@@ -77,6 +77,10 @@ enum LibraryOpener {
 enum LibraryRequest: Equatable {
     case newSnippet
     case importReplacements
+    /// Test hook: the import sheet, reading this file.
+    case importFile(URL)
+    /// Test hook: select the snippet with this abbreviation.
+    case select(String)
 }
 
 extension Notification.Name {
@@ -107,6 +111,7 @@ struct ShorthandMenu: View {
         }
         Divider()
 
+        searchButton
         Button("New Snippet…") { openLibrary(.newSnippet) }
             .keyboardShortcut("n")
         Button("Open Snippets") { openLibrary() }
@@ -116,6 +121,15 @@ struct ShorthandMenu: View {
         pauseButton
 
         MenuFooter(info: info)
+    }
+
+    @ViewBuilder private var searchButton: some View {
+        let button = Button("Insert a Snippet…") { model.toggleSearch() }
+        if let shortcut = KeyboardShortcuts.getShortcut(for: .searchSnippets), let key = shortcut.menuKey {
+            button.keyboardShortcut(key, modifiers: shortcut.eventModifiers)
+        } else {
+            button
+        }
     }
 
     @ViewBuilder private var pauseButton: some View {
@@ -171,6 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Snapshots.runIfAsked(model: model) { return }
         model.start()
         KeyboardShortcuts.onKeyDown(for: .togglePause) { AppModel.shared.togglePause() }
+        KeyboardShortcuts.onKeyDown(for: .searchSnippets) { AppModel.shared.toggleSearch() }
         if Diagnostics.testHooks { TestHooks.install() }
         // First launch: show the library once (its empty state explains what to do).
         if !Diagnostics.isSmokeTest, !model.defaults.bool(forKey: AppModel.Keys.openedLibrary) {
@@ -194,7 +209,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        standard.applicationDidBecomeActive(notification)
         AppModel.shared.refreshPermissions()
     }
 

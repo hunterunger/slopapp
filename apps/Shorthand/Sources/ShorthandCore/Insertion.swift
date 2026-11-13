@@ -21,6 +21,8 @@ public struct InsertionPlan: Sendable, Equatable {
     public var text: String
     public var leftArrows: Int
     public var retype: String
+    /// Pasted as formatted text (with a plain-text copy for apps that only take plain text).
+    public var formatted = false
 }
 
 public enum InsertionPlanner {
@@ -42,7 +44,12 @@ public enum InsertionPlanner {
     /// `typedLength`: characters typed for the abbreviation; `pending`: keys typed after it
     /// (already in the app, after the abbreviation: they're deleted and retyped after the snippet).
     public static func plan(resolved: Resolved, typedLength: Int, pending: String, mode: InsertMode) -> InsertionPlan {
-        InsertionPlan(backspaces: typedLength + pending.count, method: method(for: resolved.text, mode: mode),
-                      text: resolved.text, leftArrows: resolved.charactersAfterCursor, retype: pending)
+        // Formatting only survives a paste, whatever the mode.
+        if resolved.isFormatted {
+            return InsertionPlan(backspaces: typedLength + pending.count, method: .paste, text: resolved.text,
+                                 leftArrows: resolved.formattedCharactersAfterCursor, retype: pending, formatted: true)
+        }
+        return InsertionPlan(backspaces: typedLength + pending.count, method: method(for: resolved.text, mode: mode),
+                             text: resolved.text, leftArrows: resolved.charactersAfterCursor, retype: pending)
     }
 }

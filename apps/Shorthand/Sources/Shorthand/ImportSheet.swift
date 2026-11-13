@@ -4,23 +4,32 @@ import SlopKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Import macOS Text Replacements: from this Mac, or from the file System Settings writes
-/// when rows are dragged out of Keyboard › Text Replacements. A preview with checkboxes;
-/// macOS's own list is never changed.
+/// Import snippets: this Mac's Text Replacements, or a file from another expander
+/// (TextExpander, espanso, a Text Replacements export, CSV) or Shorthand's own export. A
+/// preview with checkboxes says what couldn't be carried over. macOS's own list is never changed.
 struct ImportSheet: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var rows: [ImportCandidate]?
+    @State private var format: SnippetImport.Format?
+    @State private var fileNotes: [String] = []
     @State private var error: String?
 
-    init(model: AppModel, rows: [ImportCandidate]? = nil) {
+    /// A file to read as soon as the sheet opens (test hooks), taken once.
+    @MainActor static var pendingFile: URL?
+
+    init(model: AppModel, rows: [ImportCandidate]? = nil, format: SnippetImport.Format? = nil) {
         self.model = model
         _rows = State(initialValue: rows)
+        _format = State(initialValue: format)
     }
+
+    static let fileTypes: [UTType] = [.propertyList, .json, .yaml, .commaSeparatedText, .tabSeparatedText, .plainText,
+                                      UTType(filenameExtension: "textexpander") ?? .data, UTType(filenameExtension: "yml") ?? .data]
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.l) {
-            Text("Import Text Replacements")
+            Text(format.map { "Import from \($0.displayName)" } ?? "Import Snippets")
                 .font(.title2.bold())
             if let rows {
                 preview(rows)
@@ -29,20 +38,28 @@ struct ImportSheet: View {
             }
         }
         .padding(Spacing.xl)
-        .frame(width: 560)
-        .frame(minHeight: 300)
+        .frame(width: 600)
+        .frame(minHeight: 320)
+        .onAppear {
+            if let file = Self.pendingFile, rows == nil {
+                Self.pendingFile = nil
+                read(file)
+            }
+        }
     }
 
     // MARK: Choose a source
 
     private var chooser: some View {
         VStack(alignment: .leading, spacing: Spacing.l) {
-            Text("Bring in the replacements you set up in System Settings › Keyboard. Nothing changes in macOS's own list.")
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Import from This Mac") { readFromThisMac() }
-                .buttonStyle(.borderedProminent)
-            DropZone("Or drop the file you dragged out of Text Replacements", systemImage: "doc.badge.plus",
-                     types: [.propertyList], allowsMultiple: false) { urls in
+            VStack(alignment: .leading, spacing: Spacing.s) {
+                Text("Bring in the Text Replacements you set up in System Settings › Keyboard. Nothing changes in macOS's own list.")
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Import Text Replacements from This Mac") { readFromThisMac() }
+                    .buttonStyle(.borderedProminent)
+            }
+            DropZone("Or drop a file from TextExpander, espanso, Text Replacements or Shorthand, or a CSV",
+                     systemImage: "doc.badge.plus", types: Self.fileTypes, allowsMultiple: false) { urls in
                 if let url = urls.first { read(url) }
             }
             .frame(height: 150)
@@ -75,7 +92,7 @@ struct ImportSheet: View {
             error = "This Mac has no text replacements, or macOS didn't share them. Try dragging them out of System Settings › Keyboard › Text Replacements and dropping the file here."
             return
         }
-        show(TextReplacementsImport.entries(fromDictionary: dictionary))
+        show(TextReplacementsImport.importEntries(TextReplacementsImport.entries(fromDictionary: dictionary)), format: .textReplacements, notes: [])
     }
 
     private func read(_ url: URL) {
@@ -84,27 +101,49 @@ struct ImportSheet: View {
             return
         }
         do {
-            show(try TextReplacementsImport.entries(fromPlist: data))
+            let result = try SnippetImport.read(data, fileURL: url)
+            show(result.entries, format: result.format, notes: result.fileNotes)
+        } catch SnippetImport.ReadError.damaged(let why) {
+            error = "That file couldn't be read: \(why)"
         } catch {
-            self.error = "That file isn't a Text Replacements export. In System Settings › Keyboard › Text Replacements, select the rows and drag them to the desktop to make one."
+            self.error = "Shorthand doesn't recognise that file. It reads TextExpander group files (.textexpander), espanso match files (.yml), the file you get by dragging rows out of System Settings › Keyboard › Text Replacements, CSV files and Shorthand exports."
         }
     }
 
-    private func show(_ entries: [(shortcut: String, phrase: String)]) {
+    private func show(_ entries: [ImportEntry], format: SnippetImport.Format, notes: [String]) {
         error = nil
-        rows = TextReplacementsImport.candidates(entries, library: model.library)
-        Diagnostics.record("import preview rows=\(entries.count)")
+        self.format = format
+        fileNotes = notes
+        rows = SnippetImport.candidates(entries, library: model.library)
+        Diagnostics.record("import preview format=\(format.rawValue) rows=\(entries.count)")
     }
 
     // MARK: Preview
 
     private func preview(_ rows: [ImportCandidate]) -> some View {
         let selected = rows.filter { $0.isSelected && $0.canSelect }.count
+        let partial = rows.filter { !$0.notes.isEmpty && $0.canSelect }.count
+        let skipped = rows.filter { !$0.canSelect }.count
         return VStack(alignment: .leading, spacing: Spacing.m) {
             if rows.isEmpty {
                 ContentUnavailableView("Nothing to Import", systemImage: "text.badge.xmark",
-                                       description: Text("The list is empty."))
+                                       description: Text("The file has no snippets."))
             } else {
+                if partial > 0 || skipped > 0 || !fileNotes.isEmpty {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        if partial > 0 {
+                            Text(partial == 1 ? "1 snippet has parts Shorthand can't do; they're described under it."
+                                 : "\(partial) snippets have parts Shorthand can't do; they're described under each.")
+                        }
+                        if skipped > 0 {
+                            Text(skipped == 1 ? "1 can't be imported (the reason is under it)." : "\(skipped) can't be imported (the reason is under each).")
+                        }
+                        ForEach(fileNotes, id: \.self) { Text($0) }
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
                 Table(of: Binding<ImportCandidate>.self) {
                     TableColumn("") { $row in
                         Toggle("Import \(row.shortcut)", isOn: $row.isSelected)
@@ -115,12 +154,23 @@ struct ImportSheet: View {
                     TableColumn("Abbreviation") { $row in
                         Text(row.shortcut).font(.body.monospaced()).lineLimit(1)
                     }
-                    .width(min: 80, ideal: 110)
+                    .width(min: 80, ideal: 110, max: 160)
                     TableColumn("Text") { $row in
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(row.phrase.replacingOccurrences(of: "\n", with: " ")).lineLimit(1)
+                            HStack(spacing: Spacing.xs) {
+                                if row.entry.richText != nil {
+                                    Image(systemName: "textformat")
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityLabel("Formatted")
+                                }
+                                Text(row.phrase.isEmpty && row.entry.richText != nil ? "Image" : row.phrase.replacingOccurrences(of: "\n", with: " "))
+                                    .lineLimit(2)
+                            }
                             if let reason = row.reason {
                                 Text(reason).font(.caption).foregroundStyle(.secondary)
+                            }
+                            ForEach(row.notes, id: \.self) { note in
+                                Text(note).font(.caption).foregroundStyle(.textOrange).lineLimit(2)
                             }
                         }
                     }
@@ -129,16 +179,25 @@ struct ImportSheet: View {
                         TableRow($row)
                     }
                 }
-                .frame(minHeight: 220)
+                .frame(minHeight: 240)
                 .hairlineBorder(Rectangle())
             }
-            Text("macOS keeps applying its own copies in apps that support them. To avoid doubles, you can remove them in Keyboard settings.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if format == .textReplacements {
+                Text("macOS keeps applying its own copies in apps that support them. To avoid doubles, you can remove them in Keyboard settings.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
-                Button("Open Keyboard Settings") {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!)
+                if format == .textReplacements {
+                    Button("Open Keyboard Settings") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!)
+                    }
+                } else {
+                    Button("Choose Another File") {
+                        self.rows = nil
+                        self.format = nil
+                    }
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }
@@ -152,7 +211,7 @@ struct ImportSheet: View {
 
     private func importRows(_ rows: [ImportCandidate]) {
         var added = 0
-        model.edit { added = TextReplacementsImport.apply(rows, to: &$0) }
+        model.edit { added = SnippetImport.apply(rows, to: &$0) }
         Diagnostics.record("imported \(added)")
         dismiss()
         HUD.show(added == 1 ? "Imported 1 snippet" : "Imported \(added) snippets", systemImage: "square.and.arrow.down")

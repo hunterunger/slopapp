@@ -30,6 +30,24 @@ enum Snapshots {
                        "editor-unknown-\(name)", directory)
                 render(ImportSheet(model: model, rows: importRows(full)), "import-\(name)", directory)
                 render(ImportSheet(model: model), "import-start-\(name)", directory)
+                render(ImportSheet(model: model, rows: teRows(full), format: .textExpander), "import-te-\(name)", directory)
+                render(SnippetEditor(model: model, snippetID: full.snippets[8].id, focusAbbreviation: 0).frame(width: 600, height: 820),
+                       "editor-fillin-\(name)", directory)
+                render(SnippetEditor(model: model, snippetID: full.snippets[9].id, focusAbbreviation: 0).frame(width: 600, height: 820),
+                       "editor-formatted-\(name)", directory)
+                let reply = full.snippets[8]
+                let form = FillInState(title: reply.title, fields: FillIn.fields(for: reply, lookup: full.lookup)) { values in
+                    PlaceholderResolver(now: Date()).resolve(reply, values: values, lookup: full.lookup) { .none }.text
+                }
+                form.values["Name"] = .text("slopapp-test Ann")
+                render(FillInForm(state: form).background(.background), "fillin-form-\(name)", directory)
+                let search = SearchState()
+                search.library = { full }
+                search.preview = { model.readablePreview($0) }
+                search.refresh()
+                render(SearchPanelView(state: search, pick: { _ in }, openLibrary: {}).background(.background), "search-\(name)", directory)
+                search.query = "repl"
+                render(SearchPanelView(state: search, pick: { _ in }, openLibrary: {}).background(.background), "search-query-\(name)", directory)
                 render(NoticeStack(model: model).frame(width: 320), "notices-\(name)", directory)
                 render(GeneralSettingsTab(isMenuBarApp: true, appName: info.name) {
                     Toggle("Expand abbreviations", isOn: .constant(true))
@@ -64,6 +82,13 @@ enum Snapshots {
         library.addSnippet(Snippet(groupID: work.id, abbreviation: "sig", content: "slopapp-test Best regards, {name}"))
         library.addSnippet(Snippet(groupID: off.id, name: "Old sign-off", abbreviation: ";old", content: "slopapp-test Cheers"))
         library.addSnippet(Snippet(groupID: g, name: "", abbreviation: "", content: ""))
+        library.addSnippet(Snippet(groupID: work.id, name: "Reply", abbreviation: ";reply",
+                                   content: "Hi {field:Name},\n\nThanks for writing. {choice:Tone|Talk soon|Best wishes}{optional:PS}\nP.S. {field:Note=slopapp-test}{/optional}\n{snippet:;sigf}", useCount: 30))
+        let bold = NSFontManager.shared.convert(RichText.baseFont, toHaveTrait: .boldFontMask)
+        let signature = NSMutableAttributedString(string: "slopapp-test Signature\n", attributes: [.font: bold])
+        signature.append(NSAttributedString(string: "Example Co · {date:long}", attributes: [.font: RichText.baseFont, .foregroundColor: NSColor.systemBlue]))
+        library.addSnippet(Snippet(groupID: work.id, name: "Formatted signature", abbreviation: ";sigf", content: signature.string,
+                                   richText: RichText.encode(signature), useCount: 4))
         return library
     }
 
@@ -72,6 +97,16 @@ enum Snapshots {
             (";omw", "slopapp-test On my way"), (";addr", "slopapp-test elsewhere"), ("has space", "slopapp-test"),
             (";br", "slopapp-test Best regards"), (";tm", "™"), (";shrug", "¯\\_(ツ)_/¯"),
         ], library: library)
+    }
+
+    static func teRows(_ library: Library) -> [ImportCandidate] {
+        let entries = [
+            TextExpanderImport.entry(from: ["abbreviation": ";ty", "label": "Thanks", "plainText": "slopapp-test Thanks %filltext:name=Name%, see you %@+1D%A"], group: "Replies"),
+            TextExpanderImport.entry(from: ["abbreviation": ";form", "plainText": "slopapp-test Name%key:tab%Email"], group: "Replies"),
+            TextExpanderImport.entry(from: ["abbreviation": ";sh", "plainText": "#!/bin/sh\necho slopapp-test", "snippetType": 3], group: "Replies"),
+            TextExpanderImport.entry(from: ["abbreviation": ";addr", "plainText": "slopapp-test elsewhere"], group: "Replies"),
+        ]
+        return SnippetImport.candidates(entries, library: library)
     }
 
     private static func render<V: View>(_ view: V, _ name: String, _ directory: URL) {

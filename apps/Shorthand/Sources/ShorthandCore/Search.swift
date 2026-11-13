@@ -9,7 +9,7 @@ public enum SnippetSearch {
 
     public static func matches(_ snippet: Snippet, words: [String]) -> Bool {
         guard !words.isEmpty else { return true }
-        let haystack = fold(snippet.abbreviation + "\n" + snippet.name + "\n" + snippet.content)
+        let haystack = fold(snippet.abbreviation + "\n" + snippet.name + "\n" + snippet.plainContent)
         return words.allSatisfy { haystack.contains($0) }
     }
 
@@ -30,6 +30,45 @@ public enum SnippetSearch {
             if a.element.useCount != b.element.useCount { return a.element.useCount > b.element.useCount }
             return a.offset < b.offset
         }.map(\.element)
+    }
+}
+
+/// The quick search panel's list: every snippet with text (groups that are off too: picking
+/// one by hand is deliberate). Empty query: most used first, then most recent.
+public enum QuickSearch {
+    public static let limit = 50
+
+    public static func results(_ snippets: [Snippet], query: String, limit: Int = QuickSearch.limit) -> [Snippet] {
+        let candidates = snippets.filter { !$0.content.isEmpty }
+        let words = SnippetSearch.words(query)
+        guard !words.isEmpty else {
+            return Array(candidates.enumerated().sorted { a, b in
+                if a.element.useCount != b.element.useCount { return a.element.useCount > b.element.useCount }
+                let aDate = a.element.lastUsed ?? .distantPast
+                let bDate = b.element.lastUsed ?? .distantPast
+                if aDate != bDate { return aDate > bDate }
+                return a.offset < b.offset
+            }.prefix(limit).map(\.element))
+        }
+        let first = words[0]
+        let hits = candidates.filter { SnippetSearch.matches($0, words: words) }
+        // `sig` finds `;sig` as readily as `sig`: the prefix symbol isn't part of the word.
+        let bare = String(first.drop { !$0.isLetter && !$0.isNumber })
+        func rank(_ snippet: Snippet) -> Int {
+            let abbreviation = SnippetSearch.fold(snippet.abbreviation)
+            let bareAbbreviation = String(abbreviation.drop { !$0.isLetter && !$0.isNumber })
+            if abbreviation == first || (!bare.isEmpty && bareAbbreviation == bare) { return 0 }
+            if abbreviation.hasPrefix(first) || (!bare.isEmpty && bareAbbreviation.hasPrefix(bare)) { return 1 }
+            let titleWords = SnippetSearch.fold(snippet.title).split { !$0.isLetter && !$0.isNumber }
+            if titleWords.contains(where: { $0.hasPrefix(first) }) { return 2 }
+            return 3
+        }
+        return Array(hits.enumerated().sorted { a, b in
+            let ra = rank(a.element), rb = rank(b.element)
+            if ra != rb { return ra < rb }
+            if a.element.useCount != b.element.useCount { return a.element.useCount > b.element.useCount }
+            return a.offset < b.offset
+        }.prefix(limit).map(\.element))
     }
 }
 

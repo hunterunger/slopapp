@@ -42,8 +42,13 @@ nonisolated enum Diagnostics {
         environment[key].flatMap { $0.isEmpty ? nil : $0 }
     }
 
+    /// scripts/smoke.sh: launch only, no first-run window. A smoke run is a test run: a
+    /// throwaway library, its own settings and shortcut names, no keyboard tap, so it never
+    /// touches the person's snippets, settings or shortcuts.
+    static let isSmokeTest = environment["SLOPAPP_SMOKE_TEST"] == "1"
     static let dataDirectory = path("SHORTHAND_DATA_DIR")
-    static let noTap = environment["SHORTHAND_NO_TAP"] == "1"
+        ?? (isSmokeTest ? FileManager.default.temporaryDirectory.appendingPathComponent("shorthand-smoke-\(getpid())") : nil)
+    static let noTap = environment["SHORTHAND_NO_TAP"] == "1" || isSmokeTest
     static let replayFile = path("SHORTHAND_REPLAY")
     static let insertOnlyInto = value("SHORTHAND_INSERT_ONLY_INTO")
     static let pasteboardName = value("SHORTHAND_PASTEBOARD")
@@ -55,8 +60,6 @@ nonisolated enum Diagnostics {
     static let assumeSecureInput: Bool? = environment["SHORTHAND_INSERT_ONLY_INTO"] == nil
         ? nil : environment["SHORTHAND_ASSUME_SECURE_INPUT"].map { $0 == "1" }
     static let snapshotDirectory = path("SHORTHAND_SNAPSHOT_DIR")
-    /// scripts/smoke.sh: launch only, no first-run window.
-    static let isSmokeTest = environment["SLOPAPP_SMOKE_TEST"] == "1"
     private static let logFile = path("SHORTHAND_LOG")
 
     static var isTestMode: Bool { dataDirectory != nil }

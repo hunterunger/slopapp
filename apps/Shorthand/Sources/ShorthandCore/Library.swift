@@ -14,20 +14,25 @@ public struct Snippet: Codable, Sendable, Equatable, Identifiable, Hashable {
     /// Optional label; lists show the first line of the content when it's empty.
     public var name: String
     public var abbreviation: String
+    /// The text with its placeholders. For a formatted snippet it's the plain text of
+    /// `richText`, character for character (images are U+FFFC), so offsets line up.
     public var content: String
+    /// Formatted text and images (RTFD), or nil for a plain-text snippet.
+    public var richText: Data?
     public var caseMode: CaseMode
     public var useCount: Int
     public var lastUsed: Date?
     public var created: Date
     public var modified: Date
 
-    public init(id: UUID = UUID(), groupID: UUID, name: String = "", abbreviation: String, content: String,
+    public init(id: UUID = UUID(), groupID: UUID, name: String = "", abbreviation: String, content: String, richText: Data? = nil,
                 caseMode: CaseMode = .exact, useCount: Int = 0, lastUsed: Date? = nil, created: Date = Date(), modified: Date? = nil) {
         self.id = id
         self.groupID = groupID
         self.name = name
         self.abbreviation = abbreviation
         self.content = content
+        self.richText = richText
         self.caseMode = caseMode
         self.useCount = useCount
         self.lastUsed = lastUsed
@@ -35,12 +40,18 @@ public struct Snippet: Codable, Sendable, Equatable, Identifiable, Hashable {
         self.modified = modified ?? created
     }
 
+    public var isFormatted: Bool { richText != nil }
+
+    /// The content without images, for lists and search.
+    public var plainContent: String { richText == nil ? content : content.filter { $0 != attachmentCharacter } }
+
     /// The name, or the content's first non-empty line.
     public var title: String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
-        let line = content.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
-        return line.isEmpty ? "Empty snippet" : line
+        let line = plainContent.split(whereSeparator: \.isNewline).lazy.map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
+        if line.isEmpty { return content.contains(attachmentCharacter) ? "Image" : "Empty snippet" }
+        return line
     }
 }
 
@@ -88,6 +99,22 @@ public struct Library: Codable, Sendable, Equatable {
     public func group(_ id: UUID) -> SnippetGroup? { groups.first { $0.id == id } }
 
     public func snippet(_ id: UUID) -> Snippet? { snippets.first { $0.id == id } }
+
+    /// The snippet `{snippet:…}` means: the exact abbreviation, in any group (a group that's
+    /// off is a good place for parts that shouldn't expand on their own).
+    public func snippet(abbreviation: String) -> Snippet? {
+        guard !abbreviation.isEmpty else { return nil }
+        return snippets.first { $0.abbreviation == abbreviation }
+    }
+
+    /// For the resolver: finds included snippets in this library.
+    public var lookup: (String) -> Snippet? {
+        var byAbbreviation: [String: Snippet] = [:]
+        for snippet in snippets where !snippet.abbreviation.isEmpty && byAbbreviation[snippet.abbreviation] == nil {
+            byAbbreviation[snippet.abbreviation] = snippet
+        }
+        return { byAbbreviation[$0] }
+    }
 
     public func snippets(in groupID: UUID?) -> [Snippet] {
         guard let groupID else { return snippets }

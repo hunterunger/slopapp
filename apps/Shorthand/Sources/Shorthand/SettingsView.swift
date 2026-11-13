@@ -29,6 +29,7 @@ struct SettingsView: View {
                 .tabItem { Label("Apps", systemImage: "square.grid.2x2") }
 
             SettingsForm {
+                ShortcutRow("Insert a snippet", subtitle: "Search all your snippets and insert one where you're typing.", name: .searchSnippets)
                 ShortcutRow("Pause or resume expansion", name: .togglePause)
             }
             .tabItem { Label("Shortcuts", systemImage: "command") }
@@ -193,7 +194,7 @@ struct AdvancedTab: View {
         switch model.insertMode {
         case .automatic: "Short, single-line snippets are typed and leave the clipboard alone. Longer ones, and anything with several lines or a tab, are pasted."
         case .alwaysPaste: "Every snippet is pasted. Fast in every app, but uses the clipboard."
-        case .alwaysType: "Every snippet is typed. A new line is typed as Return, which sends the message in some chat apps."
+        case .alwaysType: "Every snippet is typed (formatted ones are still pasted). A new line is typed as Return, which sends the message in some chat apps."
         }
     }
 }
