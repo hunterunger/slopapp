@@ -10,6 +10,9 @@ internal import SlopKitLaunch
 ///   reasons the app can't see (a full menu bar, or the app switched off in System Settings ›
 ///   Menu Bar), so Settings is the way back in. If the app's own reopen handler shows a
 ///   window first, Settings stays closed. Turn it off with `opensSettingsOnReopen = false`.
+///   Only "reopen" counts, not the app becoming active: menu bar apps activate themselves
+///   to show a window or panel, and macOS activates the default browser on every link
+///   click, so activation would keep undoing "Show in menu bar" off.
 /// - Window apps: closing the last window quits, like other single-window utilities.
 /// - Testing: `SLOP_APPEARANCE=light|dark` in the environment forces that appearance, so
 ///   screenshots can cover both without touching the system setting
@@ -52,16 +55,6 @@ public final class SlopAppDelegate: NSObject, NSApplicationDelegate {
     /// A visible ordinary window (not a panel, menu or status item window).
     static var hasVisibleWindow: Bool {
         NSApp.windows.contains { $0.isVisible && $0.level == .normal && !($0 is NSPanel) }
-    }
-
-    /// macOS doesn't always send "reopen" to a background (LSUIElement) app, but opening it
-    /// again does activate it. With no windows open, activation can only mean the user
-    /// launched it again, so bring the icon back.
-    public func applicationDidBecomeActive(_ notification: Notification) {
-        guard isMenuBarApp, !MenuBarIcon.isVisible else { return }
-        if !Self.hasVisibleWindow {
-            MenuBarIcon.isVisible = true
-        }
     }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

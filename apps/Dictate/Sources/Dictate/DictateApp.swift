@@ -64,10 +64,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         slop.applicationShouldHandleReopen(sender, hasVisibleWindows: flag)
     }
 
-    func applicationDidBecomeActive(_ notification: Notification) {
-        slop.applicationDidBecomeActive(notification)
-    }
-
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     /// Windows closing after this are the app quitting, not the person closing them.

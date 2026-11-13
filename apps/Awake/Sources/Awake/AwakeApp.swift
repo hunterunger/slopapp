@@ -68,10 +68,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    func applicationDidBecomeActive(_ notification: Notification) {
-        standard.applicationDidBecomeActive(notification)
-    }
-
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }

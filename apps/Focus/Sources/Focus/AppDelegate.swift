@@ -51,7 +51,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        standard.applicationDidBecomeActive(notification)
         Task { await AppModel.controller.refreshPermission() }
     }
 
