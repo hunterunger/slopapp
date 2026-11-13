@@ -34,6 +34,7 @@ final class DocumentEditor {
         page.addAnnotation(annotation)
         register(name) { $0.remove(annotation, from: page, name: name) }
         changed(page)
+        if annotation.type == "Widget" { onFieldsChange() }
     }
 
     func remove(_ annotation: PDFAnnotation, from page: PDFPage, name: String = "Delete") {
@@ -41,6 +42,7 @@ final class DocumentEditor {
         if model.selectedAnnotation === annotation { model.selectedAnnotation = nil }
         register(name) { $0.add(annotation, to: page, name: name) }
         changed(page)
+        if annotation.type == "Widget" { onFieldsChange() }
     }
 
     func setBounds(_ annotation: PDFAnnotation, _ bounds: CGRect, name: String) {
@@ -208,7 +210,13 @@ final class DocumentEditor {
 
     /// Swaps pages for rebuilt ones (OCR text layer, stamped headers). Annotations move to the
     /// new page; undo swaps the originals back with their annotations.
+    /// Remembers what's in view before pages are swapped and returns how to get back there
+    /// (a swapped page is a new object, and PDFView would otherwise jump).
+    var positionKeeper: () -> () -> Void = { {} }
+
     func replace(_ replacements: [(index: Int, page: PDFPage)], name: String) {
+        let restorePosition = positionKeeper()
+        defer { restorePosition() }
         var originals: [(index: Int, page: PDFPage)] = []
         for item in replacements.sorted(by: { $0.index < $1.index }) {
             guard let old = pdf.page(at: item.index) else { continue }
@@ -221,6 +229,107 @@ final class DocumentEditor {
         model.refreshPages()
         register(name) { $0.replace(originals, name: name) }
         onPagesChange()
+    }
+
+    // MARK: Crop
+
+    func crop(_ pages: [PDFPage], to rect: CGRect, reference: PDFPage, name: String) {
+        let old = PageCrop.apply(rect, from: reference, to: pages)
+        register(name) { $0.restoreCrop(old, name: name) }
+        for page in pages { model.touch(page) }
+        onPagesChange()
+    }
+
+    func removeCrop(_ pages: [PDFPage]) {
+        let old = PageCrop.remove(from: pages)
+        register("Remove Crop") { $0.restoreCrop(old, name: "Remove Crop") }
+        for page in pages { model.touch(page) }
+        onPagesChange()
+    }
+
+    private func restoreCrop(_ boxes: [(PDFPage, CGRect)], name: String) {
+        let current = boxes.map { ($0.0, $0.0.bounds(for: .cropBox)) }
+        for (page, box) in boxes { page.setBounds(box, for: .cropBox) }
+        register(name) { $0.restoreCrop(current, name: name) }
+        for (page, _) in boxes { model.touch(page) }
+        onPagesChange()
+    }
+
+    // MARK: Form fields
+
+    /// Called after field edits so the form tracker and calculations catch up.
+    var onFieldsChange: () -> Void = {}
+
+    /// One undoable change to a field: `set` applies a value, `get` reads the current one.
+    func change<Value>(_ fields: [PDFAnnotation], _ name: String, get: @escaping (PDFAnnotation) -> Value,
+                       set: @escaping (PDFAnnotation, Value) -> Void, to value: Value) {
+        let old = fields.map(get)
+        for field in fields { set(field, value) }
+        register(name) { editor in
+            editor.restore(fields, name, values: old, get: get, set: set)
+        }
+        for field in fields { changed(field.page) }
+        onFieldsChange()
+    }
+
+    private func restore<Value>(_ fields: [PDFAnnotation], _ name: String, values: [Value], get: @escaping (PDFAnnotation) -> Value,
+                                set: @escaping (PDFAnnotation, Value) -> Void) {
+        let current = fields.map(get)
+        for (field, value) in zip(fields, values) { set(field, value) }
+        register(name) { $0.restore(fields, name, values: current, get: get, set: set) }
+        for field in fields { changed(field.page) }
+        onFieldsChange()
+    }
+
+    /// Renames a field (every widget of a radio group) and the calculations that read it.
+    func renameField(_ fields: [PDFAnnotation], from old: String, to new: String) {
+        guard old != new, !new.isEmpty else { return }
+        let scripts = model.formScripts
+        for field in fields {
+            field.fieldName = new
+            // A tooltip that was just the name follows it.
+            if FormFieldFactory.tooltip(of: field) == old { FormFieldFactory.setTooltip(new, on: field) }
+        }
+        var renamed = scripts
+        renamed.rename(old, to: new)
+        setScriptsQuietly(renamed)
+        register("Rename Field") { editor in
+            editor.renameField(fields, from: new, to: old)
+        }
+        for field in fields { changed(field.page) }
+        onFieldsChange()
+    }
+
+    func setCalculation(_ calculation: FieldCalculation?, for name: String) {
+        var scripts = model.formScripts
+        scripts.set(calculation, for: name)
+        setScripts(scripts, name: calculation == nil ? "Remove Calculation" : "Change Calculation")
+    }
+
+    func setScripts(_ scripts: FormScripts, name: String) {
+        let old = model.formScripts
+        guard old != scripts else { return }
+        setScriptsQuietly(scripts)
+        register(name) { $0.setScripts(old, name: name) }
+        onFieldsChange()
+    }
+
+    private func setScriptsQuietly(_ scripts: FormScripts) {
+        model.formScripts = scripts
+        document?.formScripts = scripts
+        // Saving writes the scripts; mark the document edited even if no field changed.
+        document?.updateChangeCount(.changeDone)
+        model.annotationsRevision += 1
+    }
+
+    /// Reorders a page's fields (tab order).
+    func reorderFields(on page: PDFPage, to order: [PDFAnnotation]) {
+        let old = page.annotations.filter { $0.type == "Widget" }
+        guard old.map(ObjectIdentifier.init) != order.map(ObjectIdentifier.init) else { return }
+        FormFields.reorder(page, widgets: order)
+        register("Change Tab Order") { $0.reorderFields(on: page, to: old) }
+        changed(page)
+        onFieldsChange()
     }
 
     // MARK: Document

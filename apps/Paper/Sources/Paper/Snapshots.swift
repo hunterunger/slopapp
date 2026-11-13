@@ -27,16 +27,18 @@ enum Snapshots {
         let source = URL(fileURLWithPath: fixtures, isDirectory: true)
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("paper-snapshot-\(UUID().uuidString)", isDirectory: true)
         do { try FileManager.default.copyItem(at: source, to: base) } catch { return }
+        let onlyFeatures = ProcessInfo.processInfo.environment["PAPER_SNAPSHOT_ONLY"] == "features"
         Task {
             for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
                 NSApp.appearance = NSAppearance(named: appearance)
-                await walk(base: base, folder: folder, suffix: name)
+                if !onlyFeatures { await walk(base: base, folder: folder, suffix: name) }
+                await FeatureWalk.run(base: base, folder: folder, suffix: name)
             }
             NSApp.terminate(nil)
         }
     }
 
-    private static func open(_ url: URL) async -> PaperWindowController? {
+    static func open(_ url: URL) async -> PaperWindowController? {
         await withCheckedContinuation { continuation in
             NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { document, _, _ in
                 continuation.resume(returning: (document as? PaperDocument)?.windowController)
@@ -44,7 +46,7 @@ enum Snapshots {
         }
     }
 
-    private static func pause(_ seconds: Double = 0.8) async {
+    static func pause(_ seconds: Double = 0.8) async {
         try? await Task.sleep(for: .seconds(seconds))
     }
 
@@ -161,7 +163,7 @@ enum Snapshots {
     }
 
     /// Closes without saving: the fixtures stay as generated.
-    private static func close(_ controller: PaperWindowController) async {
+    static func close(_ controller: PaperWindowController) async {
         guard let document = controller.paperDocument else { return }
         document.undoManager?.removeAllActions()
         document.updateChangeCount(.changeCleared)

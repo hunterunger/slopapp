@@ -56,22 +56,64 @@ enum Exporting {
         }
     }
 
+    /// Export Text…: plain text, or rich text (fonts, sizes, paragraphs) chosen in the panel.
     static func exportText(document: PaperDocument, window: NSWindow) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
         panel.nameFieldStringValue = "\(baseName(document)).txt"
         if let directory = document.fileURL?.deletingLastPathComponent() { panel.directoryURL = directory }
+        let format = FormatChooser(panel: panel)
+        panel.accessoryView = format.view
         panel.beginSheetModal(for: window) { response in
             MainActor.assumeIsolated {
+                withExtendedLifetime(format) {}
                 guard response == .OK, let url = panel.url else { return }
-                let text = document.pdf.string ?? ""
                 do {
-                    try text.write(to: url, atomically: true, encoding: .utf8)
-                    HUD.show(text.isEmpty ? "Saved (the document has no text)" : "Saved text")
+                    if format.isRich {
+                        guard let data = OfficeExport.rtf(document.pdf) else { throw PaperError.writeFailed }
+                        try data.write(to: url, options: .atomic)
+                        HUD.show("Saved rich text")
+                    } else {
+                        let text = document.pdf.string ?? ""
+                        try text.write(to: url, atomically: true, encoding: .utf8)
+                        HUD.show(text.isEmpty ? "Saved (the document has no text)" : "Saved text")
+                    }
                 } catch {
                     NSAlert(error: error).beginSheetModal(for: window, completionHandler: nil)
                 }
             }
+        }
+    }
+
+    /// The Format pop-up under the save panel.
+    @MainActor
+    final class FormatChooser: NSObject {
+        let view: NSView
+        private let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        private weak var panel: NSSavePanel?
+
+        init(panel: NSSavePanel) {
+            self.panel = panel
+            let label = NSTextField(labelWithString: "Format:")
+            popup.addItems(withTitles: ["Plain Text", "Rich Text (RTF)"])
+            popup.setAccessibilityLabel("Format")
+            let stack = NSStackView(views: [label, popup])
+            stack.orientation = .horizontal
+            stack.spacing = Spacing.s
+            stack.edgeInsets = NSEdgeInsets(top: Spacing.m, left: Spacing.l, bottom: Spacing.m, right: Spacing.l)
+            view = stack
+            super.init()
+            popup.target = self
+            popup.action = #selector(changed)
+        }
+
+        var isRich: Bool { popup.indexOfSelectedItem == 1 }
+
+        @objc private func changed() {
+            guard let panel else { return }
+            let base = (panel.nameFieldStringValue as NSString).deletingPathExtension
+            panel.allowedContentTypes = [isRich ? .rtf : .plainText]
+            panel.nameFieldStringValue = base + (isRich ? ".rtf" : ".txt")
         }
     }
 

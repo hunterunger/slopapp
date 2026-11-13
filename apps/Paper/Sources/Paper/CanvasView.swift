@@ -13,6 +13,13 @@ protocol CanvasDelegate: AnyObject {
     func canvasNeedsOverlay()
     func canvasFormMayHaveChanged()
     func canvasSetTool(_ tool: Tool)
+    func canvasEditContent(_ block: TextBlock, on page: PDFPage)
+    func canvasMoveImage(_ target: ImageTarget, to rect: CGRect)
+    func canvasDeleteImage(_ target: ImageTarget)
+    func canvasCreateField(on page: PDFPage, rect: CGRect)
+    func canvasApplyCrop()
+    func canvasPlaceCertificateSignature(on page: PDFPage, rect: CGRect)
+    func canvasSignatureFieldClicked(_ widget: PDFAnnotation, at point: NSPoint)
 }
 
 /// What the overlay draws while a drag is in progress, in page space.
@@ -21,6 +28,8 @@ enum CanvasPreview {
     case marquee(page: PDFPage, rect: CGRect)
     case line(page: PDFPage, from: CGPoint, to: CGPoint, arrow: Bool)
     case ink(page: PDFPage, points: [CGPoint])
+    /// A frame being drawn or moved: a new form field, a certificate signature, an image.
+    case frame(page: PDFPage, rect: CGRect)
 }
 
 /// PDFView plus Paper's tools. Text selection, links, form fields and scrolling stay
@@ -46,6 +55,34 @@ final class PaperPDFView: PDFView {
         case shape(PDFPage, start: CGPoint, current: CGPoint)
         case ink(PDFPage, points: [CGPoint])
         case marquee(PDFPage, start: CGPoint, current: CGPoint)
+        case image(ImageTarget, start: CGRect, origin: CGPoint, handle: Int?, current: CGRect)
+        case crop(PDFPage, start: CGPoint)
+        case field(PDFPage, start: CGPoint, current: CGPoint)
+        case certificate(PDFPage, start: CGPoint, current: CGPoint)
+    }
+
+    /// Text blocks and images per page, for the Edit tool (pages are replaced, never
+    /// changed in place, by content edits, so a page's entry stays right).
+    private var contentCache: [ObjectIdentifier: (blocks: [TextBlock], images: [PageImage])] = [:]
+    /// What the pointer is over with the Edit tool, outlined by the overlay.
+    private(set) var hover: (page: PDFPage, rect: CGRect)?
+
+    func content(of page: PDFPage) -> (blocks: [TextBlock], images: [PageImage]) {
+        if let cached = contentCache[ObjectIdentifier(page)] { return cached }
+        let scan = ContentScanner.scan(page)
+        let entry = (TextLayout.blocks(from: TextLayout.lines(on: page, scanned: scan.text)), scan.images.filter { $0.rect.width > 4 && $0.rect.height > 4 })
+        if contentCache.count > 40 { contentCache.removeAll() }
+        contentCache[ObjectIdentifier(page)] = entry
+        return entry
+    }
+
+    func invalidateContent() {
+        contentCache.removeAll()
+        hover = nil
+    }
+
+    func image(at point: CGPoint, on page: PDFPage) -> PageImage? {
+        content(of: page).images.last { $0.rect.contains(point) }
     }
 
     private var drag: Drag = .none
@@ -64,8 +101,28 @@ final class PaperPDFView: PDFView {
         return (page, convert(viewPoint, to: page))
     }
 
+    /// The topmost form field at a point.
+    func field(at point: CGPoint, on page: PDFPage) -> PDFAnnotation? {
+        page.annotations.reversed().first { $0.type == "Widget" && $0.bounds.insetBy(dx: -2, dy: -2).contains(point) }
+    }
+
+    /// Whether the selection handles resize this annotation with the current tool.
+    func canResize(_ annotation: PDFAnnotation) -> Bool {
+        if annotation.type == "Widget" { return model?.tool == .form }
+        return AnnotationGeometry.isResizable(annotation)
+    }
+
+    /// An empty signature field (not one signed with a certificate). PDFKit doesn't expose a
+    /// signature field's value, so the signatures Paper validated on open decide.
+    func isEmptySignatureField(_ annotation: PDFAnnotation) -> Bool {
+        guard annotation.widgetFieldType == .signature else { return false }
+        let signed = Set(model?.signatures.map(\.fieldName) ?? [])
+        return !signed.contains(annotation.fieldName ?? "")
+    }
+
     /// The topmost annotation Paper can select at a point (not form fields or links).
     func editableAnnotation(at point: CGPoint, on page: PDFPage) -> PDFAnnotation? {
+        if model?.tool == .form { return field(at: point, on: page) }
         let tolerance = 3 / max(scaleFactor, 0.1)
         return page.annotations.reversed().first { annotation in
             AnnotationGeometry.isEditable(annotation) && annotation.shouldDisplay
@@ -84,9 +141,13 @@ final class PaperPDFView: PDFView {
     /// Corner handles of the selected annotation in view coordinates.
     func handleRects(for annotation: PDFAnnotation) -> [NSRect] {
         guard let page = annotation.page else { return [] }
+        return handleRects(for: annotation.bounds, on: page)
+    }
+
+    func handleRects(for pageRect: CGRect, on page: PDFPage) -> [NSRect] {
         // On the selection outline's corners (it sits just outside the annotation).
         let outset = PaperMetrics.selectionOutset
-        let rect = convert(annotation.bounds, from: page).insetBy(dx: -outset, dy: -outset)
+        let rect = convert(pageRect, from: page).insetBy(dx: -outset, dy: -outset)
         let size = Self.handleSize
         // Order matches AnnotationGeometry.dragging: bottom-left, bottom-right, top-left, top-right.
         return [NSPoint(x: rect.minX, y: rect.minY), NSPoint(x: rect.maxX, y: rect.minY),
@@ -112,7 +173,10 @@ final class PaperPDFView: PDFView {
                handleRects(for: selected).contains(where: { $0.insetBy(dx: -3, dy: -3).contains(viewPoint) }) {
                 return true
             }
+            if !model.isReadOnly, let widget = field(at: point, on: page), isEmptySignatureField(widget) { return true }
             return editableAnnotation(at: point, on: page) != nil
+        case .edit, .form, .crop:
+            return true
         case .highlight:
             return false
         case .redact:
@@ -128,7 +192,30 @@ final class PaperPDFView: PDFView {
         let tool = model.isReadOnly ? .select : model.tool
         switch tool {
         case .select:
+            if !model.isReadOnly, let widget = field(at: point, on: page), isEmptySignatureField(widget),
+               editableAnnotation(at: point, on: page) == nil {
+                drag = .none
+                canvasDelegate?.canvasSignatureFieldClicked(widget, at: convert(event.locationInWindow, from: nil))
+                return
+            }
             mouseDownSelecting(event, page: page, point: point)
+        case .edit:
+            mouseDownEditing(event, page: page, point: point)
+        case .form:
+            if let selected = model.selectedAnnotation, selected.page === page, canResize(selected),
+               let handle = handleRects(for: selected).firstIndex(where: { $0.insetBy(dx: -3, dy: -3).contains(convert(event.locationInWindow, from: nil)) }) {
+                drag = .resize(selected, handle: handle, start: selected.bounds)
+            } else if let widget = field(at: point, on: page) {
+                select(widget)
+                drag = .move(widget, start: widget.bounds, origin: point, moved: false)
+            } else {
+                select(nil)
+                drag = .field(page, start: point, current: point)
+            }
+        case .crop:
+            select(nil)
+            model.cropDraft = CropDraft(page: page, rect: CGRect(origin: point, size: .zero))
+            drag = .crop(page, start: point)
         case .highlight:
             drag = .none
         case .redact:
@@ -154,13 +241,41 @@ final class PaperPDFView: PDFView {
         case .sign:
             select(nil)
             drag = .none
-            if let signature = model.pendingSignature {
+            if model.certificatePlan != nil {
+                drag = .certificate(page, start: point, current: point)
+            } else if let signature = model.pendingSignature {
                 placeSignature(signature, on: page, at: point)
             } else {
                 canvasDelegate?.canvasShowSignatureMenu(at: convert(event.locationInWindow, from: nil))
             }
         }
         updatePreview()
+    }
+
+    /// The Edit tool: a click on an image selects it (drag to move, corners to resize); a
+    /// click on text opens it for editing in place.
+    private func mouseDownEditing(_ event: NSEvent, page: PDFPage, point: CGPoint) {
+        guard let model else { return }
+        select(nil)
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        if let target = model.imageTarget, target.page === page,
+           let handle = handleRects(for: target.image.rect, on: page).firstIndex(where: { $0.insetBy(dx: -3, dy: -3).contains(viewPoint) }) {
+            drag = .image(target, start: target.image.rect, origin: point, handle: handle, current: target.image.rect)
+            return
+        }
+        if let image = image(at: point, on: page) {
+            let target = ImageTarget(page: page, image: image)
+            model.imageTarget = target
+            drag = .image(target, start: image.rect, origin: point, handle: nil, current: image.rect)
+            canvasDelegate?.canvasNeedsOverlay()
+            return
+        }
+        model.imageTarget = nil
+        drag = .none
+        if let block = TextLayout.block(at: point, in: content(of: page).blocks) {
+            canvasDelegate?.canvasEditContent(block, on: page)
+        }
+        canvasDelegate?.canvasNeedsOverlay()
     }
 
     private func mouseDownSelecting(_ event: NSEvent, page: PDFPage, point: CGPoint) {
@@ -223,6 +338,7 @@ final class PaperPDFView: PDFView {
             guard let annotationPage = annotation.page else { return }
             let point = convert(convert(event.locationInWindow, from: nil), to: annotationPage)
             let keepAspect = event.modifierFlags.contains(.shift) || annotation.type == "Ink"
+                || FormFieldKind.of(annotation)?.keepsSquare == true
             let target = AnnotationGeometry.dragging(handle: handle, of: start, to: point, keepAspect: keepAspect)
             AnnotationGeometry.resize(annotation, to: target)
             annotationsChanged(on: annotationPage)
@@ -239,6 +355,28 @@ final class PaperPDFView: PDFView {
         case .marquee(let markPage, let start, _):
             let point = markPage === page ? rawPoint : convert(convert(event.locationInWindow, from: nil), to: markPage)
             drag = .marquee(markPage, start: start, current: point)
+        case .image(let target, let start, let origin, let handle, _):
+            let point = convert(convert(event.locationInWindow, from: nil), to: target.page)
+            let rect: CGRect
+            if let handle {
+                rect = AnnotationGeometry.dragging(handle: handle, of: start, to: point, keepAspect: !event.modifierFlags.contains(.shift), minSize: 8)
+            } else {
+                rect = start.offsetBy(dx: point.x - origin.x, dy: point.y - origin.y)
+            }
+            drag = .image(target, start: start, origin: origin, handle: handle, current: rect)
+        case .crop(let cropPage, let start):
+            let point = convert(convert(event.locationInWindow, from: nil), to: cropPage)
+            let rect = CGRect(x: min(start.x, point.x), y: min(start.y, point.y), width: abs(point.x - start.x), height: abs(point.y - start.y))
+            model?.cropDraft = CropDraft(page: cropPage, rect: rect.intersection(cropPage.bounds(for: .mediaBox)))
+        case .field(let fieldPage, let start, _):
+            var point = convert(convert(event.locationInWindow, from: nil), to: fieldPage)
+            if model?.formKind.keepsSquare == true {
+                let side = max(abs(point.x - start.x), abs(point.y - start.y))
+                point = CGPoint(x: start.x + (point.x < start.x ? -side : side), y: start.y + (point.y < start.y ? -side : side))
+            }
+            drag = .field(fieldPage, start: start, current: point)
+        case .certificate(let signPage, let start, _):
+            drag = .certificate(signPage, start: start, current: convert(convert(event.locationInWindow, from: nil), to: signPage))
         }
         updatePreview()
     }
@@ -276,7 +414,29 @@ final class PaperPDFView: PDFView {
             let rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))
             guard rect.width * scaleFactor > 3, rect.height * scaleFactor > 3 else { return }
             editor.add(RedactionMarks.makeMark(bounds: rect), to: page, name: "Mark for Redaction")
+        case .image(let target, let start, _, _, let current):
+            guard abs(current.minX - start.minX) + abs(current.minY - start.minY) + abs(current.width - start.width) + abs(current.height - start.height) > 0.5 else { return }
+            canvasDelegate?.canvasMoveImage(target, to: current)
+        case .crop:
+            if let draft = model.cropDraft, PageCrop.clamped(draft.rect, to: draft.page) == nil { model.cropDraft = nil }
+        case .field(let page, let start, let end):
+            var rect = Self.rect(start, end)
+            if rect.width * scaleFactor < 6 || rect.height * scaleFactor < 6 {
+                let size = model.formKind.defaultSize
+                rect = CGRect(x: start.x, y: start.y - size.height, width: size.width, height: size.height)
+            }
+            canvasDelegate?.canvasCreateField(on: page, rect: rect)
+        case .certificate(let page, let start, let end):
+            var rect = Self.rect(start, end)
+            if rect.width * scaleFactor < 12 || rect.height * scaleFactor < 8 {
+                rect = CGRect(x: start.x - 100, y: start.y - 25, width: 200, height: 50)
+            }
+            canvasDelegate?.canvasPlaceCertificateSignature(on: page, rect: rect.intersection(page.bounds(for: .cropBox)))
         }
+    }
+
+    static func rect(_ a: CGPoint, _ b: CGPoint) -> CGRect {
+        CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
     }
 
     /// Highlight or Redact tool: the text just selected gets the tool's treatment. Called after
@@ -361,6 +521,10 @@ final class PaperPDFView: PDFView {
         case .marquee(let page, let start, let end):
             preview = .marquee(page: page, rect: CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
                                                         width: abs(end.x - start.x), height: abs(end.y - start.y)))
+        case .image(let target, _, _, _, let current):
+            preview = .frame(page: target.page, rect: current)
+        case .field(let page, let start, let end), .certificate(let page, let start, let end):
+            preview = .frame(page: page, rect: Self.rect(start, end))
         default:
             preview = nil
         }
@@ -369,9 +533,34 @@ final class PaperPDFView: PDFView {
 
     // MARK: Cursor
 
+    func updateHover(_ event: NSEvent) {
+        var next: (PDFPage, CGRect)?
+        if model?.tool == .edit, let (page, point) = pagePoint(for: event), page.bounds(for: .cropBox).contains(point) {
+            let content = content(of: page)
+            if let image = content.images.last(where: { $0.rect.contains(point) }) {
+                next = (page, image.rect)
+            } else if let block = TextLayout.block(at: point, in: content.blocks) {
+                next = (page, block.bounds)
+            }
+        }
+        if next?.0 !== hover?.page || next?.1 != hover?.rect {
+            hover = next.map { (page: $0.0, rect: $0.1) }
+            canvasDelegate?.canvasNeedsOverlay()
+        }
+    }
+
     func updateCursor(for event: NSEvent) {
         guard let model, !model.isReadOnly else { return }
         switch model.tool {
+        case .edit:
+            updateHover(event)
+            if let hover, let (_, point) = pagePoint(for: event) {
+                if hover.rect.contains(point), content(of: hover.page).images.contains(where: { $0.rect == hover.rect }) { NSCursor.openHand.set() } else { NSCursor.iBeam.set() }
+            } else {
+                NSCursor.arrow.set()
+            }
+        case .form, .crop:
+            NSCursor.crosshair.set()
         case .draw, .shape, .note, .sign:
             NSCursor.crosshair.set()
         case .text:
@@ -397,6 +586,14 @@ final class PaperPDFView: PDFView {
         }
         if characters == "v", flags.isEmpty, model.tool != .select {
             canvasDelegate?.canvasSetTool(.select)
+            return true
+        }
+        if model.tool == .edit, let target = model.imageTarget, flags.isEmpty, event.keyCode == 51 || event.keyCode == 117 {
+            canvasDelegate?.canvasDeleteImage(target)
+            return true
+        }
+        if model.tool == .crop, model.cropDraft != nil, flags.isEmpty, event.keyCode == 36 || event.keyCode == 76 {
+            canvasDelegate?.canvasApplyCrop()
             return true
         }
         guard let selected = model.selectedAnnotation, let page = selected.page, !model.isReadOnly,
@@ -435,7 +632,13 @@ final class PaperPDFView: PDFView {
             return
         }
         guard let model else { return }
-        if model.tool != .select {
+        if model.cropDraft != nil {
+            model.cropDraft = nil
+            canvasDelegate?.canvasNeedsOverlay()
+        } else if model.imageTarget != nil {
+            model.imageTarget = nil
+            canvasDelegate?.canvasNeedsOverlay()
+        } else if model.tool != .select {
             canvasDelegate?.canvasSetTool(.select)
         } else if model.selectedAnnotation != nil {
             select(nil)
@@ -555,7 +758,7 @@ final class CanvasOverlay: NSView {
             outline.lineWidth = 1.5
             accent.setStroke()
             outline.stroke()
-            if AnnotationGeometry.isResizable(annotation), !model.isReadOnly {
+            if pdfView.canResize(annotation), !model.isReadOnly {
                 for handle in pdfView.handleRects(for: annotation) {
                     let local = convert(handle, from: pdfView)
                     let path = NSBezierPath(ovalIn: local)
@@ -566,6 +769,46 @@ final class CanvasOverlay: NSView {
                     path.stroke()
                 }
             }
+        }
+        func handles(_ rect: CGRect, on page: PDFPage) {
+            for handle in pdfView.handleRects(for: rect, on: page) {
+                let path = NSBezierPath(ovalIn: convert(handle, from: pdfView))
+                NSColor.white.setFill()
+                path.fill()
+                path.lineWidth = 1.5
+                accent.setStroke()
+                path.stroke()
+            }
+        }
+        if model.tool == .edit, let hover = pdfView.hover, hover.page.document === model.pdf, model.imageTarget?.image.rect != hover.rect {
+            let local = convert(pdfView.convert(hover.rect, from: hover.page), from: pdfView).insetBy(dx: -3, dy: -3)
+            let path = NSBezierPath(rect: local)
+            path.setLineDash([4, 3], count: 2, phase: 0)
+            path.lineWidth = 1
+            accent.withAlphaComponent(0.8).setStroke()
+            path.stroke()
+        }
+        if model.tool == .edit, let target = model.imageTarget, target.page.document === model.pdf, pdfView.preview == nil {
+            let local = convert(pdfView.convert(target.image.rect, from: target.page), from: pdfView)
+            let outline = NSBezierPath(rect: local.insetBy(dx: -PaperMetrics.selectionOutset, dy: -PaperMetrics.selectionOutset))
+            outline.lineWidth = 1.5
+            accent.setStroke()
+            outline.stroke()
+            handles(target.image.rect, on: target.page)
+        }
+        if let draft = model.cropDraft, draft.page.document === model.pdf, draft.rect.width > 0 {
+            // Dim what the crop cuts away.
+            let pageRect = convert(pdfView.convert(draft.page.bounds(for: .cropBox), from: draft.page), from: pdfView)
+            let cropRect = convert(pdfView.convert(draft.rect, from: draft.page), from: pdfView)
+            let shade = NSBezierPath(rect: pageRect)
+            shade.append(NSBezierPath(rect: cropRect))
+            shade.windingRule = .evenOdd
+            NSColor.black.withAlphaComponent(0.35).setFill()
+            shade.fill()
+            let outline = NSBezierPath(rect: cropRect)
+            outline.lineWidth = 1.5
+            accent.setStroke()
+            outline.stroke()
         }
         guard let preview = pdfView.preview else { return }
         let scale = pdfView.scaleFactor
@@ -605,6 +848,15 @@ final class CanvasOverlay: NSView {
         case .ink(let page, let points):
             let path = InkSmoothing.path(through: points.map { point($0, page) }, lineWidth: model.lineWidth * scale)
             model.inkColor.nsColor.setStroke()
+            path.stroke()
+        case .frame(let page, let rect):
+            let local = convert(pdfView.convert(rect, from: page), from: pdfView)
+            accent.withAlphaComponent(0.12).setFill()
+            NSBezierPath(rect: local).fill()
+            let path = NSBezierPath(rect: local)
+            path.setLineDash([4, 3], count: 2, phase: 0)
+            path.lineWidth = 1.5
+            accent.setStroke()
             path.stroke()
         }
     }

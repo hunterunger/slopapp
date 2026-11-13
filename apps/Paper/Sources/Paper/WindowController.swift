@@ -1,6 +1,7 @@
 import AppKit
 import PDFKit
 import PaperCore
+import SecurityInterface
 import SlopKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -24,6 +25,8 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
     /// A tool owns the current mouse-down/drag/up sequence.
     private var toolTracking = false
     private let lastPages = LastPageMemory(store: UserDefaultsStore(Prefs.defaults))
+    /// The last temporary copy made for sharing, and the edit revision it shows.
+    var shareCopy: (revision: Int, url: URL)?
     /// The fit mode the zoom follows, or nil after a manual zoom.
     var zoomMode: ZoomPreference? = Prefs.zoom
 
@@ -46,6 +49,20 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         super.init(window: window)
         editor.onChange = { [weak self] page in self?.annotationsDidChange(page) }
         editor.onPagesChange = { [weak self] in self?.pagesDidChange() }
+        editor.onFieldsChange = { [weak self] in self?.fieldsChanged() }
+        editor.positionKeeper = { [weak self] in
+            // Swapped pages keep their size, so the scroll offset itself is what to restore.
+            guard let self, let scroll = self.pdfView.documentView?.enclosingScrollView else { return {} }
+            let origin = scroll.contentView.bounds.origin, scale = self.pdfView.scaleFactor
+            return { [weak self] in
+                guard let self else { return }
+                self.pdfView.layoutDocumentView()
+                if abs(self.pdfView.scaleFactor - scale) > 0.001 { self.pdfView.scaleFactor = scale }
+                guard let scroll = self.pdfView.documentView?.enclosingScrollView else { return }
+                scroll.contentView.scroll(to: scroll.contentView.constrainBoundsRect(NSRect(origin: origin, size: scroll.contentView.bounds.size)).origin)
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+        }
         canvas.delegate = self
         pdfView.canvasDelegate = self
         toolbarController.owner = self
@@ -207,6 +224,10 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         model.fileURL = document.fileURL
         model.infoRevision += 1
         model.hasOutline = (document.pdf.outlineRoot?.numberOfChildren ?? 0) > 0
+        model.formScripts = document.formScripts
+        model.signatures = document.signatures
+        model.imageTarget = nil
+        model.cropDraft = nil
         if model.sidebarMode == .outline, !model.hasOutline { model.sidebarMode = .thumbnails }
         model.selectedAnnotation = nil
         model.searchHits = []
@@ -272,7 +293,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
         })
     }
 
-    private func updateCurrentPage() {
+    func updateCurrentPage() {
         guard let page = pdfView.currentPage else { return }
         let index = model.pdf.index(for: page)
         guard index != NSNotFound else { return }
@@ -298,6 +319,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
 
     func commitEditing() {
         canvas.endTextEditing()
+        canvas.endContentEditing(commit: true)
         canvasFormMayHaveChanged()
     }
 
@@ -307,6 +329,9 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
     }
 
     private func pagesDidChange() {
+        pdfView.invalidateContent()
+        if let draft = model.cropDraft, model.pdf.index(for: draft.page) == NSNotFound { model.cropDraft = nil }
+        if let target = model.imageTarget, model.pdf.index(for: target.page) == NSNotFound { model.imageTarget = nil }
         pdfView.layoutDocumentView()
         model.refreshPages()
         if model.hasTextLayer != PDFSearch.hasTextLayer(model.pdf) { textLayerChanged() }
@@ -365,6 +390,8 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
 
     func canvasFormMayHaveChanged() {
         guard let document = paperDocument, !document.formTracker.isEmpty else { return }
+        // Calculated fields follow first, so their new values undo with the edit.
+        recalculate()
         let changes = document.formTracker.changes()
         guard !changes.isEmpty else { return }
         editor.group("Fill Form") {
@@ -379,14 +406,19 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
     func setTool(_ tool: Tool) {
         guard !model.isReadOnly || tool == .select else { NSSound.beep(); return }
         canvas.endTextEditing()
-        if tool != .sign { model.pendingSignature = nil }
+        canvas.endContentEditing(commit: true)
+        if tool != .sign { model.pendingSignature = nil; model.certificatePlan = nil }
+        if tool != .edit { model.imageTarget = nil }
+        if tool != .crop { model.cropDraft = nil }
+        // Fields are selected with the Form Fields tool only.
+        if tool != .form, model.selectedAnnotation?.type == "Widget" { model.selectedAnnotation = nil }
         rememberGroupChoice(tool)
         model.tool = tool
         if tool != .select { pdfView.select(nil) }
         toolbarController.refresh()
         canvas.refreshOverlay()
         window?.makeFirstResponder(pdfView)
-        if tool == .sign, model.pendingSignature == nil {
+        if tool == .sign, model.pendingSignature == nil, model.certificatePlan == nil {
             toolbarController.showSignatureMenu() ?? canvasShowSignatureMenu(at: NSPoint(x: pdfView.bounds.midX, y: pdfView.bounds.midY))
         }
     }
@@ -468,7 +500,18 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
 
     @objc func deleteSelectedAnnotation(_ sender: Any?) {
         guard let annotation = model.selectedAnnotation, let page = annotation.page else { return }
-        editor.remove(annotation, from: page)
+        editor.remove(annotation, from: page, name: annotation.type == "Widget" ? "Delete Field" : "Delete")
+    }
+
+    /// Renames the selected field (every button of a radio group).
+    func renameSelectedField(_ name: String) {
+        guard let field = model.selectedAnnotation, let old = field.fieldName else { return }
+        let new = FormNames.clean(name)
+        guard !new.isEmpty, new != old else { return }
+        let group = field.widgetControlType == .radioButtonControl
+            ? FormFields.widgets(in: model.pdf).map(\.annotation).filter { $0.fieldName == old } : [field]
+        editor.renameField(group, from: old, to: new)
+        if field.widgetControlType == .radioButtonControl { model.lastRadioGroup = new }
     }
 
     @objc func editSelectedAnnotation(_ sender: Any?) {
@@ -860,6 +903,7 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if let answer = validateParityItem(item) { return answer }
+        if let answer = validateEditingItem(item) { return answer }
         let locked = model.isLocked
         let editable = !model.isReadOnly
         switch item.action {
@@ -965,8 +1009,54 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
             setAuthor: { [weak self] name in
                 guard let self, let annotation = self.model.selectedAnnotation else { return }
                 self.editor.setAuthor(annotation, name)
-            }
+            },
+            renameField: { [weak self] name in self?.renameSelectedField(name) },
+            setTooltip: { [weak self] text in
+                guard let self, let field = self.model.selectedAnnotation else { return }
+                self.editor.change([field], "Change Tooltip", get: FormFieldFactory.tooltip(of:), set: { FormFieldFactory.setTooltip($1, on: $0) }, to: text)
+            },
+            setFlag: { [weak self] flag, on in
+                guard let self, let field = self.model.selectedAnnotation else { return }
+                let fields = self.groupOf(field)
+                self.editor.change(fields, "Change Field", get: { FormFieldFactory.has(flag, $0) }, set: { FormFieldFactory.set(flag, $1, on: $0) }, to: on)
+            },
+            setOptions: { [weak self] options in
+                guard let self, let field = self.model.selectedAnnotation else { return }
+                self.editor.change([field], "Change Choices", get: { $0.choices ?? [] }, set: { field, value in
+                    field.choices = value
+                    if let current = field.widgetStringValue, !current.isEmpty, !value.contains(current) { field.widgetStringValue = "" }
+                }, to: options)
+            },
+            setExportValue: { [weak self] value in
+                guard let self, let field = self.model.selectedAnnotation else { return }
+                let trimmed = value.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty, trimmed != "Off" else { return }
+                self.editor.change([field], "Change Value", get: \.buttonWidgetStateString, set: { $0.buttonWidgetStateString = $1 }, to: trimmed)
+            },
+            setCalculation: { [weak self] calculation in
+                guard let self, let name = self.model.selectedAnnotation?.fieldName else { return }
+                self.editor.setCalculation(calculation, for: name)
+                if calculation != nil, let field = self.model.selectedAnnotation, !FormFieldFactory.has(.readOnly, field) {
+                    // A calculated field is read-only by default, as in other form tools.
+                    self.editor.change([field], "Change Calculation", get: { FormFieldFactory.has(.readOnly, $0) }, set: { FormFieldFactory.set(.readOnly, $1, on: $0) }, to: true)
+                }
+                self.canvasFormMayHaveChanged()
+            },
+            showCertificate: { [weak self] status in self?.showCertificate(status) }
         )
+    }
+
+    /// Every widget of the field `field` belongs to (a radio group has several).
+    func groupOf(_ field: PDFAnnotation) -> [PDFAnnotation] {
+        guard let name = field.fieldName else { return [field] }
+        let group = FormFields.widgets(in: model.pdf).map(\.annotation).filter { $0.fieldName == name }
+        return group.isEmpty ? [field] : group
+    }
+
+    func showCertificate(_ status: SignatureStatus) {
+        guard let window, let data = status.certificate, let certificate = SecCertificateCreateWithData(nil, data as CFData) else { return }
+        SFCertificatePanel.shared().beginSheet(for: window, modalDelegate: nil, didEnd: nil, contextInfo: nil,
+                                               certificates: [certificate], showGroup: false)
     }
 
     /// OCR added (or undo removed) a text layer: search and Find and Redact can work again.
@@ -1007,7 +1097,31 @@ final class PaperWindowController: NSWindowController, NSWindowDelegate, NSMenuI
                 self?.pdfView.go(to: destination)
                 self?.updateCurrentPage()
             },
-            highlightAll: { [weak self] in self?.highlightSearchResults(nil) }
+            highlightAll: { [weak self] in self?.highlightSearchResults(nil) },
+            selectField: { [weak self] field in
+                guard let self, let page = field.page else { return }
+                if !self.model.isReadOnly { self.setTool(.form) }
+                self.pdfView.go(to: field.bounds, on: page)
+                self.pdfView.select(field)
+                self.updateCurrentPage()
+            },
+            moveFields: { [weak self] pageIndex, source, destination in
+                guard let self, let page = self.model.pdf.page(at: pageIndex) else { return }
+                var order = page.annotations.filter { $0.type == "Widget" }
+                order.move(fromOffsets: source, toOffset: destination)
+                self.editor.reorderFields(on: page, to: order)
+            },
+            orderFieldsByPosition: { [weak self] in
+                guard let self else { return }
+                self.editor.group("Order Fields by Position") {
+                    for index in 0..<self.model.pdf.pageCount {
+                        guard let page = self.model.pdf.page(at: index) else { continue }
+                        let fields = page.annotations.filter { $0.type == "Widget" }
+                        guard fields.count > 1 else { continue }
+                        self.editor.reorderFields(on: page, to: FormFields.positionOrder(fields))
+                    }
+                }
+            }
         )
     }
 }
@@ -1029,4 +1143,7 @@ struct SidebarActions {
     var copyNotes: () -> Void
     var goToOutline: (PDFDestination) -> Void
     var highlightAll: () -> Void
+    var selectField: (PDFAnnotation) -> Void
+    var moveFields: (Int, IndexSet, Int) -> Void
+    var orderFieldsByPosition: () -> Void
 }

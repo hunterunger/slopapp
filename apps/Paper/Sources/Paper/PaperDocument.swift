@@ -18,6 +18,12 @@ final class PaperDocument: NSDocument {
     private var rawData: Data?
     /// Pending widget values captured to spot form edits (see FormTracker).
     let formTracker = FormTracker()
+    /// Calculated fields, read from the file's form scripts and written back on save.
+    var formScripts = FormScripts()
+    /// Certificate signatures in the file as opened, checked when it was read.
+    private(set) var signatures: [SignatureStatus] = []
+    /// The bytes as opened, when signing should append to them (keeps earlier signatures).
+    var originalData: Data? { rawData }
 
     override init() {
         super.init()
@@ -75,6 +81,10 @@ final class PaperDocument: NSDocument {
         // versions don't read back (research P20): restore them from the file's own bytes.
         if let raw { AnnotationTags.restore(in: document, from: raw) }
         facts = DocumentFacts.inspect(document, raw: raw)
+        if let raw {
+            formScripts = FormScripts.read(from: raw)
+            signatures = facts.hasDigitalSignature ? SignatureValidator.validate(raw) : []
+        }
         // Research P4: PDFKit applies `Redact` annotations on every write. Convert them to
         // pending marks in memory so no save can apply them; the change isn't saved until the
         // person edits something, and the info bar says what happened.
@@ -115,13 +125,20 @@ final class PaperDocument: NSDocument {
         guard !pdf.isLocked else { throw PaperError.writeFailed }
         // Defense in depth for P4: never write while a `Redact` annotation is in the document.
         guard RedactionMarks.redactAnnotations(in: pdf).isEmpty else { throw PaperError.unsafeToSave }
-        var options: [PDFDocumentWriteOption: Any] = [:]
-        if let password {
-            options[.userPasswordOption] = password
-            options[.ownerPasswordOption] = password
+        guard var data = pdf.dataRepresentation() else { throw PaperError.writeFailed }
+        // PDFKit leaves fields out of the AcroForm, drops button states and can't write
+        // calculation scripts; put them in (research P24–P26).
+        if !formScripts.isEmpty || !FormFields.widgets(in: pdf).isEmpty {
+            data = AcroFormWriter.finalize(data, scripts: formScripts, widgets: FormFields.states(in: pdf))
         }
-        guard let data = options.isEmpty ? pdf.dataRepresentation() : pdf.dataRepresentation(options: options) else {
-            throw PaperError.writeFailed
+        if let password {
+            // Encrypt last: the form fix-ups are written in the clear first, and PDFKit keeps
+            // the dictionaries it didn't change when it writes the protected file.
+            guard let fixed = PDFDocument(data: data),
+                  let protected = fixed.dataRepresentation(options: [PDFDocumentWriteOption.userPasswordOption: password, PDFDocumentWriteOption.ownerPasswordOption: password]) else {
+                throw PaperError.writeFailed
+            }
+            data = protected
         }
         return data
     }

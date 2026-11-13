@@ -12,11 +12,12 @@ struct SidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             switch model.sidebarMode {
-            case .thumbnails, .outline, .annotations:
+            case .thumbnails, .outline, .annotations, .fields:
                 Picker("Sidebar", selection: $model.sidebarMode) {
                     Label("Thumbnails", systemImage: "square.grid.2x2").tag(SidebarMode.thumbnails)
                     if model.hasOutline { Label("Outline", systemImage: "list.bullet.indent").tag(SidebarMode.outline) }
                     Label("Notes", systemImage: "text.bubble").tag(SidebarMode.annotations)
+                    Label("Fields", systemImage: "list.bullet.rectangle").tag(SidebarMode.fields)
                 }
                 .pickerStyle(.segmented)
                 .labelStyle(.iconOnly)
@@ -38,6 +39,7 @@ struct SidebarView: View {
                     case .thumbnails: ThumbnailList(model: model, actions: actions)
                     case .outline: OutlineList(pdf: model.pdf, actions: actions)
                     case .annotations: AnnotationList(model: model, actions: actions)
+                    case .fields: FieldList(model: model, actions: actions)
                     case .search: SearchResults(model: model, actions: actions)
                     case .redact: FindAndRedact(model: model, actions: actions)
                     }
@@ -573,6 +575,107 @@ struct ListSelectionHighlightRemover: NSViewRepresentable {
                 if let table = firstTable(in: subview) { return table }
             }
             return nil
+        }
+    }
+}
+
+
+// MARK: Form fields (tab order)
+
+/// Every form field, page by page in the order Tab moves through them. Drag to change the
+/// order; Order by Position sorts each page into rows.
+struct FieldList: View {
+    @Bindable var model: DocumentModel
+    let actions: SidebarActions
+
+    var body: some View {
+        let _ = model.annotationsRevision
+        let items = FormFields.widgets(in: model.pdf)
+        if items.isEmpty {
+            FillingUnavailable("No Form Fields", systemImage: "list.bullet.rectangle",
+                               description: Text("Choose Forms in the toolbar, then click on a page to add a field."))
+        } else {
+            let pages = Array(Set(items.map(\.pageIndex))).sorted()
+            VStack(spacing: 0) {
+                List {
+                    ForEach(pages, id: \.self) { pageIndex in
+                        let fields = items.filter { $0.pageIndex == pageIndex }.map(\.annotation)
+                        Section("Page \(pageIndex + 1)") {
+                            ForEach(Array(fields.enumerated()), id: \.element) { offset, field in
+                                FieldRow(field: field, number: offset + 1,
+                                         calculated: model.formScripts.calculations[field.fieldName ?? ""] != nil,
+                                         isSelected: model.selectedAnnotation === field)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { actions.selectField(field) }
+                            }
+                            .onMove { source, destination in
+                                guard !model.isReadOnly else { return }
+                                actions.moveFields(pageIndex, source, destination)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.sidebar)
+                .accessibilityLabel("Form fields in tab order")
+                Hairline()
+                HStack {
+                    Button("Order by Position", action: actions.orderFieldsByPosition)
+                        .disabled(model.isReadOnly)
+                        .help("Tab moves through each page's fields in rows, top to bottom and left to right")
+                    Spacer()
+                }
+                .controlSize(.small)
+                .padding(.horizontal, Spacing.m)
+                .frame(height: PaperMetrics.barHeight)
+            }
+        }
+    }
+}
+
+struct FieldRow: View {
+    let field: PDFAnnotation
+    let number: Int
+    let calculated: Bool
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: Spacing.s) {
+            Text("\(number)")
+                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                .frame(minWidth: 16, alignment: .trailing)
+            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 16)
+            Text(title).lineLimit(1).truncationMode(.middle).layoutPriority(1)
+            if let group {
+                Text(group).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+            }
+            Spacer(minLength: 0)
+            if calculated {
+                Text("fx").font(.caption.italic()).foregroundStyle(.secondary).help("Calculated")
+            }
+        }
+        .fontWeight(isSelected ? .semibold : .regular)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(number). \(title)\(group.map { ", group \($0)" } ?? ""), \(FormFieldKind.of(field)?.title ?? "field")\(calculated ? ", calculated" : "")")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// A radio button shows its own value; its group is the quieter second label.
+    private var title: String {
+        field.widgetControlType == .radioButtonControl ? field.buttonWidgetStateString : field.fieldName ?? "Unnamed"
+    }
+
+    private var group: String? {
+        field.widgetControlType == .radioButtonControl ? field.fieldName : nil
+    }
+
+    private var symbol: String {
+        switch FormFieldKind.of(field) {
+        case .text: "rectangle.and.pencil.and.ellipsis"
+        case .checkbox: "checkmark.square"
+        case .radio: "circle.inset.filled"
+        case .dropdown: "filemenu.and.selection"
+        case .signature: "pencil.line"
+        case nil: "questionmark.square.dashed"
         }
     }
 }

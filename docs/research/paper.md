@@ -1106,6 +1106,141 @@ light and dark, test data only (`/tmp/paper-test/`, `PAPER_DATA_DIR`, `PAPER_DEF
 their own selection), `PressDimmingButtonStyle`, `NSColor.readableSymbol` (SlopKit's
 `readableText` is internal; a public "readable on this surface" colour would cover both).
 
+## Feature round: editing, forms, certificates, crop, compare, Office (2026-11-12)
+
+The owner compared Paper with the original and listed gaps users notice: editing existing text
+and images, making forms (with calculations), Word export, certificate signatures (and checking
+them), crop and compare. This round closes all of them with Apple frameworks only (PDFKit,
+CoreGraphics, CoreText, Security, CryptoKit, SecurityInterface for the certificate viewer). It
+reverses the inventory's earlier calls on rows 16 (compare), 45 (digital ID signatures),
+47 and 51 (signature fields, creating fields), 53 (form JavaScript: Paper now runs the standard
+calculations itself and writes them for other viewers, but still never runs a document's own
+scripts), 65 (crop), 94 and 95 (editing text and images).
+
+### More PDFKit facts (macOS 27.2)
+
+| # | Fact | What we did |
+|---|---|---|
+| P24 | `PDFDocument.dataRepresentation()` writes new widgets but never adds them to the catalog's `/AcroForm /Fields` (it doesn't create an `/AcroForm` at all), so Acrobat and other viewers don't treat them as form fields. An existing `/AcroForm` is kept, without the new fields. | `AcroFormWriter` runs after every save as an **incremental update** (Paper's own small PDF object parser and writer, `PDFSyntax`): registers every field, adds `/DA` and `/DR` (Helv, ZaDb). Idempotent, so a second save adds nothing. |
+| P25 | PDFKit has no JavaScript action and crashes when `/AA` is set as a dictionary (`-[__NSSingleEntryDictionaryI createDictionaryRef]`). Untouched `/AA` from a file is passed through; it isn't exposed to the annotation model. | Calculations live in Paper's `FormScripts` (read back from the file's `/AA /C` and `/CO` with `PDFSyntax`) and are written by `AcroFormWriter`: `AFSimple_Calculate` for sum/product/average/min/max, Acrobat's `BVCALC … EVCALC` simplified-field-notation form for formulas, `AFNumber_Format`/`Keystroke` for decimals. Scripts Paper doesn't understand are kept and re-written as they were. |
+| P26 | For widgets added to a *loaded* document (and any widget PDFKit rewrites after a change), the writer emits `/DA` as an invalid **name**, button `/V` as a string, no `/AS`, a single baked appearance instead of on/off states, empty `/MK` and `/BS`, and separate same-named radio fields. Reopened, radio export values are lost ("plan Yes"). Setting `widgetFieldType` after `fieldName` resets the name to "text0". | `AcroFormWriter.repair` fixes each widget from Paper's in-memory state (`WidgetState`, matched by page and rect): string `/DA`, `/MK` colours, on/off appearance streams (drawn paths) with `/AS`/`/V`, `/Opt`; same-named buttons become one radio group with `/Kids`. This also fixes form *filling* of existing forms, which had the same problem before this round. The field factory sets the type first. |
+| P27 | `PDFPage.attributedString` reports the real font when it's installed but **Helvetica** for any font that isn't (the PDF's name is lost). Fill colour is reported. | `ContentScanner` (CGPDFScanner, follows form XObjects) reads each text run's `/BaseFont`, size and baseline; `FontMatcher` uses the installed font, the same family, or the closest serif/sans/mono with matching weight and slant, and says when it's not the document's font. macOS maps some names to stand-ins (Calibri → Carlito); those count as substitutes. |
+| P28 | A `Redact` annotation over text also removes **vector fills** under it (a hole in a coloured box) and **zeroes** image pixels (a fully covered image stays in the content as black). | Content edits repaint the removed area with the most common colour around it (`ContentEditor.backgroundColor`), 1 pt past image edges so no anti-aliased outline shows; the scanner ignores images covered by an opaque filled rectangle, so a removed picture's remains can't be selected. |
+| P29 | PDFKit never draws a **text field's border** (live or rendered) whatever the property order; only the background. | Saved text fields get an appearance that wraps PDFKit's (keeping its text drawing) and adds the border; the Forms tool outlines every field on screen while authoring. |
+| P30 | `NSSharingServicePickerToolbarItem` asks its delegate for items during toolbar validation, not only on click. Paper's handler called `commitEditing()`, which closed any open text editor (text boxes too, before this round) whenever the toolbar validated, and wrote a temporary PDF each time for edited documents. | The toolbar query no longer ends editing; the share copy is cached until the document changes. |
+
+### What was built, and how it fits
+
+| Gap | Paper now | Where |
+|---|---|---|
+| Edit existing text | **Edit** tool group (⌘7): hover outlines paragraphs and pictures; click a paragraph to edit it in place in a rich-text editor at the page's zoom, fonts/colours/alignment/line spacing matched, on the page's background colour; Esc or a click outside commits. The page is rebuilt: old glyphs removed (P1), area repainted (P28), new text drawn as real text (CoreText, embedded subset), re-wrapped to the paragraph width; one undo step that swaps the page back. Editing bar: the font in use, or a warning naming the missing font and the substitute. Longer text that runs past the paragraph gets a HUD warning. | `ContentScanner`, `TextLayout`, `FontMatcher`, `ContentEditor`, `CanvasController.beginContentEditing` |
+| Edit images | Click a picture: handles to resize (aspect kept; Shift stretches), drag to move, Replace Image…, Delete Image (⌫), Add Image… Moving draws the picture from a copy of the page with everything outside it removed, so the result is the original pixels (any colour space, masks) with nothing else leaking. | `ContentEditor.moveImage/replaceImage/deleteImage/addImage` |
+| Create form fields | **Forms** tool group: Text Field, Checkbox, Radio Button (new buttons join the last group with a new value), Dropdown, Signature Field; click or drag; fields selectable/movable/resizable only in this tool; editing bar has the name; Inspector > Selection is the field's properties (name/group, tooltip, required, read only, several lines, choices, value when on); **Fields** sidebar (⌥⌘5) lists fields in tab order per page with drag-to-reorder and Order by Position. Every field gets its name as tooltip, so screen readers (and `drive tree`) announce it. | `FormFieldFactory`, `FormFields`, `FieldPane`, `FieldList` |
+| Calculated fields | Inspector > Calculation: typed in, sum/product/average/min/max of chosen fields, or a formula with validation ("No field is named …"); decimals. Live in Paper (recalculated with every form change, undone with it, in dependency order); written as standard form scripts (P25). | `FormScripts`, `FormMath`, `FormulaParser`, `FormJavaScript`, `AcroFormWriter` |
+| Word / RTF | File > Export as Word Document…: Paper writes the .docx package itself (stored ZIP + WordprocessingML) from the same text blocks as editing, in reading order with pictures between paragraphs; AppKit's own Office writer drops images. Export Text… has Plain Text / Rich Text (RTF). Fonts PDFKit couldn't name keep the PDF's family in Word. | `OfficeExport`, `ZipWriter` |
+| Certificate signatures | Sign ▸ Sign with Certificate… (or click an empty signature field): certificate (keychain identities, code-signing-only ones hidden, expired flagged), reason, location, optional handwritten ink; drag the box; save panel for a **new file**; signed and re-verified before the report sheet. CMS SignedData built in Paper (DER) with ESS signing-certificate-v2, SubFilter `ETSI.CAdES.detached`, byte range over an incremental update; appearance drawn as outlines (name) plus standard Helvetica text (details). With no unsaved changes the update is appended to the file on disk, so earlier signatures stay valid (countersigning). | `ASN1`, `CMS`, `PDFSigner`, `SignatureAppearance`, `EditingFlows.finishCertificateSigning` |
+| Signature validation | On open: every signature checked with Apple's `CMSDecoder` (independent of Paper's encoder) plus byte-range coverage and trust (SecTrust); info bar summarises (valid / changed after signing / altered / untrusted certificate); Inspector > Security lists each with reason, location, issuer and Show Certificate… (system viewer). | `SignatureValidator`, `SignatureRow` |
+| Crop | Crop tool (⌘K, Preview's key; Edit group, Pages menu): drag the area, the rest dims; Crop This Page / Selected Pages / All Pages (Return = this page), Remove Crop; crop box only, so it's undoable and reversible. | `PageCrop`, `DocumentEditor.crop` |
+| Compare | File > Compare With… (⌥⌘K): window with both versions side by side (snapshots), word-level diff of the whole text mapped back to pages, removed/added tints, list of differences with ⌘↑/⌘↓. | `DocumentCompare`, `CompareWindowController` |
+
+### Decisions (made in this round, and why)
+
+1. **Edits rewrite the page right away** instead of staying pending until save: undo is a page
+   swap, re-editing works on the new text, and nothing old can survive in a save. Same removal
+   as redaction, so "the old text is truly gone" holds.
+2. **Paragraph-level editing** (lines grouped by size, spacing and overlap; alignment detected),
+   not single lines or whole pages: fixing a sentence re-wraps naturally; nothing else moves.
+3. **Font honesty over a silent match**: the editing bar names the document's font when Paper
+   can't use it. Reusing embedded subset fonts was left out (missing glyphs, broken cmaps).
+4. **Moving an image re-draws the original page clipped to it** (after removing everything else)
+   rather than decoding the image: exact pixels, no colour-space code, no leaks.
+5. **Paper's own incremental writer** (`PDFSyntax`) rather than more PDFKit workarounds: forms
+   and signatures need exact bytes, and appending never disturbs earlier signatures.
+6. **Signed output is always a new file** (default "name (signed).pdf"), verified before success,
+   like redaction. Signing PDFs with an open password is refused with an explanation.
+7. **No network for signatures** (no timestamp server, no revocation checks): Slopapp's no-network
+   rule; the signing time comes from this Mac and the README says what's missing.
+8. **Tool keys**: Edit ⌘7 (the slot the menu plan left free), Crop ⌘K (Preview's), Compare ⌥⌘K;
+   Form Fields has no single key (rare task; toolbar group and Tools menu).
+9. **Tests never touch the login keychain**: unit tests sign with an in-memory key and
+   certificate (`TestSigner`); app runs list identities from `PAPER_SIGNING_KEYCHAIN` only.
+
+### Gates (this round)
+
+- **Unit tests: 188 in 36 suites, all pass** (138 before; 50 new): PDF syntax (parse/serialize,
+  classic and stream cross-references, incremental updates, deflate), form fields (every kind
+  persists, AcroForm registration, radio grouping across saves, tab order, names, appearances
+  with borders, tooltips), calculations (formulas, aggregates, run order, JS round trip, rename,
+  written for other viewers and read back), certificate signatures (cert parse, sign + verify
+  with CMSDecoder, tampering, later changes, countersigning, existing field, appearance, dates),
+  content editing (blocks, text replace with font/colour/baselines, background repaint, image
+  move/replace/delete/add, no ghosts, font matching incl. stand-ins), crop, compare, Office
+  export (docx read back by AppKit, page breaks, fonts, RTF, CRC32).
+- **Independent tools**: Poppler `pdfsig` validates Paper's signatures (ETSI.CAdES.detached,
+  "Signature is Valid", countersigned file: first "not total document signed", both valid;
+  tampered: "Digest Mismatch"); OpenSSL `cms -verify` on the extracted CMS; `pdfinfo` reports
+  `Form: AcroForm` and prints the calculate/format scripts; `pdftotext` shows edited text with no
+  trace of the old words; `textutil` reads the .docx in reading order; `pdftoppm` renders the
+  signature appearance.
+- **`scripts/check.sh Paper --perf`**: lint, icon, test, bundle, smoke, catalog pass. Perf:
+  launch 127 ms, idle CPU 0.017–0.019 %, footprint 18.6–19.0 MB pass; **first window
+  622–633 ms fail at load 17–22** (nine builders compiling). The first window is the system Open
+  panel; this round doesn't touch the launch path (AppDelegate, DocumentController, main
+  unchanged). Same borderline as the build, parity and polish passes (596–626 ms at load 5–9).
+  No installed copy of Paper was running, so perf measured this build.
+- **Accessibility**: `scripts/drive tree` at all 32 walk states: no `[unlabeled]` Paper
+  controls; the only unlabeled elements were PDF fields, and fields Paper creates now carry
+  their names (tree shows `textField "qty"`, `checkBox "Checkbox 1"`, `popUpButton "Signature 1"`).
+- **Lint**: pass, 0 warnings.
+
+### Walkthrough (release build, `/tmp/paper-test/`, light and dark)
+
+The owner was at the Mac for most of the session, so the main walk used the review walk
+(`PAPER_SNAPSHOT_ONLY=features` + `PAPER_SNAPSHOT_HANDSHAKE`): Paper drives its own controller
+code in both appearances while `scripts/drive shot` captures each state from outside (32 PNGs,
+`/tmp/paper-test/shots/walk/`), with a log of results. Real-pointer steps ran only after 60 s
+without input, one action per check (`/tmp/paper-test/shots/m*.png`).
+
+| Feature | Result |
+|---|---|
+| Edit text (walk + real click and typing) | Editor opens over the paragraph (Times New Roman 13 pt, blue, three lines); "untouched" → "unchanged"; committed page shows it in the same font, colour and baselines; undo/redo; `pdftotext` has no "untouched". After fixing P30 and the scroll restore, the canvas offset is identical before and after a commit (walk log). |
+| Missing font | Calibri (not embedded, not installed): bar says "“Calibri Bold” isn't on this Mac. Paper uses Carlito Bold, the closest it has." |
+| Images (walk + real drag) | Selected with handles and Replace/Delete bar; moved and resized; old spot clean; one image left on the page. |
+| Forms (walk + real drag) | Drag created "Text 1"; walk built qty/price/total + checkbox + radio group + dropdown + signature field; total calculated live to 13.50; inspector Field and Calculation sections; Fields sidebar with tab order and the fx badge; saved file: `Form: AcroForm` with scripts. |
+| Crop (walk + real drag + Return) | Dimmed outside, Crop This Page/All Pages; crop box `{40, 380, 532, 350}`; thumbnail and fit follow. |
+| Certificate signing (walk + full UI) | Sheet lists "Paper Test Signer (until Dec 12, 2026)" from the temporary keychain; Choose Where… → drag box → save panel (test folder) → "Signed … Checked: the signature is valid and covers the whole file", with the untrusted-certificate note; `pdfsig` valid. |
+| Validation on open | Signed file: info bar and Inspector > Security "Signed by Paper Test Signer … The certificate isn't from an authority this Mac trusts", reason/location, Show Certificate…; tampered copy: "The document was changed after Paper Test Signer signed it. This signature is no longer valid." |
+| Compare | text.pdf vs text-revised.pdf: 3 differences ("public" → "revised", "redaction." → "review.", line removed on page 3), tinted on both sides. |
+| Word export | `editable.docx` with heading, paragraph, tinted line, picture and caption in order; one picture after the ghost fix. |
+
+**Not walked with the real pointer** (owner present, then a system automation overlay covered
+the screen): hover outlines, resizing an image by its corner, Add/Replace Image (Open panel),
+dragging rows in the Fields sidebar, Export as Word through the menu (save panel), Compare With…
+through the menu (Open panel), clicking an empty signature field. They share the code paths the
+walk and unit tests exercise.
+
+**Signing test identity**: a self-signed certificate (OpenSSL) imported into a temporary keychain
+file `/tmp/paper-test/sign/test.keychain-db`; the user keychain search list was checked before
+and after creation (unchanged: login only). The keychain and key files were deleted at the end.
+
+### Shared components built in-app (SlopKit candidates)
+
+`ZipWriter` + `CRC32` (stored ZIP; any app exporting packages), `DER` (minimal ASN.1), and the
+offscreen-walk handshake in `FeatureWalk.capture` (an outside-screenshot hook other apps' snapshot
+walks could share). `PDFSyntax`, `AcroFormWriter`, `CMS`/`PDFSigner` are PDF-specific and stay.
+
+### Risks
+
+- Content edits, like redaction, rely on PDFKit's `Redact` behaviour (P1). On a macOS version
+  where it doesn't remove text, an edit would leave the old text under the new (the unit tests
+  would fail on that version's CI).
+- `AcroFormWriter` matches widgets to Paper's state by page and rectangle; two fields stacked
+  exactly on top of each other could swap repairs.
+- Signatures from Paper have no trusted timestamp; viewers show the signing time as the
+  signer's clock. Acrobat shows Paper's self-signed test certificate as unknown, as expected.
+- The incremental writer handles classic and stream cross-references and object streams, but
+  not encrypted files (signing them is refused; their forms keep PDFKit's limits).
+
 ## Blind test log
 
 One section per round, newest last. See docs/dev-cycle.md step 5.

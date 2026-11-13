@@ -19,6 +19,15 @@ final class CanvasController: NSViewController, NSTextViewDelegate, NSPopoverDel
     private var editingAnnotation: PDFAnnotation?
     private var editingIsNew = false
     private var notePopover: NSPopover?
+    /// Page text being edited in place with the Edit tool.
+    private var contentEdit: (block: TextBlock, page: PDFPage, view: NSTextView, scale: CGFloat)?
+    /// Typing undo inside the page-text editor stays with the editor (the document's undo
+    /// manager would keep pointing at it after it closes); the finished edit is one step.
+    private let contentUndo = UndoManager()
+
+    func undoManager(for view: NSTextView) -> UndoManager? {
+        view === contentEdit?.view ? contentUndo : view.window?.undoManager
+    }
     private var scrollObserver: NSObjectProtocol?
     private var headerObserver: NSObjectProtocol?
     private var headerHeight: CGFloat = 0
@@ -96,6 +105,7 @@ final class CanvasController: NSViewController, NSTextViewDelegate, NSPopoverDel
     private func didScroll() {
         refreshOverlay()
         positionTextEditor()
+        positionContentEditor()
         positionSelectionBar()
     }
 
@@ -105,7 +115,9 @@ final class CanvasController: NSViewController, NSTextViewDelegate, NSPopoverDel
     }
 
     private func drawFieldHighlights() {
-        overlay.fieldRects = model.highlightFields ? widgetRects() : []
+        // The Form Fields tool always shows where the fields are: PDFKit doesn't draw a text
+        // field's border until the file is saved (research P29).
+        overlay.fieldRects = model.highlightFields || model.tool == .form ? widgetRects() : []
     }
 
     private func widgetRects() -> [(PDFPage, CGRect)] {
@@ -150,7 +162,20 @@ final class CanvasController: NSViewController, NSTextViewDelegate, NSPopoverDel
             editSelection: { [weak self] in self?.delegate?.editSelectedAnnotation(nil) },
             toggleFields: { [weak self] in self?.delegate?.toggleFieldHighlight(nil) },
             duplicate: { [weak self] in self?.delegate?.paperDocument?.duplicate(nil) },
-            recognizeText: { [weak self] in self?.delegate?.recognizeText(nil) }
+            recognizeText: { [weak self] in self?.delegate?.recognizeText(nil) },
+            replaceImage: { [weak self] in self?.delegate?.replaceSelectedImage(nil) },
+            deleteImage: { [weak self] in self?.delegate?.deleteSelectedImage(nil) },
+            addImage: { [weak self] in self?.delegate?.addImageToPage(nil) },
+            crop: { [weak self] scope in self?.delegate?.applyCrop(scope) },
+            removeCrop: { [weak self] in self?.delegate?.removeCrop(nil) },
+            setFormKind: { [weak self] kind in self?.model.formKind = kind },
+            renameField: { [weak self] name in self?.delegate?.renameSelectedField(name) },
+            showFieldDetails: { [weak self] in self?.delegate?.showInspector(.selection) },
+            showSignatures: { [weak self] in self?.delegate?.showInspector(.security) },
+            cancelCertificate: { [weak self] in
+                self?.model.certificatePlan = nil
+                self?.delegate?.setTool(.select)
+            }
         )
     }
 
@@ -230,9 +255,17 @@ final class CanvasController: NSViewController, NSTextViewDelegate, NSPopoverDel
         editor.frame = NSRect(x: rect.minX, y: rect.maxY - size.height - 4, width: max(size.width + 12, rect.width), height: size.height + 4)
     }
 
-    func textDidChange(_ notification: Notification) { positionTextEditor() }
+    func textDidChange(_ notification: Notification) {
+        if let edit = contentEdit, notification.object as? NSTextView === edit.view { positionContentEditor(); return }
+        positionTextEditor()
+    }
 
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.cancelOperation(_:)), textView === contentEdit?.view {
+            endContentEditing(commit: true)
+            view.window?.makeFirstResponder(pdfView)
+            return true
+        }
         if selector == #selector(NSResponder.cancelOperation(_:)) {
             endTextEditing()
             view.window?.makeFirstResponder(pdfView)
@@ -241,7 +274,121 @@ final class CanvasController: NSViewController, NSTextViewDelegate, NSPopoverDel
         return false
     }
 
-    func textDidEndEditing(_ notification: Notification) { endTextEditing() }
+    func textDidEndEditing(_ notification: Notification) {
+        if let edit = contentEdit, notification.object as? NSTextView === edit.view {
+            endContentEditing(commit: true)
+            return
+        }
+        endTextEditing()
+    }
+
+    // MARK: Editing page text
+
+    /// Opens a text block for editing where it is: the block's own text, fonts and colours
+    /// at the current zoom, on the page's background colour so the old text doesn't show.
+    func beginContentEditing(_ block: TextBlock, on page: PDFPage) {
+        endTextEditing()
+        endContentEditing(commit: true)
+        let original = block.attributedText
+        PaperPDFView.debug("beginContentEditing length=\(original.length)")
+        guard original.length > 0 else { return }
+        let first = (original.attribute(.font, at: 0, effectiveRange: nil) as? NSFont) ?? NSFont.systemFont(ofSize: block.fontSize)
+        let choice = FontMatcher.match(pdfKitFont: first, pdfName: block.pdfFontName)
+        let text = FontMatcher.applying(choice, to: original)
+        model.editNotice = choice.notice
+        model.editNoticeIsWarning = !choice.isExact
+        let scale = pdfView.scaleFactor
+        let style = NSMutableParagraphStyle()
+        style.alignment = block.alignment
+        style.minimumLineHeight = block.lineSpacing * scale
+        style.maximumLineHeight = block.lineSpacing * scale
+        let display = NSMutableAttributedString(attributedString: Self.scaled(text, by: scale))
+        display.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: display.length))
+        let editor = NSTextView()
+        editor.delegate = self
+        editor.isRichText = true
+        editor.allowsUndo = true
+        editor.importsGraphics = false
+        editor.drawsBackground = true
+        editor.backgroundColor = NSColor(cgColor: ContentEditor.backgroundColor(of: page, in: block.bounds)) ?? .white
+        // The page stays light in dark mode, and so does text on it.
+        editor.appearance = NSAppearance(named: .aqua)
+        // A little room between the text and the editing border; the frame grows by the
+        // same amount so the text stays exactly over the page's.
+        editor.textContainerInset = NSSize(width: Self.contentInset, height: Self.contentInset)
+        editor.textContainer?.lineFragmentPadding = 0
+        editor.textContainer?.widthTracksTextView = false
+        editor.textContainer?.containerSize = NSSize(width: (block.bounds.width + block.fontSize * 0.3) * scale, height: 100_000)
+        editor.isVerticallyResizable = true
+        editor.textStorage?.setAttributedString(display)
+        editor.typingAttributes = display.attributes(at: display.length - 1, effectiveRange: nil)
+        editor.insertionPointColor = .controlAccentColor
+        editor.setAccessibilityLabel("Page text")
+        editor.wantsLayer = true
+        editor.layer?.borderColor = NSColor.controlAccentColor.cgColor
+        editor.layer?.borderWidth = 1
+        pdfContainer.addSubview(editor)
+        contentEdit = (block, page, editor, scale)
+        positionContentEditor()
+        view.window?.makeFirstResponder(editor)
+        // The caret goes where the person clicked.
+        if let window = view.window {
+            let point = editor.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            let index = editor.characterIndexForInsertion(at: point)
+            editor.setSelectedRange(NSRange(location: min(index, display.length), length: 0))
+        }
+    }
+
+    private func positionContentEditor() {
+        guard let edit = contentEdit else { return }
+        let editor = edit.view
+        editor.layoutManager?.ensureLayout(for: editor.textContainer!)
+        let used = editor.layoutManager?.usedRect(for: editor.textContainer!) ?? .zero
+        let width = editor.textContainer?.containerSize.width ?? 100
+        // Top of the first line: the first baseline plus the line's height above it.
+        let firstLine = edit.block.lines[0]
+        let top = CGPoint(x: edit.block.bounds.minX, y: firstLine.baseline + edit.block.lineSpacing * 0.8)
+        let origin = pdfContainer.convert(pdfView.convert(top, from: edit.page), from: pdfView)
+        let inset = Self.contentInset
+        let height = max(used.height, edit.block.lineSpacing * edit.scale) + 2 + inset * 2
+        editor.frame = NSRect(x: origin.x - inset, y: origin.y - height + inset, width: width + inset * 2, height: height)
+    }
+
+    /// Closes the page-text editor; with `commit`, the page is rebuilt with the new text.
+    func endContentEditing(commit: Bool) {
+        guard let edit = contentEdit else { return }
+        PaperPDFView.debug("endContentEditing commit=\(commit)")
+        contentEdit = nil
+        contentUndo.removeAllActions()
+        model.editNotice = nil
+        let edited = NSMutableAttributedString(attributedString: edit.view.attributedString())
+        edit.view.removeFromSuperview()
+        edited.removeAttribute(.paragraphStyle, range: NSRange(location: 0, length: edited.length))
+        let text = Self.scaled(edited, by: 1 / edit.scale)
+        if commit { delegate?.commitContentEdit(edit.block, on: edit.page, text: text) }
+        refreshOverlay()
+    }
+
+    var isEditingContent: Bool { contentEdit != nil }
+    static let contentInset: CGFloat = 3
+
+    /// Test hook for the review walk: replaces text in the open page-text editor as typing would.
+    func replaceEditingText(_ old: String, with new: String) {
+        guard let editor = contentEdit?.view, let storage = editor.textStorage else { return }
+        let range = (storage.string as NSString).range(of: old)
+        guard range.location != NSNotFound, editor.shouldChangeText(in: range, replacementString: new) else { return }
+        storage.replaceCharacters(in: range, with: new)
+        editor.didChangeText()
+    }
+
+    static func scaled(_ text: NSAttributedString, by factor: CGFloat) -> NSAttributedString {
+        let result = NSMutableAttributedString(attributedString: text)
+        result.enumerateAttribute(.font, in: NSRange(location: 0, length: result.length)) { value, range, _ in
+            guard let font = value as? NSFont else { return }
+            result.addAttribute(.font, value: NSFontManager.shared.convert(font, toSize: font.pointSize * factor), range: range)
+        }
+        return result
+    }
 
     func endTextEditing() {
         guard let editor = textEditor, let annotation = editingAnnotation else { return }
