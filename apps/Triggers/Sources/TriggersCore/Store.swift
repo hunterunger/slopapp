@@ -54,11 +54,13 @@ public enum ConfigCodec {
         result.apps.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         for binding in imported.bindings {
             let exists = result.bindings.contains {
-                $0.trigger == binding.trigger && $0.action == binding.action && $0.scope == binding.scope
+                $0.trigger == binding.trigger && $0.stepKinds == binding.stepKinds && $0.scope == binding.scope
+                    && $0.conditions == binding.conditions
             }
             guard !exists else { continue }
             var copy = binding
             copy.id = UUID()
+            copy.steps = copy.steps.map { ActionStep($0.kind) }
             result.bindings.append(copy)
             added += 1
         }

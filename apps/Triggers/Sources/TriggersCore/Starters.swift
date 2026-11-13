@@ -80,7 +80,7 @@ public struct RecentLog: Sendable, Equatable {
         public let id: UUID
         public let bindingID: UUID
         public let trigger: Trigger
-        public let action: Action
+        public let binding: TriggerBinding
         public let appName: String?
         public let date: Date
         public let outcome: String?
@@ -92,7 +92,7 @@ public struct RecentLog: Sendable, Equatable {
     public init(capacity: Int = 20) { self.capacity = capacity }
 
     public mutating func record(_ binding: TriggerBinding, appName: String?, date: Date, outcome: String? = nil) {
-        entries.insert(Entry(id: UUID(), bindingID: binding.id, trigger: binding.trigger, action: binding.action,
+        entries.insert(Entry(id: UUID(), bindingID: binding.id, trigger: binding.trigger, binding: binding,
                              appName: appName, date: date, outcome: outcome), at: 0)
         if entries.count > capacity { entries.removeLast(entries.count - capacity) }
     }

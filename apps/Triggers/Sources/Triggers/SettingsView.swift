@@ -21,6 +21,10 @@ struct SettingsView: View {
                 Text("Show a confirmation when a trigger runs")
                 Text("Names the trigger and its action at the bottom of the screen. Handy while you learn your gestures.")
             }
+            Toggle(isOn: $settings.hyperKey) {
+                Text("Use Caps Lock as a hyper key")
+                Text(hyperDetail)
+            }
             Picker(selection: $settings.tapSensitivity) {
                 Text("Relaxed").tag(GestureTuning.TapSensitivity.relaxed)
                 Text("Standard").tag(GestureTuning.TapSensitivity.standard)
@@ -58,6 +62,18 @@ struct SettingsView: View {
                 Text("A JSON file you can keep or move to another Mac.")
             }
         }
+    }
+}
+
+extension SettingsView {
+    private var hyperDetail: String {
+        _ = model.hyperRevision
+        if model.settings.hyperKey {
+            if let problem = model.keyboard.hyperProblem { return problem }
+            if !model.isTrusted { return "Needs Accessibility access. Until then Caps Lock works as before." }
+            if model.isPaused { return "Off while Triggers is paused: Caps Lock works as before." }
+        }
+        return "Hold Caps Lock for ⌃⌥⇧⌘ (record combinations with it like any other), tap it for Escape. Caps Lock is back as soon as you turn this off, pause or quit Triggers."
     }
 }
 

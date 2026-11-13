@@ -15,6 +15,7 @@ final class MultitouchSource: TouchFrameSource {
     var onFingers: ((Int) -> Void)?
     var reportsFingers = false { didSet { TouchProcessor.shared.setReportsFingers(reportsFingers) } }
     var tuning = GestureTuning() { didSet { TouchProcessor.shared.setTuning(tuning) } }
+    var interests = GestureInterests.immediate { didSet { if interests != oldValue { TouchProcessor.shared.setInterests(interests) } } }
     private(set) var isRunning = false
 
     private let api: MultitouchAPI?
@@ -115,7 +116,10 @@ final class MultitouchSource: TouchFrameSource {
             let device = UnsafeMutableRawPointer(mutating: raw)
             var family: Int32 = 0
             _ = api.familyID(device, &family)
-            // Magic Mouse surfaces aren't trackpads (owner decision: no Magic Mouse support).
+            // Magic Mouse surfaces aren't trackpads. Magic Mouse gestures would start here: let
+            // these families through, tag their frames as a mouse surface and give them their
+            // own recognizer rules (docs/research/triggers.md, "Magic Mouse"). Not done: the
+            // only way to read a Magic Mouse's touches is this private framework.
             if MultitouchAPI.mouseFamilies.contains(family) { continue }
             var width: Int32 = 0
             var height: Int32 = 0
@@ -192,6 +196,8 @@ final class TouchProcessor: @unchecked Sendable {
     private struct State {
         var recognizer = GestureRecognizer()
         var validator = TouchFrameValidator()
+        /// A held-back single tap's deadline (frame clock), with a flush scheduled for it.
+        var flushScheduledFor: Double?
         var buffer: [TouchContact] = []
         var reportsFingers = false
         var lastFingers = -1
@@ -202,6 +208,8 @@ final class TouchProcessor: @unchecked Sendable {
     }
 
     private let lock = OSAllocatedUnfairLock(initialState: State())
+    /// Lets held-back single taps go when their double-tap window ends (no frames arrive then).
+    private let flushQueue = DispatchQueue(label: "app.slopapp.triggers.touch-flush", qos: .userInteractive)
     /// Set once by the source at launch, before any frames.
     nonisolated(unsafe) var deliver: (@Sendable (Event) -> Void)?
 
@@ -212,7 +220,9 @@ final class TouchProcessor: @unchecked Sendable {
     func handle(device: UnsafeMutableRawPointer?, touches: UnsafePointer<TRTouch>?, count: Int, timestamp: Double) {
         let start = mach_absolute_time()
         var event: Event?
+        var earlier: Event?
         var fingersEvent: Event?
+        var flushAfter: (delay: Double, deadline: Double)?
         lock.withLockUnchecked { state in
             guard !state.failed else { return }
             state.buffer.removeAll(keepingCapacity: true)
@@ -241,6 +251,11 @@ final class TouchProcessor: @unchecked Sendable {
                 state.recognizer.process(device: Int(bitPattern: device), timestamp: timestamp, contacts: $0)
             }
             if let gesture = output.gesture { event = .gesture(gesture) }
+            if let gesture = output.earlier { earlier = .gesture(gesture) }
+            if let deadline = output.pendingUntil, state.flushScheduledFor != deadline {
+                state.flushScheduledFor = deadline
+                flushAfter = (max(0, deadline - timestamp), deadline)
+            }
             if state.reportsFingers, output.fingers != state.lastFingers {
                 state.lastFingers = output.fingers
                 fingersEvent = .fingers(output.fingers)
@@ -248,8 +263,24 @@ final class TouchProcessor: @unchecked Sendable {
             state.cost.record(seconds: Self.seconds(since: start))
         }
         if let fingersEvent { deliver?(fingersEvent) }
+        if let earlier { deliver?(earlier) }
         if let event { deliver?(event) }
+        if let flushAfter { scheduleFlush(after: flushAfter.delay, deadline: flushAfter.deadline) }
     }
+
+    /// At the deadline, in the frames' own clock (so the two clocks never mix).
+    private func scheduleFlush(after delay: Double, deadline: Double) {
+        flushQueue.asyncAfter(deadline: .now() + delay + 0.001) { [self] in
+            let gestures = lock.withLock { state -> [Gesture] in
+                guard state.flushScheduledFor == deadline else { return [] }
+                state.flushScheduledFor = nil
+                return state.recognizer.flush(now: deadline)
+            }
+            for gesture in gestures { deliver?(.gesture(gesture)) }
+        }
+    }
+
+    func setInterests(_ interests: GestureInterests) { lock.withLock { $0.recognizer.interests = interests } }
 
     func setSurface(device: Int, width: Float, height: Float) {
         lock.withLock { $0.recognizer.setSurface(device: device, width: width, height: height) }

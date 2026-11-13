@@ -116,4 +116,6 @@ enum FakeCatalog {
     ]
 
     static let shortcuts = ["Log Water", "Start Focus Session", "Resize Image", "Send Arrival Time"]
+
+    static let displays = [DisplayInfo(name: "Built-in Display", isBuiltIn: true), DisplayInfo(name: "Studio Monitor", isBuiltIn: false)]
 }

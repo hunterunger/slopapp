@@ -287,10 +287,11 @@ private struct BindingsTable: View {
             }
             .width(min: 180, ideal: 240)
             TableColumn("Action") { binding in
-                Text(KeyDisplay.title(binding.action))
+                Text(KeyDisplay.summary(binding))
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.tail)
                     .foregroundStyle(binding.isEnabled ? .primary : .secondary)
+                    .help(binding.steps.count > 1 ? KeyDisplay.summary(binding) : "")
             }
             .width(min: 160, ideal: 260)
         }
@@ -327,6 +328,13 @@ private struct TriggerCell: View {
             Text(KeyDisplay.title(binding.trigger))
                 .lineLimit(1)
                 .foregroundStyle(binding.isEnabled ? .primary : .secondary)
+            if !binding.conditions.isEmpty {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
+                    .help("Only when: \(binding.conditions.summary)")
+                    .accessibilityLabel("Only when \(binding.conditions.summary)")
+            }
             if let warning {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .symbolRenderingMode(.multicolor)
@@ -360,7 +368,7 @@ struct InfoBars: View {
         }
         if !model.isTrusted && model.needsAccessibility {
             InfoBar(systemImage: "accessibility",
-                    text: "Triggers needs Accessibility access to press keys, click, move windows and use mouse buttons for you.",
+                    text: "Triggers needs Accessibility access to press keys, click, move windows, use mouse buttons and watch key sequences for you.",
                     button: "Open System Settings") { model.openAccessibilitySettings() }
         }
         if let problem = model.gestureProblem, model.config.bindings.contains(where: { $0.trigger.family == .trackpad }) {
@@ -420,7 +428,7 @@ private struct FirstRunView: View {
                     .accessibilityHidden(true)
                 VStack(spacing: Spacing.xs) {
                     Text("No Triggers Yet").font(.title2.bold())
-                    Text("Make a trackpad gesture, a mouse button or a key combination do something, in every app or just one.")
+                    Text("Make a trackpad gesture, a mouse button or keys do something, or a list of things, in every app or just one.")
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -498,12 +506,17 @@ enum ConflictText {
     static func message(_ conflict: Conflict) -> String {
         switch conflict {
         case .system(let use): use.message
-        case .duplicate(let other): "Another trigger here uses the same input (\(KeyDisplay.title(other.action))). Only the first one runs."
+        case .duplicate(let other):
+            other.conditions.isEmpty
+                ? "Another trigger here uses the same input (\(KeyDisplay.summary(other))). Only the first one runs. Add a condition to choose between them."
+                : "Another trigger here uses the same input with the same conditions (\(KeyDisplay.summary(other))). Only the first one runs."
         case .systemShortcut: "macOS already uses this key combination. Pick another, or change it in Keyboard Shortcuts."
         case .shortcutTaken: "Another app is using this key combination, so Triggers can't. Pick another."
         case .pressesItself: "The action presses the same keys as the trigger, so it would only trigger itself."
         case .overrides(let other):
-            "Replaces the \(other.scope == .browsers ? "Browsers" : "All Apps") trigger for this input (\(KeyDisplay.title(other.action)))."
+            "Replaces the \(other.scope == .browsers ? "Browsers" : "All Apps") trigger for this input (\(KeyDisplay.summary(other)))."
+        case .sequenceTypes: "These keys still type in the app; Triggers only watches for them."
+        case .sequenceEverywhere: "These keys still type, and Triggers watches for them in every app. Add a modifier, or make it work in one app only."
         }
     }
 }

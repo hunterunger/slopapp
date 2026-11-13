@@ -16,9 +16,15 @@ import Testing
         #expect(outputs.last?.gesture == .tap(fingers))
     }
 
-    @Test func twoAndFiveFingerTapsAreIgnored() {
-        #expect(gestures(SyntheticTouches.tap(fingers: 2)).isEmpty)
-        #expect(gestures(SyntheticTouches.tap(fingers: 5)).isEmpty)
+    @Test(arguments: [2, 5])
+    func twoAndFiveFingerTaps(fingers: Int) {
+        #expect(gestures(SyntheticTouches.tap(fingers: fingers)) == [.tap(fingers)])
+    }
+
+    @Test func unboundGesturesAreNotLookedFor() {
+        var recognizer = GestureRecognizer(interests: GestureInterests([.tap(3)]))
+        let found = SyntheticTouches.tap(fingers: 2).compactMap { recognizer.process(device: 1, timestamp: $0.timestamp, contacts: $0.touches).gesture }
+        #expect(found.isEmpty)
     }
 
     @Test func slowTapIsNotATap() {
@@ -106,13 +112,13 @@ import Testing
     }
 
     @Test func palmIsNotCountedAsAFinger() {
-        // A resting palm (huge contact) plus two fingers tapping is a two-finger tap: nothing.
+        // A resting palm (huge contact) plus two fingers tapping is a two-finger tap, not three.
         let frames = SyntheticTouches.tap(fingers: 2).map { frame in
             var copy = frame
             if !copy.contacts.isEmpty { copy.contacts.append(.init(id: 9, x: 0.9, y: 0.1, size: 12)) }
             return copy
         }
-        #expect(gestures(frames).isEmpty)
+        #expect(gestures(frames) == [.tap(2)])
         // And a palm next to a three-finger tap doesn't make it four.
         let three = SyntheticTouches.tap(fingers: 3).map { frame in
             var copy = frame
@@ -128,7 +134,7 @@ import Testing
             copy.contacts = copy.contacts.map { var c = $0; c.state = c.id == 3 ? 2 : 4; return c }
             return copy
         }
-        #expect(gestures(frames).isEmpty, "only two of the three were touching")
+        #expect(gestures(frames) == [.tap(2)], "only two of the three were touching")
     }
 
     @Test func devicesAreKeptApart() {

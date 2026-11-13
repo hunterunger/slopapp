@@ -8,6 +8,8 @@ struct ActionEditor: View {
     let model: AppModel
     @Binding var action: Action
     let scope: Scope
+    /// "Do Nothing" only works as a trigger's only step, outside All Apps.
+    var offersPassThrough = true
 
     var body: some View {
         Picker("Action", selection: Binding(get: { action.kind }, set: { action = $0.defaultAction(from: action) })) {
@@ -18,7 +20,7 @@ struct ActionEditor: View {
                     }
                 }
             }
-            if scope != .allApps {
+            if scope != .allApps && offersPassThrough || action == .passThrough {
                 Divider()
                 Text(ActionKind.passThrough.title).tag(ActionKind.passThrough)
             }
@@ -71,14 +73,85 @@ struct ActionEditor: View {
         case .runShortcut(let name):
             ShortcutField(name: Binding(get: { name }, set: { action = .runShortcut($0) }))
         case .window(let move):
-            caption(move == .nextDisplay ? "Moves the front window to the next display." : "Moves the front window.")
+            caption(move == .nextDisplay ? "Moves the front window to the next display."
+                    : move == .fullScreen ? "Puts the front window in full screen, or takes it out." : "Moves the front window.")
+        case .windowArea(let area):
+            AreaFields(area: Binding(get: { area }, set: { action = .windowArea($0) }))
+        case .media(let key):
+            caption(key == .brightnessUp || key == .brightnessDown
+                    ? "Like the brightness keys: changes the built-in display's brightness."
+                    : "Like the key on the keyboard: macOS shows its usual overlay.")
+        case .system(let system):
+            caption(Self.caption(for: system))
+        case .typeText(let text):
+            TextField("Text", text: Binding(get: { text }, set: { action = .typeText($0) }), prompt: Text("Text to type"), axis: .vertical)
+                .lineLimit(1...6)
+            caption("Typed into the app in front, as if from the keyboard. The clipboard isn't touched.")
+        case .script(let language, let source):
+            TextField(language.title, text: Binding(get: { source }, set: { action = .script(language, $0) }),
+                      prompt: Text(language == .shell ? "open -g ~/Downloads" : "tell application \"Music\" to playpause"), axis: .vertical)
+                .lineLimit(2...10)
+                .font(.body.monospaced())
+                .autocorrectionDisabled()
+            caption(language == .shell
+                    ? "Runs with zsh as you, with your login PATH. Output is ignored; an error is shown."
+                    : "Runs with osascript. macOS may ask once before it controls another app.")
         case .passThrough:
             caption("Lets the app have the input, instead of the All Apps or Browsers trigger.")
         }
     }
 
+    static func caption(for system: SystemAction) -> String {
+        switch system {
+        case .missionControl, .appExpose, .showDesktop, .launchpad: "The same as the Mission Control key or gesture."
+        case .sleepDisplay: "Turns the displays off. Move the mouse or press a key to wake them."
+        case .lockScreen: "Locks the Mac (⌃⌘Q). Your apps keep running."
+        case .screenSaver: "Starts the screen saver."
+        case .toggleDarkMode: "Switches between light and dark. macOS asks once to let Triggers control System Events."
+        }
+    }
+
     private func caption(_ text: String) -> some View {
         Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A custom window area as percentages of the usable screen.
+private struct AreaFields: View {
+    @Binding var area: UnitRect
+
+    var body: some View {
+        LabeledContent("Position") {
+            HStack(spacing: Spacing.s) {
+                field("Left", \.x)
+                field("Top", \.y)
+            }
+        }
+        LabeledContent("Size") {
+            HStack(spacing: Spacing.s) {
+                field("Width", \.width)
+                field("Height", \.height)
+            }
+        }
+        if !area.isValid {
+            Text("Keep the area inside the screen: left plus width, and top plus height, at most 100%.")
+                .font(.callout).foregroundStyle(.textOrange)
+        }
+    }
+
+    private func field(_ label: String, _ path: WritableKeyPath<UnitRect, Double>) -> some View {
+        HStack(spacing: Spacing.xs) {
+            Text(label).foregroundStyle(.secondary)
+            TextField(label, value: Binding(get: { (area[keyPath: path] * 100).rounded() },
+                                            set: { area[keyPath: path] = min(max($0, 0), 100) / 100 }),
+                      format: .number.precision(.fractionLength(0)))
+                .labelsHidden()
+                .multilineTextAlignment(.trailing)
+                .monospacedDigit()
+                .frame(width: 44)
+                .accessibilityLabel("\(label) in percent of the screen")
+            Text("%").foregroundStyle(.secondary)
+        }
     }
 }
 

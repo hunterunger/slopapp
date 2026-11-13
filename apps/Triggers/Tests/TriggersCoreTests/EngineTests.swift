@@ -113,6 +113,7 @@ import Testing
         #expect(rig.hotkeys.registered.isEmpty, "existing combos can be pressed and recorded")
         #expect(rig.mouse.press(3).down == .pass, "buttons reach the recording window")
         rig.touch.feed(SyntheticTouches.tap(fingers: 4))
+        rig.touch.idle(until: 10) // recording also listens for double taps, so a single one waits
         rig.engine.receive(.keyCombo(ctrlOptK))
         #expect(recorded == [.gesture(.tap(4), modifiers: []), .keyCombo(ctrlOptK)])
         #expect(rig.performer.calls.isEmpty)

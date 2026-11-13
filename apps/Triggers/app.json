@@ -12,5 +12,8 @@
   "version": "0.1.0",
   "build": 1,
   "minimumMacOS": "14.0",
-  "bundleId": "app.slopapp.triggers"
+  "bundleId": "app.slopapp.triggers",
+  "infoPlist": {
+    "NSAppleEventsUsageDescription": "Triggers runs your AppleScripts and switches dark mode through System Events, only when one of your triggers asks it to."
+  }
 }

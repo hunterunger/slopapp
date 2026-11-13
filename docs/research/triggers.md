@@ -894,3 +894,158 @@ colour icons, inactive window), 26 (live appearance flip).
 7. Sleep the Mac, wake it: gestures still work. Unplug/replug a Magic Trackpad if you have one.
 8. Settings › Advanced › Export Diagnostics after some touching: the `frame_interval` line is
    spike 4's answer (trackpad frame rate); `touch_devices` lists the trackpads used.
+
+## Feature round: gaps the owner found (2026-11-11 to 11-12)
+
+The owner compared Triggers with the app it replaces and found setups it couldn't represent:
+more gestures, Magic Mouse, action sequences, conditions, key sequences and a hyper key, and
+direct system and media actions. Built into the existing model rather than beside it.
+
+### What changed in the model
+
+- **Steps instead of one action.** `TriggerBinding.steps: [ActionStep]`, each an action, a
+  delay or a "wait until <condition>, at most N s". Schema 2. Version 1 files (one `action`)
+  decode with that action as the only step; a migration test decodes the exact JSON 0.1's
+  encoder wrote (checked by building 0.1's core from git and diffing its output). Files are
+  written as version 2; 0.1 refuses them as "newer" (its existing behaviour), never overwrites.
+- **Conditions per trigger**, all or any: app running / not, app in front / not, network
+  (online, offline, Wi-Fi, Ethernet), display (external connected, none, a named one), power
+  (adapter, battery), time of day (wraps midnight), days of the week, modifiers held, dark mode.
+  Routing now keeps every enabled binding per input and place, in order; the first whose
+  conditions hold runs, else the next place (app → Browsers → All Apps), else the app gets the
+  input. Duplicates are only flagged when conditions are identical.
+- **Inputs:** gestures gained double taps (2–5 fingers), 2- and 5-finger taps, 5-finger swipes,
+  pinch and spread (2–5), rotate, one-finger corner taps, two-finger edge swipes, tip-taps (40
+  gestures, up from 8). Key sequences (`⌘ twice`, `Tap ⌥ alone`, `G then H`, `⌃K then ⌃C`, up
+  to 4 presses, 0.3–2 s between presses). The hyper key is a setting, not a trigger: hyper
+  combinations are ordinary key combinations with ⌃⌥⇧⌘.
+- **Actions:** media keys (play/pause, next, previous, volume up/down, mute, brightness
+  up/down), system (Mission Control, App Exposé, Show Desktop, Launchpad/Apps, sleep display,
+  lock screen, screen saver, toggle dark mode), type text, shell script, AppleScript, thirds,
+  two-thirds, quarters, full screen, and a custom window area in % of the screen.
+
+### Decisions (and why)
+
+1. **Gestures from the touch source Triggers already reads.** The brief asked for public APIs
+   where possible and no *new* reliance on MultitouchSupport. The owner already approved the
+   private source for trackpad taps and swipes (2026-11-07); every new trackpad gesture is new
+   recognizer logic over the same frames, so it adds no private-API surface. Public gesture
+   events were considered for pinch/rotate: they only exist for two fingers, only when macOS
+   itself recognises the gesture, and would need an extra event tap on every gesture event;
+   contacts give 2–5 finger pinches with the same tap-free cost. Pinch/rotate conflicts with
+   app zoom/rotate are shown from the real trackpad settings.
+2. **Magic Mouse: not built** (needs a new private-framework device class). There is no public
+   way to read Magic Mouse touches: it reports scroll and smart-zoom events, which can't be told
+   apart from trackpad ones or counted by finger. What it would take: in `TouchSource.swift`,
+   stop skipping device families 112/113 (the comment marks the spot), tag frames with a surface
+   kind, give `GestureRecognizer` mouse-surface rules (the surface is curved and small: taps by
+   region, 1–2 finger swipes, no pinch), and add `Gesture.surface` (absent = trackpad, so files
+   stay compatible). About a day plus owner hand tests on a Magic Mouse.
+3. **The recognizer looks only for bound gestures** (`GestureInterests`, bit masks, set by the
+   engine; everything while recording). An unbound pinch can't eat a bound swipe, and single
+   taps stay instant unless a double tap with the same finger count is bound; only then does the
+   single tap wait the 0.25 s double-tap window (a timer flushes it; no frames arrive once the
+   fingers lift).
+4. **Edge swipes are two-finger, corner taps one-finger.** One-finger edge swipes are just
+   pointer movement starting at the edge; two fingers from the right edge is macOS's
+   Notification Center (flagged). Corner taps also click when tap-to-click is on (flagged).
+5. **Key sequences never swallow keys.** They're watched by a keyboard event tap that only
+   exists while an enabled sequence is bound (or the hyper key is on), and it only ever passes
+   keys through. Plain-letter sequences ("G then H") still type; the editor says so, and warns
+   when one works in every app. Modifier taps exclude chords, a key in between, a click in
+   between (`CGEventSource.secondsSinceLastEventType`) and holds over 0.5 s.
+6. **Hyper key via a HID remap plus the tap, with guaranteed cleanup.** An event tap alone
+   can't see Caps Lock being held (it only reports the caps toggle). So, only while the setting
+   is on, Triggers isn't paused and Accessibility is granted, Caps Lock is remapped to F18 with
+   `/usr/bin/hidutil` (Apple TN2450) and the tap turns F18 down/up into ⌃⌥⇧⌘ down/up (posted as
+   real modifier events, so every app's shortcuts see them), and a lone tap within 1 s into
+   Escape. Undone on: setting off, pause, Accessibility revoked, the tap giving up, quit
+   (`applicationWillTerminate`), and a crash or kill -9: a watchdog `sh` blocks reading a pipe
+   only Triggers holds (CLOEXEC); when Triggers dies for any reason the pipe closes and the
+   watchdog clears the mapping. It ignores INT/TERM/HUP so ⌃C in a terminal still cleans up.
+   At launch, a mapping of Triggers' own left behind (watchdog killed too) is removed. Someone
+   else's `UserKeyMapping` is never overwritten: Triggers refuses and says so in Settings.
+   Re-applied on wake and when a keyboard appears (new keyboards don't have the mapping).
+   **Never enabled on the owner's Mac**: test mode, dry runs and the smoke test use a logging
+   remapper that can't run hidutil.
+7. **Conditions are checked when the input happens.** The mouse tap and hotkeys can't check
+   them on their own threads, so they still swallow; if no binding's conditions hold, the press
+   is given back (`deliverOriginal`: the button re-posted marked as ours; the hotkey suspended
+   for 150 ms and the combo re-posted). Gestures and sequences are never swallowed anyway.
+8. **Sequences:** later steps act in the app in front *when they run* (open Notes → wait until
+   Notes is in front → ⌘N lands in Notes). A failed step stops the rest; a skipped one ("No
+   window to move") doesn't. A wait that times out stops with "Stopped waiting: …". Firing
+   again while running is ignored; pause cancels. Scripts and Shortcuts are waited for (up to
+   60 s, then the sequence moves on). Single-action bindings still run synchronously: no added
+   latency on the common path.
+9. **Not offered: Focus / Do Not Disturb and the Wi-Fi network's name.** No public API reads
+   Focus state for a Mac utility (`INFocusStatusCenter` is for messaging apps with the
+   Communication Notifications capability, and only says "a Focus is on"); the SSID needs
+   Location access. "Connected over Wi-Fi" is offered instead. Network state comes from
+   `NWPathMonitor` (no traffic).
+10. **System actions use the same public routes as the system:** the Mission Control app (its
+    argument picks Show Desktop or App Exposé), the Apps (or Launchpad) app, `pmset
+    displaysleepnow`, the Lock Screen shortcut ⌃⌘Q, ScreenSaverEngine, special-key events for
+    media/volume/brightness (macOS shows its own overlays), and System Events for dark mode
+    (macOS asks once; `NSAppleEventsUsageDescription` and the Apple Events entitlement added).
+11. **Shell scripts run with `zsh -l -c`** (the person's PATH), AppleScripts with `osascript`;
+    output ignored, the first error line shown on failure. Type Text uses SlopKit's
+    `SyntheticKeyboard` (keystrokes, clipboard untouched).
+12. **Test safety:** test mode (`TRIGGERS_DATA_DIR`) now installs no input sources unless
+    `TRIGGERS_LIVE_INPUT=1`; `TRIGGERS_DRY_RUN=1` logs every action; Mac-wide actions (media,
+    volume, brightness, sleep/lock, Mission Control, dark mode) are always only logged in test
+    mode; scripts only run in test mode with `TRIGGERS_RUN_SCRIPTS=1`. The smoke test
+    (`SLOPAPP_SMOKE_TEST=1`) is a dry run with no input sources and no remap.
+
+### Verified
+
+- **Unit tests: 188 in 18 suites, all pass** (84 before). New: migration (0.1's exact JSON),
+  40 gestures each recognized from synthetic touches with everything looked for at once, double
+  tap timing and flush, scroll/swipe/tip-tap non-interference, key sequence matching (timeouts,
+  chords, clicks, autorepeat, longest match, history reset) and recording (combo vs sequence,
+  slow recordings get a longer timeout), hyper decider (modifiers down/up, Escape on tap only,
+  repeats, own events), remap controller (never overwrites, refuses cleanly, crash leftovers,
+  reapply), hidutil output parsing, every condition kind, all/any, overnight times, conditional
+  routing and fall-through, sequencing (delays, waits, timeouts, failure vs skip, slow actions,
+  re-fire, pause), late delivery of swallowed buttons and hotkeys, keyboard tap install rules
+  (sequences, hyper, pause, trust, recording, shutdown), window thirds/quarters/custom area.
+  Writing them found a real bug: after a hyper tap, the Escape plan re-pressed the four
+  modifiers it had just released (fixed).
+- **Replay walkthrough on the release build** (`--direct`, test mode, fake apps, act only in a
+  throwaway target window, in-process replay; nothing reached the owner's apps): two-finger
+  spread → ⌃⌥X arrived; three-finger double tap → Test › Ping; corner tap → typed "hello";
+  ⌘ twice → Ping, 0.5 s pause, shell script wrote to /tmp, wait-until, ⌃⌥Y; left edge swipe →
+  the target's conditional trigger skipped, All Apps fallback ⌃⌥Z ran, "WRONG" never typed;
+  G then H → play/pause, dark mode, sleep display, volume up all only logged; tip-tap → lock
+  screen only logged; two-finger tap with a wait that times out → stopped, no ping; button 5
+  with a false condition → given back; five-finger swipe up → window to the left third (576 of
+  1728 pt); four-finger pinch → custom 50 % × 50 % area at the top right.
+- **UI** (release build, quiet test copy): `drive tree` shows **no `[unlabeled]` controls** in
+  the editor, the sheet (steps are headed "Step 2 of 5: Wait 0.5 s" for VoiceOver, with Move
+  Up/Down/Remove actions) or Settings. Screenshots, light and dark, window inactive:
+  `/tmp/triggers-test/shots/` (editor-target-*, sheet-sequence-dark-2, settings-light) and
+  offscreen `/tmp/triggers-test/snap2/` (sheet-steps-*, sheet-steps-lower-*, settings-*).
+  Conflict badges came from this Mac's real trackpad settings (pinch-zoom, rotate, thumb pinch).
+- **Hyper key safety:** toggled on and off in the test copy: `hidutil` output unchanged, no
+  watchdog or hidutil process. Never enabled on the owner's Mac.
+
+### Not verified (needs a human or real hardware)
+
+- Real fingers for every new gesture (the editor's recognize-only pad shows what's recognized).
+- The hyper key end to end (by design: never turned on here). Owner hand test: turn it on,
+  hold Caps Lock + K in a text field (should arrive as ⌃⌥⇧⌘K), tap Caps Lock (Escape), quit
+  Triggers (Caps Lock toggles caps again), relaunch, `kill -9` it (`hidutil property --get
+  UserKeyMapping` should show (null) within a second).
+- Media/system actions' real effects (only logged in tests by rule), AppleScript's Automation
+  prompt, key sequences through the real keyboard tap.
+- Drag-to-reorder steps with the mouse (the owner was at the Mac; reorder logic is the same
+  as Move Up/Down, which the tree exposes). Middle click into a background window (unchanged
+  code; the event goes where the pointer is).
+
+### Noted while testing
+
+- One keyboard service on this Mac has a `UserKeyMapping` of Caps Lock → F20. It isn't
+  Triggers' (Triggers uses F18 and never ran hidutil here); left untouched. With it present,
+  Triggers' hyper key would refuse to turn on and say why, which is the intended behaviour.
+- Processes launched from the agent's shell ignored SIGTERM (`drive quit --force` too); killed by
+  pid with SIGKILL. Not app behaviour (nothing in Triggers or SlopKit handles SIGTERM).

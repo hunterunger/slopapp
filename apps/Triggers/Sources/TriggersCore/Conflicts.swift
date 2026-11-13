@@ -13,6 +13,14 @@ public struct SystemGestureSettings: Equatable, Sendable {
     public var fourFingerVertical = false
     public var missionControlGesture = true
     public var appExposeGesture = false
+    public var tapToClick = false
+    public var secondaryClick = true
+    public var smartZoom = true
+    public var pinchZoom = true
+    public var rotate = true
+    public var launchpadPinch = true
+    public var showDesktopSpread = true
+    public var notificationCenterEdge = true
 
     public init() {}
 
@@ -37,6 +45,15 @@ public struct SystemGestureSettings: Equatable, Sendable {
         fourFingerHorizontal = any("TrackpadFourFingerHorizSwipeGesture", default: 2) { $0 == 2 }
         threeFingerVertical = any("TrackpadThreeFingerVertSwipeGesture", default: 2) { $0 == 2 }
         fourFingerVertical = any("TrackpadFourFingerVertSwipeGesture", default: 2) { $0 == 2 }
+        tapToClick = any("Clicking", default: 0) { $0 != 0 }
+        secondaryClick = any("TrackpadRightClick", default: 1) { $0 != 0 }
+        smartZoom = any("TrackpadTwoFingerDoubleTapGesture", default: 1) { $0 != 0 }
+        pinchZoom = any("TrackpadPinch", default: 1) { $0 != 0 }
+        rotate = any("TrackpadRotate", default: 1) { $0 != 0 }
+        launchpadPinch = any("TrackpadFourFingerPinchGesture", default: 2) { $0 != 0 }
+            || any("TrackpadFiveFingerPinchGesture", default: 2) { $0 != 0 }
+        showDesktopSpread = launchpadPinch
+        notificationCenterEdge = any("TrackpadTwoFingerFromRightEdgeSwipeGesture", default: 3) { $0 != 0 }
         missionControlGesture = (read("showMissionControlGestureEnabled", Self.dockDomain) ?? 1) != 0
         appExposeGesture = (read("showAppExposeGestureEnabled", Self.dockDomain) ?? 0) != 0
     }
@@ -44,6 +61,18 @@ public struct SystemGestureSettings: Equatable, Sendable {
     /// What macOS does with this gesture, if anything.
     public func systemUse(of gesture: Gesture) -> SystemGestureUse? {
         if gesture.fingers == 3, threeFingerDrag { return .threeFingerDrag }
+        switch (gesture.kind, gesture.fingers) {
+        case (.tap, 2): return tapToClick && secondaryClick ? .secondaryClick : nil
+        case (.doubleTap, 2): return smartZoom ? .smartZoom : nil
+        case (.pinchIn, 2), (.pinchOut, 2): return pinchZoom ? .zoom : nil
+        case (.rotateLeft, _), (.rotateRight, _): return rotate ? .rotate : nil
+        case (.pinchIn, 4), (.pinchIn, 5): return launchpadPinch ? .launchpad : nil
+        case (.pinchOut, 4), (.pinchOut, 5): return showDesktopSpread ? .showDesktop : nil
+        case (.cornerTap, _), (.tipTap, _): return tapToClick ? .tapToClick : nil
+        case (.edgeSwipe, _):
+            return gesture.edge == .right && notificationCenterEdge ? .notificationCenter : .scrolls
+        default: break
+        }
         switch (gesture.kind, gesture.fingers, gesture.direction) {
         case (.tap, 3, _):
             return threeFingerTapLookUp ? .lookUp : nil
@@ -72,6 +101,7 @@ public struct SystemGestureSettings: Equatable, Sendable {
 /// A macOS gesture that overlaps one of ours.
 public enum SystemGestureUse: Equatable, Sendable {
     case lookUp, pages, fullScreenApps, missionControl, appExpose, threeFingerDrag
+    case secondaryClick, smartZoom, zoom, rotate, launchpad, showDesktop, tapToClick, notificationCenter, scrolls
 
     public var message: String {
         switch self {
@@ -81,11 +111,25 @@ public enum SystemGestureUse: Equatable, Sendable {
         case .missionControl: "macOS also uses this swipe for Mission Control, so both will happen."
         case .appExpose: "macOS also uses this swipe for App Exposé, so both will happen."
         case .threeFingerDrag: "Three-finger drag is on, so macOS treats three fingers as dragging. Use four fingers, or turn three-finger drag off."
+        case .secondaryClick: "Tap to click is on, so a two-finger tap is also a secondary click."
+        case .smartZoom: "macOS also uses a two-finger double tap for smart zoom, so both will happen."
+        case .zoom: "Apps also zoom when you pinch with two fingers, so both will happen."
+        case .rotate: "Apps that rotate (Photos, Preview, Maps) also rotate, so both will happen."
+        case .launchpad: SystemAction.hasAppsApp
+            ? "macOS also opens Apps when you pinch with your thumb and three fingers, so both will happen."
+            : "macOS also opens Launchpad when you pinch with your thumb and three fingers, so both will happen."
+        case .showDesktop: "macOS also shows the desktop when you spread your thumb and three fingers, so both will happen."
+        case .tapToClick: "Tap to click is on, so this tap also clicks."
+        case .notificationCenter: "macOS also opens Notification Center with this swipe, so both will happen."
+        case .scrolls: "Two fingers moving also scroll the window under the pointer."
         }
     }
 
     /// Which System Settings pane changes it.
     public var settingsPane: SettingsPane { self == .threeFingerDrag ? .pointerControl : .trackpad }
+
+    /// Informational: nothing in macOS to turn off.
+    public var isInformational: Bool { self == .scrolls }
 }
 
 public enum SettingsPane: Sendable, Equatable {
@@ -122,11 +166,18 @@ public enum Conflict: Equatable, Sendable {
     case pressesItself
     /// Informational: in this app it replaces the All Apps (or Browsers) binding.
     case overrides(TriggerBinding)
+    /// Informational: a sequence of plain keys also types them.
+    case sequenceTypes
+    /// A sequence with no modifier at all is watched in every text field: suggest scoping.
+    case sequenceEverywhere
 
     /// Warnings get an orange badge; informational notes don't.
     public var isWarning: Bool {
-        if case .overrides = self { return false }
-        return true
+        switch self {
+        case .overrides, .sequenceTypes: false
+        case .system(let use): !use.isInformational
+        default: true
+        }
     }
 }
 
@@ -155,12 +206,16 @@ public struct ConflictChecker: Sendable {
             } else if systemShortcuts.contains(combo) {
                 result.append(.systemShortcut)
             }
-            if case .pressKeys(let pressed) = binding.action, pressed == combo { result.append(.pressesItself) }
+            if binding.actions.contains(.pressKeys(combo)) { result.append(.pressesItself) }
+        case .keySequence(let sequence):
+            if sequence.typesText { result.append(binding.scope == .allApps ? .sequenceEverywhere : .sequenceTypes) }
         case .mouseButton:
             break
         }
         let others = config.bindings.filter { $0.id != binding.id && $0.isEnabled && $0.trigger == binding.trigger }
-        if let duplicate = others.first(where: { $0.scope == binding.scope }) {
+        // With conditions, several triggers for one input are the point (first one that holds
+        // runs). Only identical conditions make one of them dead.
+        if let duplicate = others.first(where: { $0.scope == binding.scope && $0.conditions == binding.conditions }) {
             result.append(.duplicate(duplicate))
         }
         if binding.scope != .allApps {

@@ -16,7 +16,11 @@ final class CarbonHotkeys: HotkeyRegistrar {
     private var handler: EventHandlerRef?
     private static let signature: OSType = 0x5452_4753 // "TRGS"
 
+    /// What the engine wants registered (a suspended combo comes back to this).
+    private var wanted: Set<KeyCombo> = []
+
     func sync(_ combos: Set<KeyCombo>) -> Set<KeyCombo> {
+        wanted = combos
         guard !Diagnostics.noInput else { return [] }
         installHandlerIfNeeded()
         for (combo, ref) in registered where !combos.contains(combo) {
@@ -40,6 +44,18 @@ final class CarbonHotkeys: HotkeyRegistrar {
             }
         }
         return failed
+    }
+
+    /// Lets one press through: unregistered now, registered again after `seconds` (the posted
+    /// copy must reach the app first, or the hotkey would catch it again).
+    func suspend(_ combo: KeyCombo, for seconds: Double) {
+        guard let ref = registered[combo] else { return }
+        UnregisterEventHotKey(ref)
+        registered[combo] = nil
+        ids = ids.filter { $0.value != combo }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+            MainActor.assumeIsolated { _ = self.sync(self.wanted) }
+        }
     }
 
     private func installHandlerIfNeeded() {
@@ -91,12 +107,14 @@ enum KeyDisplay {
         return text.isEmpty ? combo.fallbackDisplay : text
     }
 
-    static func title(_ trigger: Trigger) -> String {
-        if case .keyCombo(let combo) = trigger { return name(combo) }
-        return trigger.fallbackTitle
-    }
+    static func title(_ trigger: Trigger) -> String { trigger.title(keys: name) }
 
     static func title(_ action: Action) -> String { action.title(keys: name) }
+
+    static func title(_ step: ActionStep) -> String { step.title(keys: name) }
+
+    /// "Press ⌘[", or "Open Notes → Wait 1 s → Press ⌘N".
+    static func summary(_ binding: TriggerBinding) -> String { binding.summary(keys: name) }
 
     /// For VoiceOver: "Control-Option-K".
     static func spoken(_ combo: KeyCombo) -> String {

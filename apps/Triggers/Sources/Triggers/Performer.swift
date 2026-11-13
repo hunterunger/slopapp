@@ -4,33 +4,38 @@ import os
 import TriggersCore
 
 /// Runs actions for real. The only production type that posts events (`CGEvent.post`), and
-/// in test mode (`TRIGGERS_ACT_ONLY_IN`) it acts only on the test target: keys and clicks go
-/// to that process with `postToPid`, menus and windows resolve only that app, and Open / Run
-/// Shortcut just log what they'd do.
+/// in test mode (`TRIGGERS_ACT_ONLY_IN`) it acts only on the test target: keys, clicks and
+/// typed text go to that process with `postToPid`, menus and windows resolve only that app,
+/// Open / Run Shortcut / scripts just log what they'd do, and actions that change the whole
+/// Mac (media keys, volume, brightness, sleeping or locking the screen, Mission Control,
+/// dark mode) are always only logged. `TRIGGERS_DRY_RUN=1` logs everything instead.
 @MainActor
 final class SystemPerformer: ActionPerformer {
     private let testTarget = Diagnostics.actOnlyIn
     private(set) var windowLatency = LatencyStats()
     private(set) var postLatency = LatencyStats()
     private static let signposter = OSSignposter(subsystem: "app.slopapp.triggers", category: "actions")
+    /// Longest a sequence waits for a script or Shortcut before moving on (it keeps running).
+    static let slowActionLimit = 60.0
 
-    func perform(_ action: Action, context: ActionContext) -> ActionResult {
+    func perform(_ action: Action, context: ActionContext, finished: @escaping @MainActor (ActionResult) -> Void) -> ActionResult? {
+        if Diagnostics.dryRun { return fake(action.fallbackTitle) }
         if let testTarget {
             guard context.frontApp?.bundleID == testTarget, let pid = context.frontApp?.pid else {
                 Diagnostics.record("skipped \(action.fallbackTitle): \(context.frontApp?.bundleID ?? "no app") isn't the test target")
                 return .skipped("Test mode acts only in the test target.")
             }
-            return run(action, context: context, testPID: pid)
+            return run(action, context: context, testPID: pid, finished: finished)
         }
-        return run(action, context: context, testPID: nil)
+        return run(action, context: context, testPID: nil, finished: finished)
     }
 
-    private func run(_ action: Action, context: ActionContext, testPID: pid_t?) -> ActionResult {
+    private func run(_ action: Action, context: ActionContext, testPID: pid_t?, finished: @escaping @MainActor (ActionResult) -> Void) -> ActionResult? {
         if action.needsAccessibility, !AccessibilityTrust.isTrusted {
             return .failed("Triggers needs Accessibility access to do this. Turn it on in System Settings › Privacy & Security › Accessibility.")
         }
         let start = Diagnostics.now()
-        let result: ActionResult
+        let result: ActionResult?
         switch action {
         case .pressKeys(let combo):
             result = KeyPoster.press(combo, held: context.trigger.modifiers, pid: testPID)
@@ -41,26 +46,77 @@ final class SystemPerformer: ActionPerformer {
         case .menuItem(let path):
             guard let pid = context.frontApp?.pid else { return .skipped("No app is in front.") }
             result = MenuInvoker.choose(path, pid: pid, appName: context.frontApp?.name ?? "the app")
-        case .window(let move):
+        case .window, .windowArea:
             guard let pid = context.frontApp?.pid else { return .skipped("No app is in front.") }
             let signpost = Self.signposter.beginInterval("window")
-            result = WindowMover.move(move, pid: pid)
+            result = WindowMover.move(action, pid: pid)
             Self.signposter.endInterval("window", signpost)
             windowLatency.record(seconds: Diagnostics.now() - start)
         case .open(let target):
             result = Diagnostics.fakesOutsideEffects ? fake("open \(target)") : Opener.open(target)
         case .runShortcut(let name):
-            result = Diagnostics.fakesOutsideEffects ? fake("run shortcut \(name)") : ShortcutRunner.run(name)
+            if Diagnostics.fakesOutsideEffects { return fake("run shortcut \(name)") }
+            return ShortcutRunner.run(name, finished: Self.once(finished))
+        case .script(let language, let source):
+            if Diagnostics.fakesOutsideEffects && !Diagnostics.runScripts { return fake("run \(language.title)") }
+            return ScriptRunner.run(language, source, finished: Self.once(finished))
+        case .typeText(let text):
+            return Typer.type(text, pid: testPID, finished: finished)
+        case .media(let key):
+            result = Diagnostics.fakesSystemEffects ? fake("press \(key.title)") : MediaKeys.press(key)
+        case .system(let system):
+            result = Diagnostics.fakesSystemEffects ? fake(system.title) : SystemActions.run(system)
         case .passThrough:
             result = .done
         }
-        Diagnostics.record("performed \(action.fallbackTitle) in \(context.frontApp?.bundleID ?? "-") -> \(result) in \(String(format: "%.2f", (Diagnostics.now() - start) * 1000)) ms")
+        Diagnostics.record("performed \(action.fallbackTitle) in \(context.frontApp?.bundleID ?? "-") -> \(result.map { "\($0)" } ?? "pending") in \(String(format: "%.2f", (Diagnostics.now() - start) * 1000)) ms")
         return result
+    }
+
+    /// The input went unused (its triggers' conditions didn't hold): give it to the app.
+    func deliverOriginal(_ trigger: Trigger, context: ActionContext?) {
+        if Diagnostics.dryRun {
+            Diagnostics.record("test mode: would let \(trigger.fallbackTitle) through")
+            return
+        }
+        var pid: pid_t?
+        if let testTarget {
+            let front = AppModel.shared.frontApp
+            guard front?.bundleID == testTarget else {
+                Diagnostics.record("skipped letting \(trigger.fallbackTitle) through: not the test target")
+                return
+            }
+            pid = front?.pid
+        }
+        guard AccessibilityTrust.isTrusted else { return }
+        switch trigger {
+        case .mouseButton(let button, let modifiers):
+            Clicker.press(button: button, modifiers: modifiers, pid: pid)
+        case .keyCombo(let combo):
+            _ = KeyPoster.press(combo, held: combo.modifiers, pid: pid)
+        case .gesture, .keySequence:
+            break // never swallowed
+        }
+        Diagnostics.record("let \(trigger.fallbackTitle) through (conditions didn't hold)")
     }
 
     private func fake(_ what: String) -> ActionResult {
         Diagnostics.record("test mode: would \(what)")
         return .done
+    }
+
+    /// A finish callback that runs once: on completion or after `slowActionLimit`, whichever
+    /// comes first (a long script doesn't hold its sequence forever).
+    static func once(_ finished: @escaping @MainActor (ActionResult) -> Void) -> @MainActor (ActionResult) -> Void {
+        final class Flag { var done = false }
+        let flag = Flag()
+        let call: @MainActor (ActionResult) -> Void = { result in
+            guard !flag.done else { return }
+            flag.done = true
+            finished(result)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + slowActionLimit) { MainActor.assumeIsolated { call(.done) } }
+        return call
     }
 }
 
@@ -124,6 +180,21 @@ enum Clicker {
             if let pid { event.postToPid(pid) } else { event.post(tap: .cghidEventTap) }
         }
         return .done
+    }
+}
+
+extension Clicker {
+    /// A press of any button (CoreGraphics numbering), marked as ours so the tap lets it by.
+    static func press(button: Int, modifiers: Modifiers, pid: pid_t?) {
+        let location = CGEvent(source: nil)?.location ?? .zero
+        let source = CGEventSource(stateID: .privateState)
+        for type in [CGEventType.otherMouseDown, .otherMouseUp] {
+            guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: location, mouseButton: .center) else { continue }
+            event.setIntegerValueField(.mouseEventButtonNumber, value: Int64(button))
+            event.flags = CGEventFlags(rawValue: modifiers.cgFlags)
+            event.setIntegerValueField(.eventSourceUserData, value: MouseTapDecider.ownEventMarker)
+            if let pid { event.postToPid(pid) } else { event.post(tap: .cghidEventTap) }
+        }
     }
 }
 
@@ -205,14 +276,29 @@ enum MenuInvoker {
 
 /// Moves the front app's focused window with Accessibility, using `WindowLayout`'s math.
 enum WindowMover {
+    /// A window move or custom area.
     @MainActor
-    static func move(_ move: WindowMove, pid: pid_t) -> ActionResult {
+    static func move(_ action: Action, pid: pid_t) -> ActionResult {
+        switch action {
+        case .window(let move): return self.move(move, area: move.area, pid: pid)
+        case .windowArea(let area): return self.move(.maximize, area: area, pid: pid)
+        default: return .skipped("Nothing to do.")
+        }
+    }
+
+    @MainActor
+    static func move(_ move: WindowMove, area: UnitRect?, pid: pid_t) -> ActionResult {
         let app = AXUIElementCreateApplication(pid)
         guard let window = MenuInvoker.element(app, kAXFocusedWindowAttribute),
               MenuInvoker.string(window, kAXRoleAttribute) == kAXWindowRole as String else {
             return .skipped("No window to move.")
         }
-        if MenuInvoker.bool(window, "AXFullScreen") == true { return .skipped("The window is full screen.") }
+        let isFullScreen = MenuInvoker.bool(window, "AXFullScreen") == true
+        if move == .fullScreen {
+            return AXUIElementSetAttributeValue(window, "AXFullScreen" as CFString, (!isFullScreen ? kCFBooleanTrue : kCFBooleanFalse)!) == .success
+                ? .done : .failed("This window can't go full screen.")
+        }
+        if isFullScreen { return .skipped("The window is full screen.") }
         if move == .minimize {
             return AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue) == .success
                 ? .done : .failed("Couldn't minimize the window.")
@@ -234,7 +320,12 @@ enum WindowMover {
             nextVisible = visibles[order[next]]
             targetVisible = visibles[order[next]]
         }
-        guard let target = WindowLayout.target(for: move, window: frame, visible: visibles[index], nextVisible: nextVisible) else {
+        let target: CGRect
+        if let area {
+            target = WindowLayout.rect(area, in: visibles[index])
+        } else if let computed = WindowLayout.target(for: move, window: frame, visible: visibles[index], nextVisible: nextVisible) {
+            target = computed
+        } else {
             return .skipped("Nothing to do.")
         }
         // Position, size, position again: moving to another display can clip the size first.
@@ -242,7 +333,7 @@ enum WindowMover {
         set(window, size: target.size)
         set(window, position: target.origin)
         if let actual = self.frame(of: window), actual.size != target.size {
-            let settled = WindowLayout.settle(actual: actual.size, target: target, move: move, visible: targetVisible)
+            let settled = WindowLayout.settle(actual: actual.size, target: target, area: area, visible: targetVisible)
             if settled.origin != actual.origin { set(window, position: settled.origin) }
         }
         return .done
@@ -300,26 +391,30 @@ enum Opener {
 
 /// Runs Shortcuts with the `shortcuts` command-line tool, off the main thread.
 enum ShortcutRunner {
+    /// Starts the Shortcut; `finished` when it's done (a sequence waits for it).
     @MainActor
-    static func run(_ name: String) -> ActionResult {
+    static func run(_ name: String, finished: @escaping @MainActor (ActionResult) -> Void) -> ActionResult? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
         process.arguments = ["run", name]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        process.terminationHandler = { finished in
-            guard finished.terminationStatus != 0 else { return }
-            let status = finished.terminationStatus
+        process.terminationHandler = { done in
+            let status = done.terminationStatus
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    Diagnostics.record("shortcut exited \(status)")
-                    NotificationCenter.default.post(name: .actionFailed, object: "Couldn't run the Shortcut “\(name)”. Check it still exists in the Shortcuts app.")
+                    if status == 0 {
+                        finished(.done)
+                    } else {
+                        Diagnostics.record("shortcut exited \(status)")
+                        finished(.failed("Couldn't run the Shortcut “\(name)”. Check it still exists in the Shortcuts app."))
+                    }
                 }
             }
         }
         do {
             try process.run()
-            return .done
+            return nil
         } catch {
             return .failed("Couldn't start Shortcuts.")
         }

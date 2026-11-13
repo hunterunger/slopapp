@@ -77,7 +77,7 @@ struct TriggersMenu: View {
     }
 
     private func recentTitle(_ entry: RecentLog.Entry) -> String {
-        var parts = ["\(KeyDisplay.title(entry.trigger)) → \(KeyDisplay.title(entry.action))"]
+        var parts = ["\(KeyDisplay.title(entry.trigger)) → \(KeyDisplay.summary(entry.binding))"]
         if let app = entry.appName { parts.append(app) }
         parts.append(RelativeAge.describe(entry.date, now: Date()))
         return parts.joined(separator: " · ")
@@ -204,11 +204,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        standard.applicationDidBecomeActive(notification)
         AppModel.shared.checkTrust()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// The hyper key's remap must not outlive Triggers.
+    func applicationWillTerminate(_ notification: Notification) {
+        AppModel.shared.engine.shutDown()
+    }
 }
 
 /// A menu bar app that shows in the Dock and gets a menu bar while its editor or Settings is
