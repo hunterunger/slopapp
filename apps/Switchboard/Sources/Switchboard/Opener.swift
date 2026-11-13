@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import SwitchboardCore
 
 /// Hands links to browsers. The only place that opens anything.
@@ -7,17 +8,38 @@ enum Opener {
     enum Failure: Error {
         case appMissing(String)
         case failed(String)
+        /// A webmail target got something it can't write (or its compose address is broken).
+        case cantCompose(String)
+        case safari(SafariWindowError)
+        /// An app link nothing on this Mac opens (or only Switchboard would).
+        case noApp(String)
+
+        var message: String {
+            switch self {
+            case .appMissing(let name): "\(name) isn't installed anymore. Choose another one in Switchboard's Settings."
+            case .failed(let name): "Couldn't open the link in \(name). Try again, or pick another one."
+            case .cantCompose(let name): "Couldn't start an email in \(name). Check its compose address in Switchboard's Settings › Email."
+            case .safari(let error): error.message
+            case .noApp(let scheme): "No app on this Mac opens \(scheme): links."
+            }
+        }
     }
+
+    /// Safari private and profile windows. Replaced by a fake in dry runs.
+    static var safari: SafariWindowOpening = AccessibilitySafariOpener()
 
     /// Opens `url` in `target`. Returns when the request has been handed to macOS (not when
     /// the page has loaded).
     static func open(_ url: URL, in target: Target, background: Bool = false) async throws {
-        let plan = LaunchPlan.make(for: target, url: url, background: background)
+        guard let plan = LaunchPlan.make(for: target, url: url, background: background) else {
+            throw Failure.cantCompose(target.pickerTitle)
+        }
         guard let appURL = appURL(for: target) else {
             throw Failure.appMissing(target.appName)
         }
         if Diagnostics.isDryRun {
-            Diagnostics.record("dry-run open target=\"\(target.displayName)\" plan=\(plan.method) activates=\(plan.activates)")
+            let access = plan.needsAccessibility ? " accessibility=\(AXIsProcessTrusted() ? "granted" : "missing")" : ""
+            Diagnostics.record("dry-run open target=\"\(target.displayName)\" plan=\(plan.method) activates=\(plan.activates)\(access)")
             return
         }
 
@@ -41,9 +63,37 @@ enum Opener {
                 configuration.arguments = arguments
                 configuration.createsNewApplicationInstance = true
                 try await NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
+            case .safariWindow(let request, let link):
+                try await safari.open(request, url: link, safariURL: appURL)
             }
+        } catch let error as SafariWindowError {
+            throw Failure.safari(error)
         } catch {
-            throw Failure.failed(error.localizedDescription)
+            throw Failure.failed(target.appName)
+        }
+    }
+
+    /// Opens an app's own link (a handoff or a rewrite's result) in that app.
+    static func open(_ app: AppLink) async throws {
+        let scheme = app.url.scheme ?? ""
+        let appURL = app.bundleID.flatMap(NSWorkspace.shared.urlForApplication(withBundleIdentifier:))
+            ?? NSWorkspace.shared.urlForApplication(toOpen: app.url)
+        guard let appURL, Bundle(url: appURL)?.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            throw Failure.noApp(scheme)
+        }
+        if Diagnostics.isDryRun {
+            Diagnostics.record("dry-run open app=\"\(appURL.lastPathComponent)\" url=\(app.url.absoluteString.prefix(200))")
+            return
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.addsToRecentItems = false
+        configuration.promptsUserIfNeeded = false
+        if let id = Bundle(url: appURL)?.bundleIdentifier { NSApp.yieldActivation(toApplicationWithBundleIdentifier: id) }
+        do {
+            try await NSWorkspace.shared.open([app.url], withApplicationAt: appURL, configuration: configuration)
+        } catch {
+            throw Failure.failed(app.appName ?? appURL.deletingPathExtension().lastPathComponent)
         }
     }
 
@@ -71,4 +121,20 @@ enum Opener {
     static func isInstalled(_ target: Target) -> Bool {
         appURL(for: target) != nil
     }
+}
+
+/// Which app a handoff would use, cached like browser locations (LaunchServices lookups cost
+/// milliseconds). Only asked for handoffs that are turned on.
+@MainActor
+enum HandoffApps {
+    private static var found: [String: String?] = [:]
+
+    static func installed(_ handoff: AppHandoff) -> String? {
+        if let cached = found[handoff.id] { return cached }
+        let id = handoff.bundleIDs.first { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }
+        found[handoff.id] = id
+        return id
+    }
+
+    static func forget() { found.removeAll() }
 }

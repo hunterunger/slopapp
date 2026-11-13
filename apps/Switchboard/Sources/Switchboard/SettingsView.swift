@@ -7,7 +7,7 @@ import SwitchboardCore
 /// Settings: General, Browsers, Rules, About. Built from SlopKit's pieces; Switchboard needs
 /// two custom tabs, so it composes them instead of using `SlopSettings`.
 enum SettingsTab: String, Hashable {
-    case general, browsers, rules, about
+    case general, browsers, email, files, rules, rewrite, about
 }
 
 struct SettingsView: View {
@@ -24,10 +24,7 @@ struct SettingsView: View {
                         Text(size.title).tag(size)
                     }
                 }
-                Toggle(isOn: $model.config.stripsTrackingParameters) {
-                    Text("Remove tracking from links")
-                    Text("Drops ad and newsletter tags like utm_source and fbclid before a link opens. The page is the same.")
-                }
+                SettingsFileRow(model: model)
                 if let notice = model.recoveryNotice {
                     Label(notice, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
@@ -43,18 +40,34 @@ struct SettingsView: View {
                 .tag(SettingsTab.browsers)
                 .tabItem { Label("Browsers", systemImage: "safari") }
 
+            EmailTab(model: model)
+                .tag(SettingsTab.email)
+                .tabItem { Label("Email", systemImage: "envelope") }
+
+            FilesTab(model: model)
+                .tag(SettingsTab.files)
+                .tabItem { Label("Files", systemImage: "doc") }
+
             RulesTab(model: model)
                 .tag(SettingsTab.rules)
                 .tabItem { Label("Rules", systemImage: "arrow.triangle.branch") }
+
+            RewriteTab(model: model)
+                .tag(SettingsTab.rewrite)
+                .tabItem { Label("Rewrite", systemImage: "wand.and.rays") }
 
             AboutSettingsTab(info: info)
                 .tag(SettingsTab.about)
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: Metrics.settingsWidth)
+        .onReceive(NotificationCenter.default.publisher(for: .switchboardShowTab)) { note in
+            if let name = note.object as? String, let next = SettingsTab(rawValue: name) { tab = next }
+        }
         .onAppear {
-            model.refreshDefaultStatus()
             model.refreshInstalledApps()
+            model.refreshMailApps()
+            model.refreshDefaultStatus()
         }
     }
 }

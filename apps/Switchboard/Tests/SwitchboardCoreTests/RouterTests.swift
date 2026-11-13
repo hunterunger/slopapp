@@ -274,13 +274,15 @@ struct ShadowTests {
 
 @Suite("Incoming links")
 struct LinkParserTests {
-    @Test("Web links and HTML files are routed; other schemes aren't")
+    @Test("Web links, email links and files are routed; other schemes aren't")
     func intake() {
         #expect(LinkParser.intake(url("https://example.com")) == .route(url("https://example.com"), forcePicker: false))
         #expect(LinkParser.intake(url("HTTP://Example.com/")) == .route(url("HTTP://Example.com/"), forcePicker: false))
         #expect(LinkParser.intake(url("file:///tmp/page.html")) == .route(url("file:///tmp/page.html"), forcePicker: false))
-        if case .reject = LinkParser.intake(url("file:///tmp/a.pdf")) {} else { Issue.record("pdf accepted") }
-        if case .reject = LinkParser.intake(url("mailto:a@example.com")) {} else { Issue.record("mailto accepted") }
+        // Files macOS hands us (we're their app) and email links go through the rules too.
+        #expect(LinkParser.intake(url("file:///tmp/a.pdf")) == .route(url("file:///tmp/a.pdf"), forcePicker: false))
+        #expect(LinkParser.intake(url("mailto:a@example.com")) == .route(url("mailto:a@example.com"), forcePicker: false))
+        if case .reject = LinkParser.intake(url("tel:+15551234")) {} else { Issue.record("tel accepted") }
         if case .reject = LinkParser.intake(url("https:///nohost")) {} else { Issue.record("hostless accepted") }
         if case .reject = LinkParser.intake(url("javascript:alert(1)")) {} else { Issue.record("javascript accepted") }
     }

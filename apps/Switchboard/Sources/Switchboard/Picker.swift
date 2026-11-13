@@ -26,6 +26,12 @@ final class PickerState {
     var host: String { link.map { LinkText.host(of: $0.url) } ?? "" }
     var detail: String { link.map { LinkText.detail(of: $0.url, maxLength: 44) } ?? "" }
     var isFile: Bool { link?.url.isFileURL == true }
+    var isEmail: Bool { link?.kind == .email }
+    /// What "Always Open … Here" makes a rule for ("example.com", "Email to example.com",
+    /// ".pdf Files"), or nil when it can't (a local web page).
+    var alwaysLabel: String? { link.flatMap { Router.alwaysOpenLabel(for: $0.url) } }
+    /// "Link", "Address" or "Location": what the copy button copies.
+    var copyNoun: String { isEmail ? "Address" : isFile ? "Location" : "Link" }
     var layout: PickerLayout {
         PickerLayout(rowCount: targets.count, size: size, availableHeight: availableListHeight)
     }
@@ -131,7 +137,7 @@ final class PickerController {
         panel.displayIfNeeded()
         startWatchingModifiers()
         NSAccessibility.post(element: panel, notification: .announcementRequested, userInfo: [
-            .announcement: "Open \(state.host) in. \(targets.count) choices.",
+            .announcement: state.isEmail ? "Email to \(state.host). Write it in. \(targets.count) choices." : "Open \(state.host) in. \(targets.count) choices.",
             .priority: NSAccessibilityPriorityLevel.high.rawValue,
         ])
         Diagnostics.record("picker shown targets=\(targets.count) event_to_visible_ms=\(Diagnostics.milliseconds(since: receivedAt))")
@@ -180,11 +186,12 @@ final class PickerController {
 
     private func copyLink() {
         guard !resolved, let link = state.link else { return }
+        let text = MailtoLink(link.url).map { $0.recipients.joined(separator: ", ") } ?? link.url.absoluteString
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(link.url.absoluteString, forType: .string)
+        NSPasteboard.general.setString(text, forType: .string)
         copied = true
         panel?.dismiss()
-        HUD.show(link.url.isFileURL ? "Location copied" : "Link copied", systemImage: "doc.on.doc")
+        HUD.show("\(state.copyNoun) copied", systemImage: "doc.on.doc")
     }
 
     private func didDismiss() {
@@ -315,7 +322,7 @@ struct PickerView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: PickerMetrics.columnGap) {
             // Centred in the icon column, so the host lines up with the browser names.
-            Image(systemName: state.isFile ? "doc" : "link")
+            Image(systemName: state.isEmail ? "envelope" : state.isFile ? "doc" : "link")
                 .font(state.size.nameFont)
                 .foregroundStyle(.secondary)
                 .frame(width: state.size.iconSize)
@@ -337,16 +344,16 @@ struct PickerView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Link to \(state.host)\(state.detail.isEmpty ? "" : ", \(state.detail)")")
+            .accessibilityLabel("\(state.isEmail ? "Email to" : "Link to") \(state.host)\(state.detail.isEmpty ? "" : ", \(state.detail)")")
             Button(action: onCopy) {
-                Label(state.isFile ? "Copy Location" : "Copy Link", systemImage: "doc.on.doc")
+                Label("Copy \(state.copyNoun)", systemImage: "doc.on.doc")
                     .labelStyle(.iconOnly)
                     .frame(width: PickerMetrics.keySlot, height: PickerMetrics.keySlot)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
-            .help(state.isFile ? "Copy location (⌘C)" : "Copy link (⌘C)")
+            .help("Copy \(state.copyNoun.lowercased()) (⌘C)")
         }
         .padding(.horizontal, PickerMetrics.contentInset)
         .padding(.vertical, Spacing.m)
@@ -378,7 +385,7 @@ struct PickerView: View {
                     size: state.size,
                     isSelected: index == state.selection,
                     highlightRadius: Radius.nested(in: panelRadius, padding: PickerMetrics.listInset),
-                    alwaysHost: state.isFile ? nil : state.host,
+                    alwaysHost: state.alwaysLabel,
                     onPick: { flags in onPick(index, flags) }
                 )
                 .id(index)
@@ -408,9 +415,14 @@ struct PickerView: View {
     }
 
     private var hint: String {
-        if state.heldModifiers.contains(.command), !state.isFile { return "Always open \(state.host) in the browser you pick" }
+        let noun = state.copyNoun.lowercased()
+        if state.heldModifiers.contains(.command), let always = state.alwaysLabel {
+            if state.isEmail { return "Always use the one you pick for " + always.replacingOccurrences(of: "Email", with: "email") }
+            if state.isFile { return "Always open " + always.replacingOccurrences(of: "Files", with: "files") + " in the app you pick" }
+            return "Always open \(always) in the browser you pick"
+        }
         if state.heldModifiers.contains(.shift) { return "Open in the background" }
-        return state.isFile ? "⇧ Background · ⌘C Copy location" : "⌘ Always use · ⇧ Background · ⌘C Copy link"
+        return state.alwaysLabel == nil ? "⇧ Background · ⌘C Copy \(noun)" : "⌘ Always use · ⇧ Background · ⌘C Copy \(noun)"
     }
 }
 
@@ -456,7 +468,7 @@ private struct TargetRow: View {
                     .frame(width: size.iconSize, height: size.iconSize)
                 VStack(alignment: .leading, spacing: 1) {
                     // App names cut at the end ("Safari Technology Pre…"), never mid-word.
-                    Text(target.appName)
+                    Text(target.pickerTitle)
                         .font(size.nameFont)
                         .lineLimit(1)
                         .truncationMode(.tail)

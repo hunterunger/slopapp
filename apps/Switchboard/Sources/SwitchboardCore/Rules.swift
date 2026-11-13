@@ -30,34 +30,97 @@ public struct Rule: Codable, Identifiable, Hashable, Sendable {
     /// Keys that must be held; empty means "doesn't matter".
     public var modifiers: Modifiers
     public var action: RuleAction
+    /// Which links the rule is for. Web rules match websites and paths; email rules match
+    /// the address (`host` holds `example.com` or `name@example.com`); file rules match
+    /// `fileExtensions`. Rules from before email and files existed are web rules.
+    public var kind: LinkKind
+    /// File rules: extensions, lowercased, without dots ("pdf"). Empty = any file.
+    public var fileExtensions: [String]
 
     public init(
         id: UUID = UUID(),
         isEnabled: Bool = true,
+        kind: LinkKind = .web,
         host: String = "",
         path: String = "",
+        fileExtensions: [String] = [],
         sourceApp: SourceAppMatch? = nil,
         modifiers: Modifiers = [],
         action: RuleAction
     ) {
         self.id = id
         self.isEnabled = isEnabled
+        self.kind = kind
         self.host = host
         self.path = path
+        self.fileExtensions = fileExtensions
         self.sourceApp = sourceApp
         self.modifiers = modifiers
         self.action = action
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, isEnabled, host, path, sourceApp, modifiers, action, kind, fileExtensions
+    }
+
+    /// `kind` and `fileExtensions` are new: older settings files don't have them.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        host = try c.decodeIfPresent(String.self, forKey: .host) ?? ""
+        path = try c.decodeIfPresent(String.self, forKey: .path) ?? ""
+        sourceApp = try c.decodeIfPresent(SourceAppMatch.self, forKey: .sourceApp)
+        modifiers = try c.decodeIfPresent(Modifiers.self, forKey: .modifiers) ?? []
+        action = try c.decode(RuleAction.self, forKey: .action)
+        // A kind from a newer version this one doesn't know: keep the rule, turned off, rather
+        // than failing the whole file or letting it catch web links.
+        if c.contains(.kind), (try? c.decode(LinkKind.self, forKey: .kind)) == nil {
+            kind = .web
+            isEnabled = false
+        } else {
+            kind = try c.decodeIfPresent(LinkKind.self, forKey: .kind) ?? .web
+        }
+        fileExtensions = try c.decodeIfPresent([String].self, forKey: .fileExtensions) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(isEnabled, forKey: .isEnabled)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(host, forKey: .host)
+        try c.encode(path, forKey: .path)
+        if kind == .file || !fileExtensions.isEmpty { try c.encode(fileExtensions, forKey: .fileExtensions) }
+        try c.encodeIfPresent(sourceApp, forKey: .sourceApp)
+        try c.encode(modifiers, forKey: .modifiers)
+        try c.encode(action, forKey: .action)
+    }
+
+    /// The website pattern, for web rules.
+    var hostPattern: HostPattern? { kind == .web ? HostPattern(host) : nil }
+    /// The path prefix, for web rules.
+    var pathPrefix: PathPrefix? { kind == .web ? PathPrefix(path) : nil }
+    /// The address pattern, for email rules.
+    var addressPattern: AddressPattern? { kind == .email ? AddressPattern(host) : nil }
+    /// The extensions, for file rules.
+    var extensionSet: Set<String> { kind == .file ? Set(fileExtensions.map { $0.lowercased() }) : [] }
+
     /// A rule needs at least one condition, or it would swallow every link.
     public var hasConditions: Bool {
-        HostPattern(host) != nil || PathPrefix(path) != nil || sourceApp != nil || !modifiers.isEmpty
+        hostPattern != nil || pathPrefix != nil || addressPattern != nil || !extensionSet.isEmpty
+            || sourceApp != nil || !modifiers.isEmpty
     }
 
     public func matches(_ link: IncomingLink) -> Bool {
-        guard isEnabled, hasConditions else { return false }
-        if let pattern = HostPattern(host), !pattern.matches(link.url) { return false }
-        if let prefix = PathPrefix(path), !prefix.matches(link.url) { return false }
+        guard isEnabled, hasConditions, link.kind == kind else { return false }
+        if let pattern = hostPattern, !pattern.matches(link.url) { return false }
+        if let prefix = pathPrefix, !prefix.matches(link.url) { return false }
+        if let pattern = addressPattern {
+            guard let mail = MailtoLink(link.url), mail.recipients.contains(where: pattern.matches(address:)) else { return false }
+        }
+        let extensions = extensionSet
+        if !extensions.isEmpty, !extensions.contains(link.url.pathExtension.lowercased()) { return false }
         if let sourceApp {
             guard let source = link.sourceBundleID,
                   source.caseInsensitiveCompare(sourceApp.bundleID) == .orderedSame
@@ -95,6 +158,23 @@ public struct Rule: Codable, Identifiable, Hashable, Sendable {
     /// a path was entered separately), path cleaned, whitespace trimmed.
     public func normalized() -> Rule {
         var copy = self
+        switch kind {
+        case .web: break
+        case .email:
+            var text = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if text.hasPrefix("mailto:") { text.removeFirst(7) }
+            if text.hasPrefix("*@") || text.hasPrefix("@") { text.removeFirst(text.hasPrefix("*@") ? 2 : 1) }
+            copy.host = text
+            copy.path = ""
+            copy.fileExtensions = []
+            return copy
+        case .file:
+            copy.host = ""
+            copy.path = ""
+            copy.fileExtensions = FileType.parseExtensions(fileExtensions.joined(separator: " "))
+            return copy
+        }
+        copy.fileExtensions = []
         let parsed = Self.parseWebsite(host)
         copy.host = parsed.host
         let typedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -114,6 +194,22 @@ public struct Rule: Codable, Identifiable, Hashable, Sendable {
     /// Why this rule can't be saved, in words for the editor, or nil if it's fine.
     /// Check the `normalized()` rule.
     public var validationProblem: String? {
+        switch kind {
+        case .web: break
+        case .email:
+            if !host.isEmpty, host.allSatisfy({ $0 == "*" || $0 == "." || $0 == "@" }) {
+                return "“\(host)” matches every address. Leave To empty instead."
+            }
+            if !host.isEmpty, AddressPattern(host) == nil || host.contains(where: \.isWhitespace) {
+                return "“\(host)” isn't an email address or domain. Use name@example.com or example.com."
+            }
+            return hasConditions ? nil : "Add an address, app or key to match."
+        case .file:
+            if let bad = fileExtensions.first(where: { !FileType.isValidExtension($0) }) {
+                return "“\(bad)” isn't a file extension. Use extensions like pdf or docx."
+            }
+            return hasConditions ? nil : "Add a file type, app or key to match."
+        }
         if !host.isEmpty, host.allSatisfy({ $0 == "*" || $0 == "." }) {
             return hasConditionsBesidesHost
                 ? "“\(host)” matches every website. Leave Website empty instead."
@@ -138,7 +234,7 @@ public struct Rule: Codable, Identifiable, Hashable, Sendable {
     }
 
     private var hasConditionsBesidesHost: Bool {
-        PathPrefix(path) != nil || sourceApp != nil || !modifiers.isEmpty
+        pathPrefix != nil || sourceApp != nil || !modifiers.isEmpty
     }
 
     /// True if holding this rule's keys always shows the picker instead (the "always show the
@@ -150,12 +246,20 @@ public struct Rule: Codable, Identifiable, Hashable, Sendable {
     /// True if this rule matches every link `other` matches, so `other` placed below it
     /// could never be used. Conservative: says false when unsure.
     public func covers(_ other: Rule) -> Bool {
-        guard hasConditions, other.hasConditions else { return false }
-        if let mine = HostPattern(host) {
-            guard let theirs = HostPattern(other.host), mine.covers(theirs) else { return false }
+        guard kind == other.kind, hasConditions, other.hasConditions else { return false }
+        if let mine = hostPattern {
+            guard let theirs = other.hostPattern, mine.covers(theirs) else { return false }
         }
-        if let mine = PathPrefix(path) {
-            guard let theirs = PathPrefix(other.path), theirs.prefix.hasPrefix(mine.prefix) else { return false }
+        if let mine = pathPrefix {
+            guard let theirs = other.pathPrefix, theirs.prefix.hasPrefix(mine.prefix) else { return false }
+        }
+        if let mine = addressPattern {
+            guard let theirs = other.addressPattern, mine.covers(theirs) else { return false }
+        }
+        let mine = extensionSet
+        if !mine.isEmpty {
+            let theirs = other.extensionSet
+            guard !theirs.isEmpty, theirs.isSubset(of: mine) else { return false }
         }
         if let sourceApp {
             guard let theirs = other.sourceApp,
@@ -167,10 +271,21 @@ public struct Rule: Codable, Identifiable, Hashable, Sendable {
     /// "*.example.com/docs from Slack with ⌥", or "Any link" (never for a valid rule).
     public var conditionSummary: String {
         var parts: [String] = []
-        let hostText = host.trimmingCharacters(in: .whitespaces)
-        let pathText = PathPrefix(path)?.prefix ?? ""
-        if !hostText.isEmpty { parts.append(hostText + pathText) } else if !pathText.isEmpty { parts.append("Path \(pathText)") }
-        if let sourceApp { parts.append(parts.isEmpty ? "Links from \(sourceApp.name)" : "from \(sourceApp.name)") }
+        switch kind {
+        case .web:
+            let hostText = host.trimmingCharacters(in: .whitespaces)
+            let pathText = pathPrefix?.prefix ?? ""
+            if !hostText.isEmpty { parts.append(hostText + pathText) } else if !pathText.isEmpty { parts.append("Path \(pathText)") }
+        case .email:
+            let to = host.trimmingCharacters(in: .whitespaces)
+            parts.append(to.isEmpty ? "Email" : "Email to \(to)")
+        case .file:
+            let exts = fileExtensions.map { "." + $0 }
+            parts.append(exts.isEmpty ? "Files" : "\(ListFormatter.localizedString(byJoining: exts)) files")
+        }
+        if let sourceApp {
+            parts.append("\(parts.isEmpty ? "Links from" : "from") \(sourceApp.name)")
+        }
         if !modifiers.isEmpty { parts.append(parts.isEmpty ? "Holding \(modifiers.symbol)" : "holding \(modifiers.symbol)") }
         return parts.isEmpty ? "Any link" : parts.joined(separator: " ")
     }
@@ -184,11 +299,16 @@ public enum Fallback: Codable, Hashable, Sendable {
 
 /// Everything the user configures. Saved as JSON.
 public struct Config: Codable, Equatable, Sendable {
-    public static let currentVersion = 1
+    /// 2: email targets, file types, rewrites and app handoffs. Version 1 files load as they
+    /// are (everything new starts empty or off).
+    public static let currentVersion = 2
 
     public var version: Int
+    /// Browsers (and other apps) for web links and web pages. Order = number keys.
     public var targets: [Target]
+    /// All rules, of every kind, in order. A rule only ever matches links of its kind.
     public var rules: [Rule]
+    /// Web links no rule matches.
     public var fallback: Fallback
     /// Holding these keys while clicking a link always shows the picker. Empty = off.
     public var askModifiers: Modifiers
@@ -201,6 +321,16 @@ public struct Config: Codable, Equatable, Sendable {
     public var pickerSize: PickerSize
     /// Remove ad/campaign tracking parameters (utm_…, fbclid, …) before routing. Off by default.
     public var stripsTrackingParameters: Bool
+    /// Mail apps and webmail, for email links. Order = number keys in their picker.
+    public var emailTargets: [Target]
+    /// Email links no rule matches.
+    public var emailFallback: Fallback
+    /// File types Switchboard was set up to open, with where each goes by default.
+    public var fileTypes: [FileType]
+    /// Applied to web links in order, before routing.
+    public var rewrites: [Rewrite]
+    /// Turned-on app handoffs (`Handoffs.all` ids), checked before rules.
+    public var handoffs: [String]
 
     public init(
         targets: [Target] = [],
@@ -210,7 +340,12 @@ public struct Config: Codable, Equatable, Sendable {
         didSeedTargets: Bool = false,
         removedTargets: [Target] = [],
         pickerSize: PickerSize = .medium,
-        stripsTrackingParameters: Bool = false
+        stripsTrackingParameters: Bool = false,
+        emailTargets: [Target] = [],
+        emailFallback: Fallback = .ask,
+        fileTypes: [FileType] = [],
+        rewrites: [Rewrite] = [],
+        handoffs: [String] = []
     ) {
         self.version = Self.currentVersion
         self.targets = targets
@@ -221,17 +356,23 @@ public struct Config: Codable, Equatable, Sendable {
         self.removedTargets = removedTargets
         self.pickerSize = pickerSize
         self.stripsTrackingParameters = stripsTrackingParameters
+        self.emailTargets = emailTargets
+        self.emailFallback = emailFallback
+        self.fileTypes = fileTypes
+        self.rewrites = rewrites
+        self.handoffs = handoffs
     }
 
     private enum CodingKeys: String, CodingKey {
         case version, targets, rules, fallback, askModifiers, didSeedTargets, removedTargets
         case pickerSize, stripsTrackingParameters
+        case emailTargets, emailFallback, fileTypes, rewrites, handoffs
     }
 
     /// Fields added after 0.1.0 are optional, so older settings files still load.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? Self.currentVersion
+        version = Self.currentVersion
         targets = try c.decode([Target].self, forKey: .targets)
         rules = try c.decode([Rule].self, forKey: .rules)
         fallback = try c.decodeIfPresent(Fallback.self, forKey: .fallback) ?? .ask
@@ -241,10 +382,17 @@ public struct Config: Codable, Equatable, Sendable {
         // An unknown size (from a newer version) falls back to the default instead of failing.
         pickerSize = (try? c.decodeIfPresent(PickerSize.self, forKey: .pickerSize)) ?? .medium
         stripsTrackingParameters = try c.decodeIfPresent(Bool.self, forKey: .stripsTrackingParameters) ?? false
+        emailTargets = try c.decodeIfPresent([Target].self, forKey: .emailTargets) ?? []
+        emailFallback = try c.decodeIfPresent(Fallback.self, forKey: .emailFallback) ?? .ask
+        fileTypes = try c.decodeIfPresent([FileType].self, forKey: .fileTypes) ?? []
+        rewrites = try c.decodeIfPresent([Rewrite].self, forKey: .rewrites) ?? []
+        handoffs = try c.decodeIfPresent([String].self, forKey: .handoffs) ?? []
     }
 
+    /// Any target: a browser, an email app or webmail, or a file type's app.
     public func target(id: UUID) -> Target? {
-        targets.first { $0.id == id }
+        targets.first { $0.id == id } ?? emailTargets.first { $0.id == id }
+            ?? fileTypes.lazy.compactMap(\.app).first { $0.id == id }
     }
 
     /// A removed browser that rules still point at.
@@ -257,39 +405,84 @@ public struct Config: Codable, Equatable, Sendable {
         targets.filter { !$0.isHidden }
     }
 
+    /// What the picker offers for this link: browsers for web links; email apps for email;
+    /// for a file, the app its type normally opens in, then the browsers.
+    public func pickerTargets(for link: IncomingLink) -> [Target] {
+        switch link.kind {
+        case .email:
+            return emailTargets.filter { !$0.isHidden }
+        case .file:
+            let usual = fileTypes.type(for: link.url)?.app.map { [$0] } ?? []
+            return usual + pickerTargets.filter { browser in !usual.contains { $0.bundleID == browser.bundleID && browser.profile == nil } }
+        case .web, nil:
+            return pickerTargets
+        }
+    }
+
+    /// Where links of this kind go when no rule matches.
+    public func fallback(for link: IncomingLink) -> Fallback {
+        switch link.kind {
+        case .email: emailFallback
+        case .file: fileTypes.type(for: link.url)?.fallback ?? .ask
+        case .web, nil: fallback
+        }
+    }
+
     /// Indexes of rules that open in this target.
     public func rulesUsing(_ targetID: UUID) -> [Int] {
         rules.indices.filter { rules[$0].action == .open(targetID: targetID) }
     }
 
-    /// Removes a target from the list. Rules and the fallback keep pointing at it: until it's
-    /// added back they show the picker instead (see `Router`).
-    public mutating func removeTarget(id: UUID) {
-        guard let index = targets.firstIndex(where: { $0.id == id }) else { return }
-        let removed = targets.remove(at: index)
-        let stillReferenced = !rulesUsing(id).isEmpty || fallback == .open(targetID: id)
-        removedTargets.removeAll { $0.destinationKey == removed.destinationKey || $0.id == removed.id }
-        if stillReferenced { removedTargets.append(removed) }
+    /// True if a rule or a "when no rule matches" choice opens in this target.
+    public func isReferenced(_ targetID: UUID) -> Bool {
+        let open = Fallback.open(targetID: targetID)
+        return !rulesUsing(targetID).isEmpty || fallback == open || emailFallback == open
+            || fileTypes.contains { $0.fallback == open }
     }
 
-    /// Adds a target, or shows it again if it's already listed. A previously removed target
+    /// Removes a browser or email target from its list. Rules and fallbacks keep pointing at
+    /// it: until it's added back they show the picker instead (see `Router`).
+    public mutating func removeTarget(id: UUID) {
+        let removed: Target
+        if let index = targets.firstIndex(where: { $0.id == id }) {
+            removed = targets.remove(at: index)
+        } else if let index = emailTargets.firstIndex(where: { $0.id == id }) {
+            removed = emailTargets.remove(at: index)
+        } else {
+            return
+        }
+        removedTargets.removeAll { $0.destinationKey == removed.destinationKey || $0.id == removed.id }
+        if isReferenced(id) { removedTargets.append(removed) }
+    }
+
+    /// Adds a browser, or shows it again if it's already listed. A previously removed target
     /// for the same browser/profile comes back with its old identity, so its rules reconnect.
     /// Returns the id of the target in the list.
     @discardableResult
     public mutating func addTarget(_ target: Target) -> UUID {
-        if let existing = targets.firstIndex(where: { $0.isSameDestination(as: target) }) {
-            targets[existing].isHidden = false
-            return targets[existing].id
+        add(target, to: \.targets)
+    }
+
+    /// Adds a mail app or webmail to the email list (same rules as `addTarget`).
+    @discardableResult
+    public mutating func addEmailTarget(_ target: Target) -> UUID {
+        add(target, to: \.emailTargets)
+    }
+
+    private mutating func add(_ target: Target, to list: WritableKeyPath<Config, [Target]>) -> UUID {
+        if let existing = self[keyPath: list].firstIndex(where: { $0.isSameDestination(as: target) }) {
+            self[keyPath: list][existing].isHidden = false
+            return self[keyPath: list][existing].id
         }
         if let tombstone = removedTargets.firstIndex(where: { $0.destinationKey == target.destinationKey }),
-           !targets.contains(where: { $0.id == removedTargets[tombstone].id }) {
+           self.target(id: removedTargets[tombstone].id) == nil {
             var restored = target
             restored.id = removedTargets[tombstone].id
             removedTargets.remove(at: tombstone)
-            targets.append(restored)
+            self[keyPath: list].append(restored)
             return restored.id
         }
-        targets.append(target)
+        self[keyPath: list].append(target)
         return target.id
     }
 }

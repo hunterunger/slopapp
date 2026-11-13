@@ -98,7 +98,7 @@ struct RulesTab: View {
             }
 
             Form {
-                Picker("When no rule matches", selection: fallbackBinding) {
+                Picker("When no rule matches a web link", selection: fallbackBinding) {
                     Text("Show the picker").tag(Fallback.ask)
                     Divider()
                     ForEach(model.config.targets) { target in
@@ -128,6 +128,13 @@ struct RulesTab: View {
             .scrollContentBackground(.hidden)
         }
         .padding(Spacing.xl)
+        .onReceive(NotificationCenter.default.publisher(for: .switchboardOpenSheet)) { note in
+            switch note.object as? String {
+            case "rule-email": editing = Rule(kind: .email, host: "example.com", action: model.config.emailTargets.first.map { .open(targetID: $0.id) } ?? .ask)
+            case "rule-file": editing = Rule(kind: .file, fileExtensions: ["pdf"], action: .ask)
+            default: break
+            }
+        }
         .sheet(item: $editing) { rule in
             RuleEditor(rule: rule, isNew: !model.config.rules.contains { $0.id == rule.id }, model: model) { saved in
                 if let saved { save(saved) }
@@ -150,7 +157,7 @@ struct RulesTab: View {
     private var tester: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             TextField("Test a link", text: Binding(get: { testText }, set: { testText = LinkParser.plainText($0) }),
-                      prompt: Text("Paste a link to see where it goes"))
+                      prompt: Text("Paste a link or email address to see where it goes"))
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel("Test a link")
@@ -166,15 +173,37 @@ struct RulesTab: View {
     private var testResult: (text: String, symbol: String)? {
         let trimmed = testText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        guard let url = LinkParser.webLink(in: trimmed) else {
-            return ("That doesn't look like a web link.", "questionmark.circle")
+        guard let url = Self.testLink(trimmed) else {
+            return ("That doesn't look like a web link or email address.", "questionmark.circle")
         }
-        let decision = Router.route(IncomingLink(url: url), config: model.config, isInstalled: model.isInstalled)
+        let prepared = LinkPreparation.prepare(url, config: model.config)
+        let link = IncomingLink(url: prepared.url)
+        let decision = Router.route(link, config: model.config, isInstalled: model.isInstalled, installedApp: HandoffApps.installed)
+        var text = Router.describe(decision, kind: link.kind)
+        let rewrites = prepared.steps.compactMap { step -> Int? in
+            if case .rewritten(let index, _) = step { return index + 1 }
+            return nil
+        }
+        if !rewrites.isEmpty {
+            let numbers = ListFormatter.localizedString(byJoining: rewrites.map(String.init))
+            text = "Rewritten (rewrite \(numbers)) to \(prepared.url.absoluteString). " + text
+        } else if prepared.steps.contains(.removedTracking) {
+            text = "Tracking removed. " + text
+        }
         switch decision {
-        case .open: return (Router.describe(decision), "arrow.up.forward.app")
-        case .pick: return (Router.describe(decision), "square.grid.2x2")
-        case .noTargets: return (Router.describe(decision), "exclamationmark.triangle")
+        case .open, .openInApp: return (text, "arrow.up.forward.app")
+        case .pick: return (text, "list.bullet")
+        case .noTargets: return (text, "exclamationmark.triangle")
         }
+    }
+
+    /// A web link, a mailto link, or a bare address ("a@b.com" → mailto:a@b.com).
+    static func testLink(_ text: String) -> URL? {
+        if text.lowercased().hasPrefix("mailto:") { return URL(string: text) }
+        if !text.contains("/"), !text.contains(" "), text.contains("@"), AddressPattern(text) != nil {
+            return URL(string: "mailto:" + text)
+        }
+        return LinkParser.webLink(in: text)
     }
 
     // MARK: Helpers
@@ -308,17 +337,63 @@ struct RuleEditor: View {
     let onDone: (Rule?) -> Void
 
     @State private var sourceApps: [SourceAppMatch] = []
+    @State private var extensionsText = ""
+
+    /// Where rules of this kind can send links.
+    private var destinations: [Target] {
+        switch rule.kind {
+        case .web: model.config.targets
+        case .email: model.config.emailTargets
+        case .file: model.config.fileTypes.compactMap(\.app) + model.config.targets
+        }
+    }
+
+    private var footerText: String {
+        switch rule.kind {
+        case .web: "example.com also matches www.example.com. *.example.com matches every subdomain."
+        case .email: "example.com matches addresses at example.com; *.example.com adds its subdomains. Any recipient (To, Cc or Bcc) counts."
+        case .file: "For file types Switchboard opens (Files tab). Separate several with commas."
+        }
+    }
+
+    /// Changing the kind keeps the app and keys, and picks a destination of the new kind.
+    private var kindBinding: Binding<LinkKind> {
+        Binding(get: { rule.kind }, set: { kind in
+            guard kind != rule.kind else { return }
+            rule.kind = kind
+            if case .open(let id) = rule.action, !destinations.contains(where: { $0.id == id }) {
+                rule.action = destinations.first.map { .open(targetID: $0.id) } ?? .ask
+            }
+        })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Form {
                 Section {
-                    TextField("Website", text: Binding(get: { rule.host }, set: { rule.host = LinkParser.plainText($0) }),
-                              prompt: Text("example.com or *.example.com"))
-                        .autocorrectionDisabled()
-                    TextField("Path starts with", text: Binding(get: { rule.path }, set: { rule.path = LinkParser.plainText($0) }),
-                              prompt: Text("Optional, like /docs"))
-                        .autocorrectionDisabled()
+                    Picker("For", selection: kindBinding) {
+                        ForEach(LinkKind.allCases, id: \.self) { kind in
+                            Text(kind.title).tag(kind)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    switch rule.kind {
+                    case .web:
+                        TextField("Website", text: Binding(get: { rule.host }, set: { rule.host = LinkParser.plainText($0) }),
+                                  prompt: Text("example.com or *.example.com"))
+                            .autocorrectionDisabled()
+                        TextField("Path starts with", text: Binding(get: { rule.path }, set: { rule.path = LinkParser.plainText($0) }),
+                                  prompt: Text("Optional, like /docs"))
+                            .autocorrectionDisabled()
+                    case .email:
+                        TextField("To", text: Binding(get: { rule.host }, set: { rule.host = LinkParser.plainText($0) }),
+                                  prompt: Text("example.com or name@example.com"))
+                            .autocorrectionDisabled()
+                    case .file:
+                        TextField("File types", text: Binding(get: { extensionsText }, set: { extensionsText = $0; rule.fileExtensions = FileType.parseExtensions($0) }),
+                                  prompt: Text("pdf, docx"))
+                            .autocorrectionDisabled()
+                    }
                     HStack {
                         Picker("Link comes from", selection: $rule.sourceApp) {
                             Text("Any app").tag(SourceAppMatch?.none)
@@ -345,7 +420,7 @@ struct RuleEditor: View {
                 } header: {
                     Text("Match links")
                 } footer: {
-                    Text(verbatim: "example.com also matches www.example.com. *.example.com matches every subdomain.")
+                    Text(verbatim: footerText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
@@ -356,7 +431,7 @@ struct RuleEditor: View {
                     Picker("Open in", selection: $rule.action) {
                         Text("Show the picker").tag(RuleAction.ask)
                         Divider()
-                        ForEach(model.config.targets) { target in
+                        ForEach(destinations) { target in
                             Text(target.displayName).tag(RuleAction.open(targetID: target.id))
                         }
                         if case .open(let id) = rule.action, model.target(id: id) == nil {
@@ -387,7 +462,10 @@ struct RuleEditor: View {
             .padding([.horizontal, .bottom], Spacing.xl)
         }
         .frame(width: 460)
-        .onAppear { sourceApps = Self.candidateSourceApps(including: rule.sourceApp) }
+        .onAppear {
+            sourceApps = Self.candidateSourceApps(including: rule.sourceApp)
+            extensionsText = rule.fileExtensions.joined(separator: ", ")
+        }
     }
 
     private func modifierBinding(_ key: Modifiers) -> Binding<Bool> {
@@ -401,7 +479,7 @@ struct RuleEditor: View {
         let normalized = rule.normalized()
         if let problem = normalized.validationProblem {
             // Before anything is typed, a gentle hint rather than an error.
-            let untouched = rule.host.isEmpty && rule.path.isEmpty && rule.sourceApp == nil && rule.modifiers.isEmpty
+            let untouched = rule.host.isEmpty && rule.path.isEmpty && rule.fileExtensions.isEmpty && rule.sourceApp == nil && rule.modifiers.isEmpty
             return (problem, untouched ? "info.circle" : "exclamationmark.triangle.fill", !untouched)
         }
         if normalized.isBlocked(byAskModifiers: model.config.askModifiers) {

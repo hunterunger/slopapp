@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import UniformTypeIdentifiers
 import SlopKit
 import SwitchboardCore
 
@@ -21,7 +22,18 @@ final class AppModel {
     private(set) var installedBrowsers: [InstalledApp] = []
     private(set) var otherLinkApps: [InstalledApp] = []
 
+    /// Mail apps found on this Mac, and other apps that can open mailto: links.
+    private(set) var installedMailApps: [InstalledApp] = []
+    private(set) var otherMailApps: [InstalledApp] = []
+
     private(set) var isDefaultBrowser = false
+    /// Who opens email links now (nil: nobody, or unknown).
+    private(set) var emailHolder: AppRef?
+    var isDefaultEmailApp: Bool { roles.isOurs(emailHolder) }
+    /// Who opens each listed file type now, by `FileType.id`.
+    private(set) var fileTypeHolders: [String: AppRef] = [:]
+    /// Bumped when the handoff apps are looked up again (Settings shows what's installed).
+    private(set) var handoffRefresh = 0
     /// Shown once in Settings if the settings file was unreadable and had to be set aside.
     var recoveryNotice: String?
 
@@ -36,8 +48,14 @@ final class AppModel {
 
     @ObservationIgnored private let store: ConfigStore
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    /// macOS's default apps: the real ones, or an in-memory copy in dry runs.
+    @ObservationIgnored let roles: HandlerRoles
 
     private init() {
+        let own = AppRef(path: Bundle.main.bundlePath, bundleID: Bundle.main.bundleIdentifier)
+        let registry: DefaultAppRegistry = Diagnostics.isDryRun || Showcase.isActive
+            ? WorkspaceRegistry.dryRunCopy(own: own) : WorkspaceRegistry()
+        roles = HandlerRoles(registry: registry, own: own)
         let support = (try? AppPaths.applicationSupport)
             ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Application Support/app.slopapp.switchboard")
         let file = Diagnostics.configOverride ?? support.appending(path: "config.json")
@@ -79,6 +97,8 @@ final class AppModel {
         let split = BrowserDiscovery.classify(apps, excluding: Bundle.main.bundleIdentifier)
         installedBrowsers = split.browsers
         otherLinkApps = split.others
+        HandoffApps.forget()
+        handoffRefresh += 1
 
         if !config.didSeedTargets {
             config.targets = BrowserDiscovery.defaultTargets(from: split.browsers)
@@ -90,27 +110,40 @@ final class AppModel {
         FileManager.default.displayName(atPath: appURL.path).replacingOccurrences(of: ".app", with: "")
     }
 
-    // MARK: - Default browser
+    /// Apps that can open email links. Read when Settings opens, not at launch.
+    func refreshMailApps() {
+        guard let probe = WorkspaceRegistry.probe("mailto") else { return }
+        let apps = NSWorkspace.shared.urlsForApplications(toOpen: probe).compactMap { url -> InstalledApp? in
+            guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier else { return nil }
+            return InstalledApp(bundleID: id, path: url.path, name: Self.displayName(of: url))
+        }
+        let split = MailAppCatalog.classify(apps, excluding: Bundle.main.bundleIdentifier)
+        installedMailApps = split.mailApps
+        otherMailApps = split.others
+    }
+
+    // MARK: - Default browser, email app, file types
 
     func refreshDefaultStatus() {
         if Diagnostics.assumesDefault || Showcase.isActive {
             isDefaultBrowser = true
-            return
+        } else {
+            isDefaultBrowser = roles.holds(.browser)
         }
-        guard let probe = URL(string: "https://example.com"),
-              let handler = NSWorkspace.shared.urlForApplication(toOpen: probe) else {
-            isDefaultBrowser = false
-            return
+        emailHolder = roles.holder(of: .email)
+        // The menu offers mail apps to hand email back to; look them up once when needed.
+        if isDefaultEmailApp, installedMailApps.isEmpty { refreshMailApps() }
+        var holders: [String: AppRef] = [:]
+        for type in config.fileTypes + FileType.presets where holders[type.id] == nil {
+            holders[type.id] = roles.holder(of: .fileType(type))
         }
-        let ours = Bundle.main.bundleIdentifier
-        isDefaultBrowser = Bundle(url: handler)?.bundleIdentifier == ours && ours != nil
+        fileTypeHolders = holders
     }
 
     /// Asks macOS to make Switchboard the default browser. macOS shows its own confirmation.
     func makeDefaultBrowser() {
-        setDefault(to: Bundle.main.bundleURL) { [weak self] in
+        change(.browser, to: nil) { [weak self] in
             guard let self else { return }
-            self.refreshDefaultStatus()
             // Links should never wait for a launch: start at login once we're the default,
             // unless the user already decided.
             if self.isDefaultBrowser, !UserDefaults.standard.bool(forKey: "didEnableLaunchAtLogin") {
@@ -127,22 +160,80 @@ final class AppModel {
 
     /// Hands default-browser status to another app. macOS shows its own confirmation.
     func handBack(to app: InstalledApp) {
-        setDefault(to: URL(fileURLWithPath: app.path)) { [weak self] in self?.refreshDefaultStatus() }
+        change(.browser, to: AppRef(path: app.path, bundleID: app.bundleID))
     }
 
-    private func setDefault(to appURL: URL, completion: @escaping @MainActor () -> Void) {
-        let schemes = ["http", "https"]
-        if Diagnostics.isDryRun {
-            Diagnostics.record("dry-run set default browser app=\(appURL.path)")
-            completion()
-            return
-        }
-        Task { @MainActor in
-            for scheme in schemes {
-                try? await NSWorkspace.shared.setDefaultApplication(at: appURL, toOpenURLsWithScheme: scheme)
+    /// Asks macOS to send email links to Switchboard. macOS shows its own confirmation.
+    /// The app that had them is offered as an email target, so nothing is lost.
+    func makeDefaultEmailApp() {
+        let previous = emailHolder
+        change(.email, to: nil) { [weak self] in
+            guard let self, self.isDefaultEmailApp else { return }
+            if let previous, !self.roles.isOurs(previous), let id = previous.bundleID,
+               !self.config.emailTargets.contains(where: { $0.bundleID == id && $0.webmail == nil }) {
+                self.config.addEmailTarget(Target(bundleID: id, appPath: previous.path,
+                                                  appName: Self.displayName(of: URL(fileURLWithPath: previous.path))))
             }
-            try? await NSWorkspace.shared.setDefaultApplication(at: appURL, toOpen: .html)
-            completion()
+        }
+    }
+
+    func handBackEmail(to app: InstalledApp) {
+        change(.email, to: AppRef(path: app.path, bundleID: app.bundleID))
+    }
+
+    /// Makes Switchboard the app for a file type. The app that had it is remembered: files
+    /// of that type keep opening there unless a rule says otherwise, and go back to it when
+    /// the user stops.
+    func takeOver(_ preset: FileType) {
+        let previous = fileTypeHolders[preset.id] ?? roles.holder(of: .fileType(preset))
+        change(.fileType(preset), to: nil) { [weak self] in
+            guard let self, self.roles.holds(.fileType(preset)) else { return }
+            var type = self.config.fileTypes.first { $0.id == preset.id } ?? preset
+            if type.app == nil, let previous, !self.roles.isOurs(previous), let id = previous.bundleID {
+                let app = Target(bundleID: id, appPath: previous.path, appName: Self.displayName(of: URL(fileURLWithPath: previous.path)))
+                type.app = app
+                if type.fallback == .ask { type.fallback = .open(targetID: app.id) }
+            }
+            if let index = self.config.fileTypes.firstIndex(where: { $0.id == type.id }) {
+                self.config.fileTypes[index] = type
+            } else {
+                self.config.fileTypes.append(type)
+            }
+        }
+    }
+
+    /// Gives a file type back to the app it came from (or another one the user picks).
+    func handBack(_ type: FileType, to app: AppRef) {
+        change(.fileType(type), to: app)
+    }
+
+    /// Apps (other than Switchboard) that can open this file type, for "Give Back To".
+    func candidates(for type: FileType) -> [InstalledApp] {
+        var seen = Set<String>()
+        return type.typeIdentifiers.compactMap(UTType.init).flatMap(NSWorkspace.shared.urlsForApplications(toOpen:))
+            .compactMap { url -> InstalledApp? in
+                guard let id = Bundle(url: url)?.bundleIdentifier, id != Bundle.main.bundleIdentifier,
+                      seen.insert(id.lowercased()).inserted else { return nil }
+                return InstalledApp(bundleID: id, path: url.path, name: Self.displayName(of: url))
+            }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Changes who holds `role`: Switchboard (`app` nil) or another app. In dry runs only the
+    /// in-memory copy changes.
+    private func change(_ role: HandlerRole, to app: AppRef?, completion: (@MainActor () -> Void)? = nil) {
+        Task { @MainActor in
+            do {
+                if let app {
+                    try await roles.handBack(role, to: app)
+                } else {
+                    try await roles.become(role)
+                }
+            } catch {
+                Diagnostics.record("default app change failed role=\(role) error=\(error)")
+            }
+            refreshDefaultStatus()
+            completion?()
         }
     }
 
@@ -189,6 +280,12 @@ final class AppModel {
         return addTarget(Target(bundleID: id, appPath: url.path, appName: Self.displayName(of: url)))
     }
 
+    /// Adds a mail app or webmail to the email list.
+    @discardableResult
+    func addEmailTarget(_ target: Target) -> UUID {
+        config.addEmailTarget(target)
+    }
+
     func removeTarget(id: UUID, undoManager: UndoManager? = nil) {
         let name = config.target(id: id)?.displayName ?? "Browser"
         changeUndoably("Remove \(name)", undoManager: undoManager) { $0.removeTarget(id: id) }
@@ -200,8 +297,16 @@ final class AppModel {
         }
     }
 
+    /// Replaces or merges in imported settings; ⌘Z (and the Undo button) puts them back.
+    func applyImport(_ plan: SettingsTransfer.Plan, mode: SettingsTransfer.Mode, undoManager: UndoManager?) {
+        changeUndoably(mode == .replace ? "Replace Settings" : "Import Settings", undoManager: undoManager) { config in
+            config = plan.result
+        }
+        refreshDefaultStatus()
+    }
+
     /// Applies a change and registers ⌘Z to restore the settings as they were.
-    private func changeUndoably(_ actionName: String, undoManager: UndoManager?, _ change: (inout Config) -> Void) {
+    func changeUndoably(_ actionName: String, undoManager: UndoManager?, _ change: (inout Config) -> Void) {
         let before = config
         change(&config)
         guard let undoManager, before != config else { return }

@@ -12,12 +12,26 @@ import QuartzCore
 /// - `SWITCHBOARD_ASSUME_DEFAULT=1`: show the "is the default browser" state without being it
 ///   (screenshots of a test copy). With `SWITCHBOARD_DRY_RUN=1`, default-browser changes are
 ///   logged, never made.
-/// - `SWITCHBOARD_SETTINGS_TAB=general|browsers|rules|about`: open Settings on that tab at
+/// - `SWITCHBOARD_SETTINGS_TAB=general|browsers|email|files|rules|rewrite|about`: open Settings on that tab at
 ///   launch (screenshots without Accessibility).
 /// - `SLOP_SHOWCASE=picker|browsers|rules`: a store screenshot scene with synthetic settings
 ///   (`ShowcaseFixtures`; see Showcase.swift and docs/screenshots.md).
 /// - `SWITCHBOARD_FLIP_APPEARANCE_AFTER=<seconds>`: switch light ↔ dark once while running
 ///   (checks that every surface follows a live appearance change).
+///
+/// - `SWITCHBOARD_INBOX=/path/dir`: route links dropped into this folder as `*.link` files,
+///   as if macOS had sent them, so tests never use `open` (which would reach the installed
+///   copy). Lines: `url=<link or file URL>`, optional `modifiers=option,command`,
+///   `source=<bundle id>`, `pick=1`. Each file is deleted once read.
+/// - `SWITCHBOARD_RENDER_DIR=/path/dir`: with the inbox, `render=<name>` draws our visible
+///   windows into PNGs there (works with the screen locked); `tab=<name>` and `sheet=<name>`
+///   show a Settings tab or sheet first.
+/// - `SWITCHBOARD_MENU_PROBE=<bundle id>`: at launch, log that running app's File menu as
+///   Accessibility reads it: positions, shortcuts and enabled state, never titles (checks the
+///   menu reader used for Safari windows on a harmless app).
+///
+/// With `SWITCHBOARD_DRY_RUN=1`, becoming the browser, email app or a file type's app only
+/// changes an in-memory copy of macOS's settings (seeded from the real ones) and is logged.
 ///
 /// Timings also go to the unified log (subsystem app.slopapp.switchboard) at debug level.
 enum Diagnostics {
@@ -32,6 +46,9 @@ enum Diagnostics {
     static let initialSettingsTab = environment["SWITCHBOARD_SETTINGS_TAB"].flatMap(SettingsTab.init(rawValue:))
         ?? ShowcaseRequest.parse(environment).flatMap { SettingsTab(rawValue: $0.scene) }
     private static let logFile = environment["SWITCHBOARD_LOG"].map { URL(fileURLWithPath: $0) }
+    static let inboxDirectory = environment["SWITCHBOARD_INBOX"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+    static let menuProbeBundleID = environment["SWITCHBOARD_MENU_PROBE"]
+    static let renderDirectory = environment["SWITCHBOARD_RENDER_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
 
     /// Seconds since boot, monotonic. For latency measurements.
     static func now() -> TimeInterval { CACurrentMediaTime() }

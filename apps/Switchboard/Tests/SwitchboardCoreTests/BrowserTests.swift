@@ -44,7 +44,10 @@ struct DiscoveryTests {
         #expect(BrowserCatalog.family(for: "com.example.unknown") == .other)
         #expect(BrowserCatalog.family(for: "com.google.Chrome").supportsProfiles)
         #expect(!BrowserCatalog.family(for: "company.thebrowser.Browser").supportsProfiles)
-        #expect(!BrowserCatalog.family(for: "com.apple.Safari").supportsPrivateWindow)
+        // Safari: private windows and profiles through its File menu (Accessibility).
+        #expect(BrowserCatalog.family(for: "com.apple.Safari").supportsPrivateWindow)
+        #expect(BrowserCatalog.family(for: "com.apple.Safari").windowsNeedAccessibility)
+        #expect(!BrowserCatalog.family(for: "com.google.Chrome").windowsNeedAccessibility)
     }
 
     @Test("Link routers are recognised")
@@ -133,27 +136,28 @@ struct LaunchPlanTests {
     func plain() {
         let safari = Target(bundleID: "com.apple.Safari", appPath: "/Applications/Safari.app", appName: "Safari")
         #expect(LaunchPlan.make(for: safari, url: link) == LaunchPlan(appPath: "/Applications/Safari.app", method: .openURL(link), activates: true))
-        #expect(LaunchPlan.make(for: safari, url: link, background: true).activates == false)
+        #expect(LaunchPlan.make(for: safari, url: link, background: true)?.activates == false)
         var bg = safari; bg.opensInBackground = true
-        #expect(LaunchPlan.make(for: bg, url: link).activates == false)
-        // Safari can't do private from the command line: ignored, still the plain path.
+        #expect(LaunchPlan.make(for: bg, url: link)?.activates == false)
+        // Safari private windows come from its File menu, never a plain (non-private) open.
         var priv = safari; priv.privateWindow = true
-        #expect(LaunchPlan.make(for: priv, url: link).method == .openURL(link))
+        #expect(LaunchPlan.make(for: priv, url: link)?.method == .safariWindow(.privateWindow, link))
+        #expect(LaunchPlan.make(for: priv, url: link)?.needsAccessibility == true)
     }
 
     @Test("Chromium profiles and private windows use arguments")
     func chromium() {
         var chrome = Target(bundleID: "com.google.Chrome", appPath: "/Applications/Google Chrome.app", appName: "Google Chrome",
                             profile: BrowserProfile(directory: "Profile 1", name: "Work"))
-        #expect(LaunchPlan.make(for: chrome, url: link).method == .launchWithArguments(["--profile-directory=Profile 1", link.absoluteString]))
+        #expect(LaunchPlan.make(for: chrome, url: link)?.method == .launchWithArguments(["--profile-directory=Profile 1", link.absoluteString]))
         chrome.privateWindow = true
-        #expect(LaunchPlan.make(for: chrome, url: link).method == .launchWithArguments(["--profile-directory=Profile 1", "--incognito", link.absoluteString]))
+        #expect(LaunchPlan.make(for: chrome, url: link)?.method == .launchWithArguments(["--profile-directory=Profile 1", "--incognito", link.absoluteString]))
     }
 
     @Test("Firefox private window")
     func firefox() {
         let ff = Target(bundleID: "org.mozilla.firefox", appPath: "/Applications/Firefox.app", appName: "Firefox", privateWindow: true)
-        #expect(LaunchPlan.make(for: ff, url: link).method == .launchWithArguments(["-private-window", link.absoluteString]))
+        #expect(LaunchPlan.make(for: ff, url: link)?.method == .launchWithArguments(["-private-window", link.absoluteString]))
     }
 }
 
