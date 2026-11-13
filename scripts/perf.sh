@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Performance gate: launch time, idle CPU and memory against Slopapp's budgets.
 #
-#   scripts/perf.sh <Name> [--no-bundle] [--runs N] [--windows N] [--seconds N] [--keep]
+#   scripts/perf.sh <Name> [--no-bundle] [--runs N] [--windows N] [--seconds N] [--keep] [--direct]
 #
 # Bundles a release build (unless --no-bundle), launches it N times (default 3) and takes
 # the median launch time, then leaves the last instance idle and measures CPU over several
@@ -18,15 +18,20 @@
 # Memory is the physical footprint (Activity Monitor's "Memory" column). RSS is shown for
 # reference only: it counts shared system frameworks, so even an empty SwiftUI app is ~80 MB.
 #
+# If another copy with the same bundle id is running (e.g. the installed one), a normal launch
+# would hand back that copy and measure it, so the script stops instead. --direct measures a
+# separate copy of this build beside it; that copy uses the same settings and data as the
+# running one unless the app isolates itself, so only use it for apps where that's harmless.
+#
 # Drives the app with scripts/drive (needs Accessibility permission for the terminal).
 # Works with macOS's bash 3.2.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
-USAGE="usage: scripts/perf.sh <Name> [--no-bundle] [--runs N] [--windows N] [--seconds N] [--keep]"
+USAGE="usage: scripts/perf.sh <Name> [--no-bundle] [--runs N] [--windows N] [--seconds N] [--keep] [--direct]"
 NAME="${1:-}"; [[ -n "$NAME" ]] || die "$USAGE"
 shift
-BUNDLE=1; RUNS=3; WINDOWS=3; IDLE=5; KEEP=0
+BUNDLE=1; RUNS=3; WINDOWS=3; IDLE=5; KEEP=0; DIRECT=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-bundle) BUNDLE=0 ;;
@@ -34,6 +39,7 @@ while [[ $# -gt 0 ]]; do
     --windows) WINDOWS="$2"; shift ;;
     --seconds) IDLE="$2"; shift ;;
     --keep) KEEP=1 ;;
+    --direct) DIRECT=1 ;;
     *) die "unknown option $1. $USAGE" ;;
   esac
   shift
@@ -70,11 +76,21 @@ quit_app() {
   die "$NAME didn't go away after quitting (still in pgrep or \`drive apps\`)"
 }
 
+# Another copy with this bundle id running elsewhere (e.g. the installed one in /Applications)?
+# Then a normal launch would hand back that copy and measure it, so start this build directly.
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
+LAUNCH_FLAGS=()
+if [[ $DIRECT -eq 1 ]]; then
+  LAUNCH_FLAGS=(--direct)
+elif other="$("$DRIVE" apps --paths 2>/dev/null | grep -F "  $BUNDLE_ID  " | grep -vF "  $APP")"; then
+  die "another $NAME is running (${other##*  }); its numbers would be measured instead of this build. Quit it, or pass --direct to measure a separate copy beside it"
+fi
+
 # launch_once: prints the `drive launch --timing` line; retries a fresh start a few times.
 launch_once() {
   local attempt line
   for ((attempt = 1; attempt <= 3; attempt++)); do
-    line="$("$DRIVE" launch "$APP" --timing 2>&1)" || true
+    line="$("$DRIVE" launch "$APP" --timing ${LAUNCH_FLAGS[@]+"${LAUNCH_FLAGS[@]}"} 2>&1)" || true
     if [[ "$line" == *launch_ms=* ]]; then echo "$line"; return 0; fi
     echo "${DIM}launch attempt $attempt: ${line}${RESET}" >&2
     quit_app
