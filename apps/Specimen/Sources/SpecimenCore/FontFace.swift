@@ -28,13 +28,16 @@ public struct FontFace: Codable, Hashable, Sendable, Identifiable {
     /// Manufacturer (foundry) and version from the font's name table, when it has them.
     public var foundry: String?
     public var version: String?
+    /// On for now only: Specimen registered it for this session and turns it off when it quits.
+    public var isTemporary: Bool
 
     public init(
         postScriptName: String, familyName: String, displayFamilyName: String? = nil, styleName: String,
         fullName: String? = nil, path: String?, isEnabled: Bool = true, weight: Double = 0, width: Double = 0,
         slant: Double = 0, isItalic: Bool = false, isVariable: Bool = false, axes: [VariationAxis] = [],
         format: String = "OpenType", category: FontCategory = .other, coversBasicLatin: Bool = true,
-        hasColorGlyphs: Bool = false, fileModified: Date? = nil, foundry: String? = nil, version: String? = nil
+        hasColorGlyphs: Bool = false, fileModified: Date? = nil, foundry: String? = nil, version: String? = nil,
+        isTemporary: Bool = false
     ) {
         self.id = FontFace.makeID(postScriptName: postScriptName, path: path)
         self.postScriptName = postScriptName
@@ -57,6 +60,7 @@ public struct FontFace: Codable, Hashable, Sendable, Identifiable {
         self.fileModified = fileModified
         self.foundry = foundry
         self.version = version
+        self.isTemporary = isTemporary
     }
 
     public static func makeID(postScriptName: String, path: String?) -> String {
@@ -183,20 +187,28 @@ public enum FontCategory: String, Codable, Sendable, CaseIterable, Identifiable 
     }
 }
 
-/// Whether a family (or selection) is on, off, or a mix.
+/// Whether a family (or selection) is on, on for now only, off, or a mix.
 public enum ActivationState: Sendable, Equatable {
-    case active, inactive, mixed
+    case active, temporary, inactive, mixed
 
     public init(faces: [FontFace]) {
-        let enabled = faces.filter(\.isEnabled).count
-        self = enabled == faces.count ? .active : enabled == 0 ? .inactive : .mixed
+        let enabled = faces.filter(\.isEnabled)
+        if enabled.count == faces.count {
+            self = !enabled.isEmpty && enabled.allSatisfy(\.isTemporary) ? .temporary : .active
+        } else {
+            self = enabled.isEmpty ? .inactive : .mixed
+        }
     }
 
     public var title: String {
         switch self {
         case .active: "Active"
+        case .temporary: "Active until you quit"
         case .inactive: "Inactive"
         case .mixed: "Partly active"
         }
     }
+
+    /// On (fully or for now): the family's switch reads "Deactivate".
+    public var isOn: Bool { self == .active || self == .temporary }
 }

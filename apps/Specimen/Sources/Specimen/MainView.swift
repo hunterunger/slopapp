@@ -17,6 +17,10 @@ struct MainView: View {
             VStack(spacing: 0) {
                 previewBar
                 Hairline()
+                if model.screen == .grid, model.hasLoaded, CollectionBar.applies(to: model.sidebar) {
+                    CollectionBar(model: model)
+                    Hairline()
+                }
                 ZStack {
                     libraryArea
                         .opacity(model.screen == .grid ? 1 : 0)
@@ -62,20 +66,29 @@ struct MainView: View {
         .sheet(item: $model.sheet) { sheet in
             LibrarySheetView(model: model, sheet: sheet)
         }
-        // Font files dropped anywhere on the window are added (File ▸ Add Fonts…).
+        .alert("Remove “\(model.pendingFolderRemoval?.name ?? "")” from the library?", isPresented: Binding(
+            get: { model.pendingFolderRemoval != nil }, set: { if !$0 { model.pendingFolderRemoval = nil } }
+        ), presenting: model.pendingFolderRemoval) { folder in
+            Button("Remove", role: .destructive) { model.remove(folder) }
+            Button("Cancel", role: .cancel) { model.pendingFolderRemoval = nil }
+        } message: { folder in
+            let count = model.activeFaces(inFolder: folder.path).count
+            Text("\(count == 1 ? "Its active font" : "Its \(count) active fonts") will be turned off. The files stay where they are.")
+        }
+        // Dropped on the window: folders join the library, documents show their fonts, and
+        // font files are installed.
         .dropDestination(for: URL.self) { urls, _ in
-            let fonts = urls.filter { $0.isFileURL }
-            guard !fonts.isEmpty else { return false }
-            model.addFonts(fonts)
-            return true
+            model.handleDrop(urls)
         }
     }
 
     private var navigationTitle: String {
         switch model.screen {
-        case .grid: model.title(for: model.sidebar)
-        case .detail(let family): model.family(named: family)?.displayName ?? family
-        case .compare: "Compare"
+        case .grid:
+            if case .document(let id) = model.sidebar { return model.document(id)?.name ?? "Document" }
+            return model.title(for: model.sidebar)
+        case .detail(let family): return model.family(named: family)?.displayName ?? family
+        case .compare: return "Compare"
         }
     }
 
@@ -115,6 +128,40 @@ struct MainView: View {
                 Text("Every font here is missing at least one of its characters.")
             } actions: {
                 Button("Show All Fonts Anyway") { model.hideUncovered = false }
+            }
+        } else if case .folder(let path) = model.sidebar {
+            if model.offlineFolders.contains(path) {
+                ContentUnavailableView {
+                    Label("“\((path as NSString).lastPathComponent)” isn’t available", systemImage: "externaldrive.badge.exclamationmark")
+                } description: {
+                    Text("The folder was moved or deleted, or it’s on a disk that isn’t connected. Its fonts come back when it does.")
+                } actions: {
+                    if let folder = model.folder(forPath: path) {
+                        Button("Remove from Library") { model.requestRemove(folder) }
+                    }
+                }
+            } else {
+                ContentUnavailableView {
+                    Label(model.isScanningFolders ? "Reading fonts…" : "No fonts in this folder", systemImage: "folder")
+                } description: {
+                    Text("Font files you put in \((path as NSString).lastPathComponent) appear here on their own.")
+                }
+            }
+        } else if case .document(let id) = model.sidebar {
+            let matches = model.documentMatches[id] ?? []
+            ContentUnavailableView {
+                Label(model.documentProblems[id] != nil ? "Can’t read this document" : matches.isEmpty ? "No fonts named" : "None of its fonts are in your library",
+                      systemImage: "doc.text.magnifyingglass")
+            } description: {
+                if let problem = model.documentProblems[id] {
+                    Text(problem)
+                } else if matches.isEmpty {
+                    Text("This file doesn’t name any fonts Specimen can read.")
+                } else {
+                    Text("Missing: \(matches.map(\.reference.name).joined(separator: ", ")). Add the folder where you keep them to your library.")
+                }
+            } actions: {
+                Button("Add Folder to Library…") { model.chooseFolderToAdd() }
             }
         } else if case .tag(let name) = model.sidebar {
             ContentUnavailableView {
@@ -276,11 +323,37 @@ struct Sidebar: View {
                 ForEach(SidebarItem.libraryItems, id: \.self, content: row)
             }
             Section {
+                ForEach(model.folders) { folder in
+                    if let tree = model.folderTrees[folder.path], let children = tree.children {
+                        DisclosureGroup {
+                            OutlineGroup(children, children: \.children) { node in folderRow(node.path, folder: folder) }
+                        } label: {
+                            folderRow(folder.path, folder: folder)
+                        }
+                    } else {
+                        folderRow(folder.path, folder: folder)
+                    }
+                }
+            } header: {
+                sectionHeader("Folders", add: "Add a folder of fonts to the library, without copying it (⇧⌘O)", accessibility: "Add Folder to Library") {
+                    model.chooseFolderToAdd()
+                }
+            }
+            Section {
+                ForEach(model.documents) { document in
+                    documentRow(document)
+                }
+            } header: {
+                sectionHeader("Documents", add: "Open a document to see the fonts it uses (⌘O)", accessibility: "Open Document") {
+                    model.chooseDocumentToOpen()
+                }
+            }
+            Section {
                 ForEach(model.tags.names, id: \.self) { name in
                     tagRow(name)
                 }
             } header: {
-                sectionHeader("Tags", add: "New Tag (⌘N)") { model.sheet = .newTag }
+                sectionHeader("Tags", add: "New Tag (⌘N)", accessibility: "New Tag") { model.sheet = .newTag }
             }
             Section {
                 ForEach(model.smartCollections) { collection in
@@ -288,21 +361,24 @@ struct Sidebar: View {
                         .help(collection.rules.summary)
                         .contextMenu {
                             Button("Edit Smart Collection…") { model.sheet = .smartCollection(collection, isNew: false) }
+                            Divider()
+                            CollectionActivationItems(model: model, item: .smart(collection.id))
+                            Divider()
                             Button("Delete Smart Collection") { model.deleteSmartCollection(collection.id) }
                         }
                 }
             } header: {
-                sectionHeader("Smart Collections", add: "New Smart Collection from the current filters (⌥⌘N)") { model.newSmartCollection() }
+                sectionHeader("Smart Collections", add: "New Smart Collection from the current filters (⌥⌘N)", accessibility: "New Smart Collection") { model.newSmartCollection() }
             }
             Section("Categories") {
                 ForEach(SidebarItem.categoryItems, id: \.self, content: row)
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if model.isIndexing || model.isChangingFonts {
+            if model.isIndexing || model.isChangingFonts || model.isScanningFolders {
                 HStack(spacing: Spacing.s) {
                     ProgressView().controlSize(.small)
-                    Text(model.isChangingFonts ? "Updating fonts…" : "Reading fonts…")
+                    Text(model.isChangingFonts ? "Updating fonts…" : model.isScanningFolders ? "Reading folders…" : "Reading fonts…")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -314,7 +390,7 @@ struct Sidebar: View {
         }
     }
 
-    private func sectionHeader(_ title: String, add help: String, action: @escaping () -> Void) -> some View {
+    private func sectionHeader(_ title: String, add help: String, accessibility: String, action: @escaping () -> Void) -> some View {
         HStack {
             Text(title)
             Spacer()
@@ -323,7 +399,7 @@ struct Sidebar: View {
             }
             .buttonStyle(.borderless)
             .help(help)
-            .accessibilityLabel(title == "Tags" ? "New Tag" : "New Smart Collection")
+            .accessibilityLabel(accessibility)
             // Section headers run 16 pt further right than the rows' count badges: pull the
             // + in so its right edge lines up with the counts below it.
             .padding(.trailing, Spacing.l)
@@ -346,6 +422,8 @@ struct Sidebar: View {
                     model.sheet = .smartCollection(SmartCollection(name: name, rules: SmartRules(tag: name)), isNew: true)
                 }
                 Divider()
+                CollectionActivationItems(model: model, item: .tag(name))
+                Divider()
                 Button("Delete Tag") { model.deleteTag(name) }
             }
             // Drag cards from the grid onto a tag to tag them.
@@ -354,6 +432,46 @@ struct Sidebar: View {
                 guard !families.isEmpty else { return false }
                 model.attachTag(name, families: families)
                 return true
+            }
+    }
+
+    private func folderRow(_ path: String, folder: LibraryFolder) -> some View {
+        let item = SidebarItem.folder(path)
+        let isRoot = path == folder.path
+        let offline = model.offlineFolders.contains(folder.path)
+        let title = (path as NSString).lastPathComponent
+        return Label(title, systemImage: offline ? "externaldrive.badge.exclamationmark" : "folder")
+            .badge(model.counts[item] ?? 0)
+            .tag(item)
+            .help(offline ? "Not available: \(path)" : path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+            .accessibilityLabel(offline ? "\(title), not available" : "\(title), \(model.counts[item] ?? 0)")
+            .contextMenu {
+                CollectionActivationItems(model: model, item: item)
+                Divider()
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+                    .disabled(offline)
+                if isRoot {
+                    Button("Remove from Library…") { model.requestRemove(folder) }
+                }
+            }
+    }
+
+    private func documentRow(_ document: OpenedDocument) -> some View {
+        let item = SidebarItem.document(document.id)
+        let matches = model.documentMatches[document.id] ?? []
+        let missing = matches.filter { $0.status == .missing && !$0.reference.isProvidedByDocument }.count
+        return Label(document.name, systemImage: missing > 0 ? "doc.badge.ellipsis" : "doc.text")
+            .badge(matches.count)
+            .tag(item)
+            .help(missing > 0 ? "\(document.path)\n\(missing) missing" : document.path)
+            .accessibilityLabel("\(document.name), \(matches.count) fonts\(missing > 0 ? ", \(missing) missing" : "")")
+            .contextMenu {
+                CollectionActivationItems(model: model, item: item)
+                Divider()
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: document.path)]) }
+                Button("Read Again") { model.refreshDocuments(only: [document.id]) }
+                Divider()
+                Button("Remove from List") { model.removeDocument(document.id) }
             }
     }
 
@@ -378,7 +496,7 @@ struct ActivationPrompt: View {
             case .swap(let plan):
                 swapContent(plan)
             case .bulk(let plan):
-                Text("Activate \(plan.changes.count.formatted()) fonts?")
+                Text(plan.temporary ? "Activate \(plan.changes.count.formatted()) fonts until you quit?" : "Activate \(plan.changes.count.formatted()) fonts?")
                     .font(.headline)
                 Text("Every active font appears in every app’s font menu, and lots of them can make apps slower to open.")
                     .fixedSize(horizontal: false, vertical: true)
@@ -409,7 +527,7 @@ struct ActivationPrompt: View {
             }
         }
         if !blocked.isEmpty {
-            Text("\(blocked.count == 1 ? "One copy" : "\(blocked.count) copies") can’t be swapped because the active copy belongs to macOS or all users.")
+            Text("\(blocked.count == 1 ? "One copy" : "\(blocked.count) copies") can’t be swapped: \(blocked.compactMap(\.activeCopyLock).first?.explanation ?? "the active copy is protected.")")
                 .fixedSize(horizontal: false, vertical: true)
         }
         Text(swappable.isEmpty ? "Only one copy of a font can be active at a time." : "Only one copy can be active at a time. Turn off the active copy and use this one?")

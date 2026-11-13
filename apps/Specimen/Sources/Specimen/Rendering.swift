@@ -23,23 +23,41 @@ final class PreviewRenderer {
         samples.countLimit = 300
     }
 
-    func font(for face: FontFace, size: CGFloat, variation: [Int: Double] = [:]) -> CTFont? {
-        let key = "\(face.id)@\(size)\(Self.variationKey(variation))" as NSString
+    func font(for face: FontFace, size: CGFloat, variation: [Int: Double] = [:], features: [FeatureValue] = []) -> CTFont? {
+        let key = "\(face.id)@\(size)\(Self.variationKey(variation))\(Self.featureKey(features))" as NSString
         if let font = sizedFonts.object(forKey: key) { return font }
         guard let base = baseFont(for: face) else { return nil }
-        var descriptor: CTFontDescriptor?
+        var attributes: [CFString: Any] = [:]
         if !variation.isEmpty {
             // Start from the face's own position (a named instance), then move the axes.
             var merged = (CTFontCopyVariation(base) as? [NSNumber: NSNumber] ?? [:]).reduce(into: [Int: Double]()) {
                 $0[$1.key.intValue] = $1.value.doubleValue
             }
             merged.merge(variation) { _, new in new }
-            let dictionary = Dictionary(uniqueKeysWithValues: merged.map { (NSNumber(value: $0.key), NSNumber(value: $0.value)) })
-            descriptor = CTFontDescriptorCreateWithAttributes([kCTFontVariationAttribute: dictionary] as CFDictionary)
+            attributes[kCTFontVariationAttribute] = Dictionary(uniqueKeysWithValues: merged.map { (NSNumber(value: $0.key), NSNumber(value: $0.value)) })
         }
+        if !features.isEmpty {
+            attributes[kCTFontFeatureSettingsAttribute] = features.map(\.coreTextSetting)
+        }
+        let descriptor = attributes.isEmpty ? nil : CTFontDescriptorCreateWithAttributes(attributes as CFDictionary)
         let font = CTFontCreateCopyWithAttributes(base, size, nil, descriptor)
         sizedFonts.setObject(font, forKey: key)
         return font
+    }
+
+    static func featureKey(_ features: [FeatureValue]) -> String {
+        features.isEmpty ? "" : "|f:" + features.map(\.cacheKey).joined(separator: ",")
+    }
+
+    private var featureTypes: [String: [FontFeatureType]] = [:]
+
+    /// The user-facing OpenType/AAT features of a face (read once per face).
+    func featureTypes(for face: FontFace) -> [FontFeatureType] {
+        if let cached = featureTypes[face.id] { return cached }
+        let types = baseFont(for: face).map(FeatureCatalog.types(of:)) ?? []
+        if featureTypes.count > 400 { featureTypes.removeAll() }
+        featureTypes[face.id] = types
+        return types
     }
 
     static func variationKey(_ variation: [Int: Double]) -> String {
@@ -71,18 +89,18 @@ final class PreviewRenderer {
     /// are drawn faint (never silently in another font). If the font can't show most of the
     /// text, the line shows a sample of the font's own characters instead.
     func line(for face: FontFace, text: String, size: CGFloat, width: CGFloat, allowSample: Bool = true,
-              variation: [Int: Double] = [:]) -> TypesetLine {
+              variation: [Int: Double] = [:], features: [FeatureValue] = []) -> TypesetLine {
         let dark = NSAppearance.currentDrawing().bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let key = "\(face.id)|\(size)|\(Int(width))|\(dark)|\(allowSample)\(Self.variationKey(variation))|\(text)" as NSString
+        let key = "\(face.id)|\(size)|\(Int(width))|\(dark)|\(allowSample)\(Self.variationKey(variation))\(Self.featureKey(features))|\(text)" as NSString
         if let cached = lines.object(forKey: key) { return cached }
-        let result = typeset(face: face, text: text, size: size, width: width, allowSample: allowSample, variation: variation)
+        let result = typeset(face: face, text: text, size: size, width: width, allowSample: allowSample, variation: variation, features: features)
         lines.setObject(result, forKey: key)
         return result
     }
 
     private func typeset(face: FontFace, text: String, size: CGFloat, width: CGFloat, allowSample: Bool,
-                         variation: [Int: Double]) -> TypesetLine {
-        guard let font = font(for: face, size: size, variation: variation) else {
+                         variation: [Int: Double], features: [FeatureValue]) -> TypesetLine {
+        guard let font = font(for: face, size: size, variation: variation, features: features) else {
             return TypesetLine(line: nil, ascent: size, descent: size * 0.3, missing: 0, isSample: false, unavailable: true, width: 0)
         }
         var runs = PreviewText.runs(text) { units in
@@ -136,6 +154,7 @@ final class PreviewRenderer {
         sizedFonts.removeAllObjects()
         baseFonts.removeAllObjects()
         samples.removeAllObjects()
+        featureTypes.removeAll()
     }
 }
 

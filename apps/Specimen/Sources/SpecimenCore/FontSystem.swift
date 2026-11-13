@@ -1,7 +1,7 @@
 import Foundation
 
 /// The cheap facts about a face that the system lists for every font (no file access).
-public struct SystemFace: Sendable, Equatable {
+public struct SystemFace: Codable, Sendable, Equatable {
     public var postScriptName: String
     public var familyName: String
     public var displayFamilyName: String
@@ -16,11 +16,13 @@ public struct SystemFace: Sendable, Equatable {
     public var isMonospaceTrait: Bool
     public var stylisticClass: Int
     public var format: String
+    /// Activated temporarily by Specimen (registered for this session; ends when Specimen quits).
+    public var isTemporary: Bool
 
     public init(postScriptName: String, familyName: String, displayFamilyName: String? = nil, styleName: String,
                 fullName: String? = nil, path: String?, isEnabled: Bool = true, weight: Double = 0, width: Double = 0,
                 slant: Double = 0, isItalic: Bool = false, isMonospaceTrait: Bool = false, stylisticClass: Int = 0,
-                format: String = "OpenType") {
+                format: String = "OpenType", isTemporary: Bool = false) {
         self.postScriptName = postScriptName
         self.familyName = familyName
         self.displayFamilyName = displayFamilyName ?? familyName
@@ -35,6 +37,7 @@ public struct SystemFace: Sendable, Equatable {
         self.isMonospaceTrait = isMonospaceTrait
         self.stylisticClass = stylisticClass
         self.format = format
+        self.isTemporary = isTemporary
     }
 
     public var id: String { FontFace.makeID(postScriptName: postScriptName, path: path) }

@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SpecimenCore
 
 /// Design review without the screen (locked, or CI): `SPECIMEN_SNAPSHOT_DIR=/tmp/x` walks the
@@ -8,12 +9,23 @@ import SpecimenCore
 /// `SPECIMEN_TEST_FONTS`; preferences are never saved in this mode.
 @MainActor
 enum Snapshots {
+    /// When the process started (the snapshot log reports load times from it).
+    static var launched: Date {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return Date() }
+        let start = info.kp_proc.p_un.__p_starttime
+        return Date(timeIntervalSince1970: TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1e6)
+    }
+
     static func startIfAsked(model: AppModel) {
         guard let path = ProcessInfo.processInfo.environment["SPECIMEN_SNAPSHOT_DIR"] else { return }
         let folder = URL(fileURLWithPath: path, isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         Task {
-            while !model.hasLoaded || model.isIndexing { try? await Task.sleep(for: .milliseconds(100)) }
+            while !model.hasLoaded || model.isIndexing || model.isScanningFolders { try? await Task.sleep(for: .milliseconds(100)) }
+            log.append("loaded \(model.faces.count) faces (\(model.libraryFaces.count) from library folders) in \(Int(Date().timeIntervalSince(launched) * 1000)) ms after launch")
             try? await Task.sleep(for: .milliseconds(600))
             await run(model: model, folder: folder)
             // A sheet still on its way out blocks quitting; wait for it.
@@ -72,8 +84,33 @@ enum Snapshots {
                 model.detailTab = .variables
                 await shot(window, "detail-variables", suffix, folder, wait: 1.2)
             }
+            // OpenType features (Avenir Next ships with macOS), with old-style figures on.
+            if let avenir = model.families.first(where: { $0.name == "Avenir Next" }), let face = avenir.representative {
+                model.openDetail(face: face)
+                if let type = PreviewRenderer.shared.featureTypes(for: face).first(where: { $0.name == "Number Case" }),
+                   let oldStyle = type.selectors.first(where: { $0.openTypeTag == "onum" }) {
+                    model.detailFeatures.choose(oldStyle, in: type)
+                }
+                model.detailTab = .features
+                await shot(window, "detail-features", suffix, folder, wait: 1.2)
+                model.detailFeatures.reset()
+            }
             model.detailTab = .styles
             model.screen = .grid
+            // Library folders and documents (test mode: SPECIMEN_DATA_DIR's folders.json).
+            if let library = model.folders.first {
+                let path = model.folderTrees[library.path]?.children?.first?.path ?? library.path
+                model.sidebar = .folder(path)
+                await shot(window, "grid-folder", suffix, folder)
+                model.viewMode = .list
+                await shot(window, "list-folder", suffix, folder)
+                model.viewMode = .grid
+            }
+            if let document = model.documents.first {
+                model.sidebar = .document(document.id)
+                await shot(window, "grid-document", suffix, folder)
+            }
+            model.sidebar = .all
             model.openCompare()
             await shot(window, "compare", suffix, folder)
             model.goBack()
@@ -120,8 +157,111 @@ enum Snapshots {
             NSApp.appearance = NSAppearance(named: .aqua)
             await shot(window, "grid-added", "light", folder)
         }
+        if model.environment.isTestMode, !model.folders.isEmpty {
+            await runFlows(model: model, window: window, folder: folder)
+        }
         try? log.joined(separator: "\n").write(to: folder.appendingPathComponent("log.txt"), atomically: true, encoding: .utf8)
         NSApp.appearance = nil
+    }
+
+    /// The library-folder flows end to end, with real files, FSEvents and CoreText (test
+    /// mode: everything registered at session scope, under the test folder, and undone).
+    /// Results go to log.txt, so they can be checked with the screen locked.
+    private static func runFlows(model: AppModel, window: NSWindow, folder: URL) async {
+        guard let root = model.folders.first?.path, let test = model.environment.testFontsDirectory else { return }
+        let clock = ContinuousClock()
+        func wait(_ what: String, timeout: Double = 8, _ done: () -> Bool) async {
+            let start = clock.now
+            while !done(), clock.now - start < .seconds(timeout) { try? await Task.sleep(for: .milliseconds(20)) }
+            log.append("\(done() ? "ok" : "FAILED") \(what): \(Int((clock.now - start) / .milliseconds(1))) ms")
+            try? log.joined(separator: "\n").write(to: folder.appendingPathComponent("log.txt"), atomically: true, encoding: .utf8)
+        }
+        func family(_ name: String) -> FontFamily? { model.family(named: name) }
+        func systemWide(_ postScript: String) -> Bool {
+            CTFontCopyPostScriptName(CTFontCreateWithName(postScript as CFString, 12, nil)) as String == postScript
+        }
+        NSApp.appearance = NSAppearance(named: .aqua)
+        model.sidebar = .all
+        model.screen = .grid
+
+        // Watched folder: add, rename, delete a font file.
+        let newFolder = URL(fileURLWithPath: root).appendingPathComponent("Clients/Newco")
+        let source = test.appendingPathComponent("Silkscreen-Regular.ttf")
+        let file = (try? FixtureFonts.makeLibrary(from: source, into: newFolder, prefix: "Watch Test", count: 1))?.first
+        await wait("new file appears") { family("Watch Test 1") != nil }
+        log.append("  sidebar has Newco: \(model.folderNodePaths.contains(newFolder.path))")
+        if let file {
+            let renamed = newFolder.appendingPathComponent("Renamed.ttf")
+            try? FileManager.default.moveItem(at: file, to: renamed)
+            await wait("rename shows the new path") { family("Watch Test 1")?.faces.first?.path == renamed.path }
+            try? FileManager.default.removeItem(at: renamed)
+            await wait("deleted file goes away") { family("Watch Test 1") == nil }
+        }
+
+        // Temporary activation of a library family, visible to other apps.
+        if let acme = family("Acme Sans") {
+            model.request(true, faces: acme.faces, temporary: true)
+            await wait("Acme Sans active temporarily") { family("Acme Sans")?.state == .temporary }
+            log.append("  scope \(model.registrar.scope(of: acme.faces[0].path ?? "")?.rawValue ?? "none"), system-wide: \(systemWide("AcmeSans-Regular")), saved: \(TemporaryStore(directory: model.environment.dataDirectory).load().count) file(s)")
+            await shot(window, "flow-temporary", "light", folder)
+            // Keep it on after quitting.
+            model.request(true, faces: family("Acme Sans")?.faces ?? [])
+            await wait("Acme Sans kept active") { family("Acme Sans")?.state == .active }
+            // (Undo isn't scripted here: offscreen there are no input events to close
+            // AppKit's undo groups. ActivationUndo is unit-tested.)
+        }
+        // Activate for good (test mode: session scope that reports itself as persistent).
+        if let beacon = family("Beacon Mono") {
+            model.request(true, faces: beacon.faces)
+            await wait("Beacon Mono active") { family("Beacon Mono")?.state == .active }
+            log.append("  reported scope \(model.registrar.scope(of: beacon.faces[0].path ?? "")?.rawValue ?? "none")")
+        }
+        // Two copies of one font in two projects: activate one, then swap to the other.
+        if let shared = family("Shared Display"), shared.faces.count == 2 {
+            let acmeCopy = shared.faces.first { $0.path?.contains("/Acme/") == true }!
+            let archiveCopy = shared.faces.first { $0.path?.contains("/Archive") == true }!
+            model.request(true, faces: [acmeCopy])
+            await wait("Acme copy of Shared Display on") { model.face(id: acmeCopy.id)?.isEnabled == true }
+            model.request(true, faces: [model.face(id: archiveCopy.id) ?? archiveCopy])
+            if case .swap(let plan) = model.pending {
+                log.append("ok swap offered for the other copy")
+                model.confirm(plan, swap: true)
+            } else {
+                log.append("FAILED no swap offered")
+            }
+            await wait("Archive copy on, Acme copy off") {
+                model.face(id: archiveCopy.id)?.isEnabled == true && model.face(id: acmeCopy.id)?.isEnabled == false
+            }
+        }
+        // A document: its fonts, then activate what's missing.
+        if let poster = model.documents.first(where: { $0.name == "Acme Poster.pdf" }) {
+            model.sidebar = .document(poster.id)
+            await wait("poster's fonts matched") { !(model.documentMatches[poster.id] ?? []).isEmpty }
+            let statuses = (model.documentMatches[poster.id] ?? []).map { "\($0.reference.name)=\($0.status)" }
+            log.append("  poster: \(statuses.joined(separator: ", "))")
+            model.request(true, faces: model.inactiveFaces(inDocument: poster.id), temporary: true)
+            await wait("poster's fonts all active") { (model.documentMatches[poster.id] ?? []).allSatisfy { $0.status == .active } }
+            await shot(window, "flow-document", "light", folder)
+        }
+        for document in model.documents where document.name != "Acme Poster.pdf" {
+            let statuses = (model.documentMatches[document.id] ?? []).map { "\($0.reference.name)=\($0.status)\($0.reference.isProvidedByDocument ? " (provided)" : "")" }
+            log.append("  \(document.name): \(model.documentProblems[document.id] ?? statuses.joined(separator: ", "))")
+        }
+        // Deactivate every temporary font.
+        model.deactivateTemporaryFonts()
+        await wait("temporary fonts deactivated") { model.temporaryFaces.isEmpty && model.temporaryPaths.isEmpty }
+        // Removing the folder turns off what's on from it.
+        if let library = model.folders.first {
+            model.sidebar = .all
+            let active = model.activeFaces(inFolder: library.path).count
+            model.requestRemove(library)
+            log.append("  remove asks first: \(model.pendingFolderRemoval != nil) (\(active) active)")
+            model.remove(library)
+            await wait("folder removed and its fonts off") {
+                model.folders.isEmpty && !model.faces.contains { $0.path.map { LibraryPaths.isInside($0, folder: library.path) } == true }
+            }
+            log.append("  still registered under the test folder: \(model.registeredPaths.filter { $0.hasPrefix(library.path) }.count)")
+        }
     }
 
     private static var log: [String] = []

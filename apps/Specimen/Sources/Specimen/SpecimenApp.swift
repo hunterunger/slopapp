@@ -53,9 +53,16 @@ struct SpecimenCommands: Commands {
             Button("New Smart Collection…") { model.newSmartCollection() }
                 .keyboardShortcut("n", modifiers: [.command, .option])
             Divider()
-            Button("Add Fonts…") { model.chooseFontsToAdd() }
+            Button("Open…") { model.chooseDocumentToOpen() }
                 .keyboardShortcut("o")
+                .help("See the fonts a PDF, Illustrator, EPS, SVG, HTML, CSS or RTF file uses")
+            Button("Add Folder to Library…") { model.chooseFolderToAdd() }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+                .help("Browse and activate a folder of fonts where it is, without copying it")
+            Button("Install Fonts…") { model.chooseFontsToAdd() }
+                .keyboardShortcut("o", modifiers: [.command, .option])
                 .disabled(model.environment.stressCopies > 1)
+                .help("Copy font files into your Fonts folder")
         }
         CommandGroup(after: .newItem) {
             Button("Show in Finder") { model.revealInFinder() }
@@ -168,9 +175,15 @@ struct SpecimenCommands: Commands {
             Button("Activate") { model.activate(true) }
                 .keyboardShortcut(";")
                 .disabled(!model.canActivate || model.isChangingFonts)
+            Button("Activate Temporarily") { model.activate(true, temporary: true) }
+                .keyboardShortcut(";", modifiers: [.command, .option])
+                .disabled(!model.canActivateTemporarily || model.isChangingFonts)
             Button("Deactivate") { model.activate(false) }
                 .keyboardShortcut(";", modifiers: [.command, .shift])
                 .disabled(!model.canDeactivate || model.isChangingFonts)
+            Divider()
+            Button("Deactivate Temporary Fonts") { model.deactivateTemporaryFonts() }
+                .disabled(model.temporaryFaces.isEmpty || model.isChangingFonts)
         }
         HelpCommands(info: info) {
             Button("Specimen Help") {
@@ -201,7 +214,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Temporary activations end when Specimen quits.
+        AppModel.shared.endTemporaryActivations()
         AppModel.shared.cleanUpTestFonts()
+    }
+
+    /// Documents (and folders) opened from Finder or dropped on the Dock icon.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let model = AppModel.shared
+        if model.hasLoaded {
+            _ = model.handleDrop(urls)
+        } else {
+            Task {
+                while !model.hasLoaded { try? await Task.sleep(for: .milliseconds(50)) }
+                _ = model.handleDrop(urls)
+            }
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

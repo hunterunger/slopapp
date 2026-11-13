@@ -53,6 +53,10 @@ struct ContextMenuBuilder {
         let activate = ClosureMenuItem("Activate", key: ";") { model.activate(true) }
         activate.isEnabled = model.canActivate
         menu.addItem(activate)
+        let temporary = ClosureMenuItem("Activate Temporarily", key: ";", modifiers: [.command, .option]) { model.activate(true, temporary: true) }
+        temporary.isEnabled = model.canActivateTemporarily
+        temporary.toolTip = "Until you quit Specimen"
+        menu.addItem(temporary)
         let deactivate = ClosureMenuItem("Deactivate", key: ";", modifiers: [.command, .shift]) { model.activate(false) }
         deactivate.isEnabled = model.canDeactivate
         menu.addItem(deactivate)
@@ -90,11 +94,12 @@ struct PreviewLine: NSViewRepresentable {
     var allowSample = true
     var variation: [Int: Double] = [:]
     var centered = false
+    var features: [FeatureValue] = []
 
     func makeNSView(context: Context) -> PreviewLineView { PreviewLineView() }
 
     func updateNSView(_ view: PreviewLineView, context: Context) {
-        view.configure(face: face, text: text, size: size, allowSample: allowSample, variation: variation, centered: centered)
+        view.configure(face: face, text: text, size: size, allowSample: allowSample, variation: variation, centered: centered, features: features)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: PreviewLineView, context: Context) -> CGSize? {
@@ -109,6 +114,7 @@ final class PreviewLineView: NSView {
     private var allowSample = true
     private var variation: [Int: Double] = [:]
     private var centered = false
+    private var features: [FeatureValue] = []
 
     override var isFlipped: Bool { true }
 
@@ -118,9 +124,11 @@ final class PreviewLineView: NSView {
         needsDisplay = true
     }
 
-    func configure(face: FontFace, text: String, size: CGFloat, allowSample: Bool, variation: [Int: Double] = [:], centered: Bool = false) {
+    func configure(face: FontFace, text: String, size: CGFloat, allowSample: Bool, variation: [Int: Double] = [:], centered: Bool = false,
+                   features: [FeatureValue] = []) {
         guard face != self.face || text != self.text || size != self.size || allowSample != self.allowSample
-            || variation != self.variation || centered != self.centered else { return }
+            || variation != self.variation || centered != self.centered || features != self.features else { return }
+        self.features = features
         self.face = face
         self.text = text
         self.size = size
@@ -137,7 +145,7 @@ final class PreviewLineView: NSView {
         guard let face, let context = NSGraphicsContext.current?.cgContext else { return }
         let lineText = PreviewText.line(for: text, familyName: face.displayFamilyName)
         let line = PreviewRenderer.shared.line(for: face, text: lineText, size: size, width: bounds.width, allowSample: allowSample,
-                                               variation: variation)
+                                               variation: variation, features: features)
         context.saveGState()
         context.clip(to: bounds)
         if line.unavailable {

@@ -10,12 +10,14 @@ struct ListRow: Identifiable, Hashable {
     let family: FontFamily
     let face: FontFace?
     var children: [ListRow]?
+    /// In a folder or document: how many of the family's styles are there.
+    var shownCount: Int? = nil
 
     static func == (a: ListRow, b: ListRow) -> Bool { a.id == b.id && a.face == b.face && a.family == b.family }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
     var name: String { face.map { family.faces.count > 1 ? $0.styleName : family.displayName } ?? family.displayName }
-    var styleCount: Int { face == nil ? family.faces.count : 1 }
+    var styleCount: Int { face == nil ? (shownCount ?? family.faces.count) : 1 }
     var categoryOrder: Int { FontCategory.allCases.firstIndex(of: family.category) ?? 0 }
     var foundry: String { (face?.foundry ?? family.foundry) ?? "" }
     var dateAdded: Date { (face?.fileModified ?? family.dateAdded) ?? .distantPast }
@@ -40,6 +42,10 @@ struct ListRow: Identifiable, Hashable {
 
     var locationText: String {
         let locations = Set(faces.map(\.location))
+        if locations == [.other], let path = faces.first?.path {
+            // Library folders: the folder the font is in.
+            return URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
+        }
         if locations.count == 1, let location = locations.first {
             if location == .other, let path = faces.first?.path {
                 return URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
@@ -64,7 +70,8 @@ struct FontListView: View {
                 let children = entry.family.faces.count > 1
                     ? entry.faces.map { ListRow(id: "face:\($0.id)", entryID: entry.id, family: entry.family, face: $0, children: nil) }
                     : nil
-                return ListRow(id: entry.id, entryID: entry.id, family: entry.family, face: nil, children: children)
+                return ListRow(id: entry.id, entryID: entry.id, family: entry.family, face: nil, children: children,
+                               shownCount: CollectionBar.applies(to: model.sidebar) ? entry.faces.count : nil)
             }
             return ListRow(id: entry.id, entryID: entry.id, family: entry.family, face: entry.representative, children: nil)
         }
@@ -210,6 +217,7 @@ struct FontListView: View {
         if row.state == .active, model.lockReason(for: row.family) != nil, row.face == nil { return "lock.fill" }
         switch row.state {
         case .active: return "circle.fill"
+        case .temporary: return "circle.dashed.inset.filled"
         case .inactive: return "circle"
         case .mixed: return "circle.lefthalf.filled"
         }
@@ -283,6 +291,7 @@ struct FontMenuItems: View {
         }
         Divider()
         Button("Activate", action: run { model.activate(true) })
+        Button("Activate Temporarily", action: run { model.activate(true, temporary: true) })
         Button("Deactivate", action: run { model.activate(false) })
         Divider()
         Button("Copy Name", action: run { model.copyNames(postScript: false) })
