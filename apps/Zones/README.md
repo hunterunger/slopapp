@@ -5,7 +5,7 @@ World clocks and meeting times, in the menu bar.
 Part of [Slopapp](../../README.md), a free, open-source collection of Mac apps.
 An open alternative to World Clock Pro.
 
-**Status:** beta (0.2.0)
+**Status:** beta (0.2.1)
 
 ## What it does
 
