@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-13T17:47:10.975Z",
+  "generatedAt": "2026-11-13T17:54:46.749Z",
   "name": "Slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "apps": [
@@ -180,15 +180,15 @@
       "icon": "camera",
       "menuBarOnly": true,
       "status": "stable",
-      "version": "0.2.0",
-      "build": 2,
+      "version": "1.0.0",
+      "build": 3,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.snapper",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/snapper-v0.2.0/Snapper.zip",
-      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/snapper-v0.2.0/Snapper-icon.png",
-      "sha256": "dba3962244e084e72b3adb4539b8d75a8c5547b4363acee5fda1e626eab8b710",
-      "size": 2235667,
-      "installedSize": 6734746,
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/snapper-v1.0.0/Snapper.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/snapper-v1.0.0/Snapper-icon.png",
+      "sha256": "74796e23e94e5d962cda48d8eb8a7ead86445ffa48588638b7ad293923081646",
+      "size": 6403117,
+      "installedSize": 17279212,
       "releaseNotes": "",
       "shots": [
         {
