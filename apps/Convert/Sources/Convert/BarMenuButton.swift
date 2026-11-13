@@ -8,6 +8,8 @@ enum BarMenuEntry {
     case action(String, action: () -> Void)
     /// A disabled line of explanation.
     case note(String)
+    /// A section title over the items that follow.
+    case header(String)
     case separator
 }
 
@@ -122,6 +124,14 @@ struct BarMenuButton: NSViewRepresentable {
                     let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
                     item.isEnabled = false
                     menu.addItem(item)
+                case .header(let text):
+                    if #available(macOS 14, *) {
+                        menu.addItem(.sectionHeader(title: text))
+                    } else {
+                        let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+                        item.isEnabled = false
+                        menu.addItem(item)
+                    }
                 case .separator:
                     menu.addItem(.separator())
                 }

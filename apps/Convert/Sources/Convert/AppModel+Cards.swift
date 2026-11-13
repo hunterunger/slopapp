@@ -106,7 +106,7 @@ extension AppModel {
                 if target == .gif { entries.append(.separator) }
             }
         case .audio:
-            for target in AudioTarget.allCases {
+            for target in capabilities.audioTargets {
                 entries.append(.choice(target.title, detail: target.detail, isOn: isOn { $0.audio == target }) { [self] in
                     updateOptions(for: targets) { $0.audio = target }
                 })
@@ -155,11 +155,29 @@ extension AppModel {
                 })
             }
         }
+        if (info?.channels ?? 0) > 2 {
+            entries.append(.separator)
+            entries += surroundEntries(for: entry)
+        }
         entries.append(.separator)
         entries.append(.choice("No Sound", detail: "Removes the sound", isOn: current == .none) { [self] in
             updateOptions(for: [entry]) { $0.sound = .none }
         })
         return entries
+    }
+
+    /// Surround stays surround unless asked (video cards' Sound menu, and sound files').
+    func surroundEntries(for entry: CardEntry) -> [BarMenuEntry] {
+        let channels = facts(for: entry.input).info?.channels ?? 0
+        let stereo = options(for: entry.input).stereo
+        return [
+            .choice("Keep \(Channels.name(channels) ?? "Surround") Sound", detail: "Where the format allows", isOn: !stereo) { [self] in
+                updateOptions(for: [entry]) { $0.stereo = false }
+            },
+            .choice("Mix to Stereo", detail: "For headphones and laptop speakers", isOn: stereo) { [self] in
+                updateOptions(for: [entry]) { $0.stereo = true }
+            },
+        ]
     }
 
     func resetOptions(for entries: [CardEntry]) {
@@ -203,7 +221,7 @@ extension AppModel {
     func saveCurrentAsPreset() {
         let alert = NSAlert()
         alert.messageText = "Save Current Settings as a Preset"
-        alert.informativeText = "\(settings.video.title), \(settings.audio.title), \(settings.image.title) · \(settings.quality.title) · \(settings.size.shortTitle)"
+        alert.informativeText = "\(settings.video.title), \(settings.audio.title), \(settings.image.title) · \(qualityTitle) · \(settings.size.shortTitle)"
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.placeholderString = "Name"
         field.setAccessibilityLabel("Preset name")

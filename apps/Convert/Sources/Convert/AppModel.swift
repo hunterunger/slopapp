@@ -122,6 +122,7 @@ final class AppModel {
     }
     /// Sheets.
     var trimming: CardEntry?
+    var cropping: CardEntry?
     var merging: [URL]?
     /// Bumped when files are added, with the cards to scroll to.
     private(set) var addedBatch = 0

@@ -960,3 +960,137 @@ the HID idle timer, so the gate waits after launching.
 
 **Gates:** `scripts/check.sh Convert --perf` green: 65 tests, launch 159 ms, first window
 351 ms, idle CPU 0.037%, footprint 44.7 MB. `[unlabeled]`: 0. Defaults restored from backup.
+
+## Feature round: formats, MKV/WebM, subtitles, surround, crop, file size (2026-11-12)
+
+The owner compared Convert with the original and listed gaps users notice: MP3, FLAC and
+WebP output; MKV, WebM and other containers in; subtitles kept or burned in; surround kept;
+crop; a target file size. Constraint: Apple frameworks, no new dependencies.
+
+### What this Mac supports (checked on macOS 27.2, M4 Max)
+
+Small Swift probes (in the session scratchpad, not the repo) and real conversions of
+ffmpeg-made probe files under `/tmp/convert-test/`:
+
+| Question | Answer |
+|---|---|
+| ImageIO writes WebP? | **No.** `org.webmproject.webp` isn't in `CGImageDestinationCopyTypeIdentifiers()` (AVIF, HEIC, JPEG 2000, PNG, TIFF… are). |
+| AudioToolbox encoders | `aac` (+ HE variants), `alac`, **`flac`**, `opus`, `ilbc`, `ima4`, `lpcm`, a-law/µ-law, `apac`. **No MP3** (`.mp3` decodes only). |
+| AudioToolbox decoders | adds MP1/2/3, AC-3, E-AC-3, AMR, **Vorbis**, Opus, FLAC… |
+| AudioFile writable types | includes FLAC, Ogg, CAF, WAV, AIFF, MP4/M4A, ADTS (and "MPG3", but with no encoder behind it). |
+| AVFoundation opens MKV / WebM? | **No** ("Cannot Open") for every MKV/WebM tried; `audiovisualTypes()` lists neither. AVI and FLV: no. |
+| …but decodes their codecs from an MP4? | **Yes** for H.264, HEVC (as `hvc1`), AV1 (hardware on M3+), VP9 (after `VTRegisterSupplementalVideoDecoderIfAvailable`), MPEG-4 Part 2, AAC, AC-3, E-AC-3, Opus, FLAC; MP3 only from MOV. **No** VP8 (no decoder), Vorbis-in-MOV. |
+| AVAssetWriter passthrough of those into MP4/MOV | **Yes** (vp09, av01, opus, flac, ac-3, tx3g subtitles), read back and decoded. |
+| Ogg | AVFoundation reads Ogg Opus, `.opus` and Ogg Vorbis now (Convert used to refuse `.ogg` by name). Ogg FLAC: no. |
+| Surround encode | AAC 5.1 (`MPEG_5_1_D` layout), AAC 7.1 (`AAC_7_1`), PCM 7.1, FLAC 2/6/8 ch; ALAC 5.1 (`MPEG_5_1_D`) but only an SDDS-style 7.1 (`MPEG_7_1_B`). |
+| FLAC bit depth | `AVAudioFile` always writes 24-bit FLAC; `ExtAudioFile` with the FLAC format flags (1 = 16-bit, 3 = 24-bit) writes what it's asked. |
+
+### Decisions
+
+- **MKV/WebM: our own demuxer, not a dependency.** Matroska is a documented container
+  (EBML); the decoders are Apple's. `MatroskaReader` (headers, clusters incl. unknown-size,
+  SimpleBlock/BlockGroup, Xiph/EBML/fixed lacing, header stripping, zlib) and
+  `MatroskaBridge` (Core Media format descriptions from each codec's private data, decode
+  timestamps rebuilt from presentation times for B-frames, a sample clock for audio,
+  text subtitles → MP4 text) copy every readable track into an MP4 (MOV for PCM/MP3).
+  When that copy *is* the result (H.264/HEVC + AAC → MP4) it goes straight to its place:
+  one pass, lossless. Otherwise the copy is a private intermediate the normal pipeline
+  converts, so trim, crop, subtitles, sound choice and file size all work on MKV. Verified:
+  frame 45 of a B-frame H.264 MKV is bit-identical after remux (PSNR ∞). Encrypted MKV is
+  refused as protected; unreadable tracks are left out with a note.
+- **MP3, WebP: not offered** (no encoder). The seams are in place: `AudioFileEncoder` (FLAC
+  uses it) for an MP3 encoder; `ImageTarget.webp` exists but only appears when
+  `Capabilities.canWrite(.webp)` is true, which today needs ImageIO to write it.
+- **Subtitles default to kept** (as player-selectable tracks in one alternate group, off
+  unless forced), like the original's defaults. Burn-in draws one text track white with an
+  outline, 8% up from the bottom, sized to the picture. Closed captions (CEA-608) are kept but
+  can't be burned. Burning drops the subtitle tracks (they'd duplicate the picture).
+- **One compositor for every redrawn picture.** `FrameCompositor` (a custom
+  `AVVideoCompositing`) does mirror, crop and burn-in with Core Image, without colour
+  matching (pixel values pass through, as AVFoundation's own compositor does; an early
+  colour-managed version lifted blues and failed the old mirror test). It replaced the
+  layer-instruction composition; merge keeps its own.
+- **Surround is kept by default**, mixed to stereo on request (per file: Sound menu, or
+  Edit File ▸ Mix Surround to Stereo). 3–5 channel sources become stereo with a note.
+  AAC surround rates: 5.1 at 256/384/512 kbps, 7.1 at 320/448/640.
+- **Crop is per file, stored as fractions of the picture as the file shows it** (after its
+  own rotation, before Convert's turn), so it follows later turns. The sheet shows the
+  picture as it will come out. Crop lives with rotate/flip in one **Picture** card tool
+  (cards gain no extra icon). Animated images can't be cropped (yet).
+- **File size is a Quality alternative** (the Quality menu and Format ▸ File Size): 10, 25,
+  50, 100, 250 MB or any size. Megabytes are 1,000,000 bytes (so "under 10 MB" also fits
+  10 MiB). Budget: 94% of the size over the kept duration; sound gets up to an eighth
+  (snapped to a standard AAC rate, with floors 32/64/160 kbps), the picture the rest, never
+  more than the source had; below 0.04 bits per pixel the frame steps down (4K → 1440p →
+  1080p → 720p → 480p → 360p) with a note. Over after encoding → one more try at a lower
+  rate. Saved presets carry it.
+- **Ogg and other named formats are tried first**, refused by name only when AVFoundation
+  fails (macOS versions differ).
+
+### Found and fixed while testing
+
+- **MKV conversions failed intermittently in the app** ("Couldn't convert…", fine on Try
+  Again; 1 in 3 drops). Cause: on the final flush the writer kept waiting, to interleave, for a
+  track whose queue was empty but not yet marked finished. Fix: during the final flush
+  each emptied track is finished at once. Afterwards 25 of 25 conversions across five drops, plus the stress tests.
+- **A card showed another file** (two "Movie with Subtitles.mkv" cards, no Surround.wav).
+  Card rows were identified by their first card only; when a file moved group (a WebM whose
+  VP8 picture can't be read is sound), a row in Audio took over a Video row's view. Row
+  ids now include the group. Latent before (animated GIFs move groups too).
+- FLAC frame-number parsing (short last block), MP3-in-MKV needing a MOV bridge, FLAC
+  bit depth (see above), bit-depth shown for lossy codecs, black-bar detection precision,
+  crop handles clipped at the picture edge, section headers in menus (`NSMenuItem.sectionHeader`).
+
+### Dependency recommendations (not added)
+
+| Missing | Recommendation | License | Size | How it would slot in |
+|---|---|---|---|---|
+| MP3 encoder | **LAME 3.100** via a small C target (or the `mp3lame` sources vendored) | LGPL-2.0: must be linked dynamically (ship `libmp3lame.dylib` in the app, with source offered) to keep Convert MIT. No maintained permissive MP3 encoder exists; *Shine* is LGPL too and much lower quality. | ~350 KB dylib | An `AudioFileEncoder` (`LAMEEncoder`) fed float PCM by `AudioFileTranscoder`; `AudioTarget.mp3` + "Audio Only (MP3)", gated by `Capabilities`. MP3 patents expired in 2017. |
+| WebP encoder | **libwebp 1.5** (Google), as a C SwiftPM target of its `src/` (encoder + mux only) | BSD-3-Clause | ~400–600 KB | A `WebPImageWriter` used by `ImageConverter` when the target is `.webp`; `Capabilities.canWrite(.webp)` returns true when it's linked. Animated WebP output via `WebPAnimEncoder` later. |
+| VP8 / Vorbis / DTS decode (MKV/WebM that fail today) | libvpx (BSD-3) for VP8, libvorbis (BSD-3); DTS: FFmpeg's `dca` (LGPL) only | BSD-3 / LGPL | 1–2 MB | Decode in `MatroskaBridge` to raw frames/PCM before handing to AVFoundation. Low priority: VP8/Vorbis WebM is rare now. |
+| Writing MKV/WebM | not recommended | | | MP4 plays almost everywhere; the original offers MKV but few people need it. |
+
+### Shared components built in-app (SlopKit candidates)
+
+- `CropCanvas` (`CropSheet.swift`): a crop box over a picture, handles, shape lock,
+  VoiceOver actions.
+- `PlayablePreviews` (`AppModel+Media.swift`): temporary playable copies and first-frame
+  thumbnails for files Quick Look/AVFoundation can't show.
+- `BarMenuEntry.header` (section headers) on `BarMenuButton`.
+
+### Tests
+
+108 tests in 14 suites (65 before), all real conversions of synthetic media read back:
+Matroska parsing (vints, unknown sizes, all three lacings, not-Matroska), codec records
+byte-for-byte against AVFoundation's own (`dac3`, `dec3`, `dfLa`, ES descriptor, `vpcC`),
+Opus/FLAC packet lengths, codec mapping and what's left out, MKV → MP4 in one pass with
+frames, subtitles (language, text, timing) and nothing left behind, laced audio with
+unknown-size clusters, burn-in pixels, MKA; surround matrix per format, stereo mix,
+FLAC (16/24-bit, trim, no-op), crop rectangles and turns, video/photo/GIF crop, black
+bars, size budget math, video/sound/photo under a size, subtitle keep/drop/burn into
+HEVC and GIF, WebP gating, Ogg tried first. A new `MatroskaFixture` writes MKV from our
+own clips, so no test needs ffmpeg. `CI=true`: the non-media tests still run, in ~1 s.
+
+### Gates (2026-11-12)
+
+- `scripts/check.sh Convert --perf`: green (lint, icon, 108 tests, release bundle, smoke,
+  catalog). Launch 174 ms, first window 320 ms, idle CPU 0.017%, footprint 45.3 MB (budget
+  120; busy machine, load 7). No other copy of Convert was running, so perf measured this
+  build. `catalog.json`: my runs only changed its date, which I reverted; the other builders' edits stay.
+- **Walkthrough** (release `build/Convert.app`, `drive launch --direct`, Accessibility only:
+  the owner was active, HID idle 0–12 s, so no real pointer or global keys; files in
+  `/tmp/convert-test/r3/`): drop via `open -a` of HEVC/AC-3 5.1/SRT MKV, VP9/Opus WebM,
+  VP8 WebM, an MKV with subtitles, a fake MKV, a 5.1 WAV, a photo → right groups, facts,
+  first-frame pictures for MKV/WebM, 5.1 kept, VP8 → sound with a note, fake MKV explained;
+  Picture ▸ Crop… on the MKV (sheet on its real frame), Square → 720×720 output (still
+  5.1, subtitles kept, replaced its own output); Subtitles ▸ burn English (frame checked,
+  no subtitle track left); Quality ▸ Other Size… 5 MB → a 46 MB 1080p clip came out
+  4.73 MB; Format ▸ Audio ▸ FLAC → 5.1 16-bit FLAC; Sound ▸ Mix to Stereo → stereo FLAC;
+  photo crop 16:9 → 1600×900; Remove Black Bars on a letterboxed MKV. Light and dark
+  screenshots: `/tmp/convert-test/r3/shots/`. `scripts/drive tree`: 0 `[unlabeled]` in the
+  window, sheets, alert and menus; window buttons 16×16. Convert's preferences were exported first
+  and restored exactly afterwards.
+- **Not tested: owner active.** Dragging the crop box and its handles with the real pointer,
+  and keyboard focus in the sheet. The drag math (`CropCanvas.adjust`, in the app target)
+  has no unit test; shapes were checked through the Shape menu (Square, 16:9) and the
+  resulting files.

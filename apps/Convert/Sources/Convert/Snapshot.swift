@@ -19,7 +19,7 @@ enum Snapshot {
         }
         guard let folder = ProcessInfo.processInfo.environment["CONVERT_SNAPSHOT"] else { return }
         try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-        // CONVERT_REVIEW=trim|merge|settings opens that view once files are in, to capture it.
+        // CONVERT_REVIEW=trim|crop|merge|settings opens that view once files are in, to capture it.
         if let review = ProcessInfo.processInfo.environment["CONVERT_REVIEW"] {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(4))
@@ -27,6 +27,7 @@ enum Snapshot {
                 let videos = model.entries.filter { model.kind(of: $0.input) != .image }
                 switch review {
                 case "trim": model.trimming = videos.first { model.canTrim($0) }
+                case "crop": model.cropping = model.entries.first { model.canCrop($0) }
                 case "merge": model.merge(videos)
                 case "settings":
                     NSApp.activate()

@@ -14,6 +14,7 @@ guard folder.path.hasPrefix("/tmp/") || folder.path.hasPrefix("/private/tmp/") e
 }
 do {
     let made = try FixtureMaker.standardSet(in: folder, includeLong: !args.contains("--quick"))
+        + (try await FixtureMaker.matroskaSet(in: folder))
     for url in made { print(url.path) }
 } catch {
     FileHandle.standardError.write(Data("failed: \(error)\n".utf8))

@@ -23,7 +23,8 @@ struct TrimSheet: View {
         self.entry = entry
         let duration = model.facts(for: entry.input).info?.duration ?? 0
         let trim = model.options(for: entry.input).trim
-        _player = State(initialValue: AVPlayer(url: entry.input))
+        // MKV and WebM play from a copy AVFoundation can read (made when the sheet opens).
+        _player = State(initialValue: PlayablePreviews.shared.needsPreview(entry.input) ? AVPlayer() : AVPlayer(url: entry.input))
         _duration = State(initialValue: duration)
         _start = State(initialValue: trim?.start ?? 0)
         _end = State(initialValue: min(trim?.end ?? duration, duration))
@@ -80,6 +81,12 @@ struct TrimSheet: View {
         }
         .frame(minWidth: 680)
         .navigationTitle("Trim \(entry.input.lastPathComponent)")
+        .task {
+            guard PlayablePreviews.shared.needsPreview(entry.input),
+                  let url = await PlayablePreviews.shared.playable(entry.input) else { return }
+            player.replaceCurrentItem(with: AVPlayerItem(url: url))
+            seek(to: start)
+        }
         .onAppear {
             seek(to: start)
             observer = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 20), queue: .main) { t in

@@ -32,6 +32,16 @@ public struct MediaInfo: Equatable, Sendable {
     public var frameCount = 1
     /// Every audio track, in file order (for choosing one).
     public var audioTracks: [AudioTrackInfo] = []
+    /// Subtitle and caption tracks, in file order.
+    public var subtitleTracks: [SubtitleTrackInfo] = []
+    /// "MKV" or "WebM" for files read by `MatroskaBridge`; nil for what AVFoundation reads.
+    public var container: String?
+    /// Things worth saying about the file itself ("Its DTS sound can't be read…").
+    public var sourceNotes: [String] = []
+    /// The file's size in bytes (0 when unknown).
+    public var fileBytes: Int64 = 0
+    /// Bits per second of the picture (0 when unknown).
+    public var videoBitRate: Double = 0
 
     public init(kind: MediaKind) {
         self.kind = kind
@@ -84,13 +94,10 @@ extension MediaInfo {
                 let khz = sampleRate / 1000
                 parts.append(khz == khz.rounded() ? "\(Int(khz)) kHz" : String(format: "%.1f kHz", khz))
             }
-            if kind == .audio, bitsPerSample > 0, Codecs.audioName(audioCodec) != "AAC" { parts.append("\(bitsPerSample)-bit") }
-            switch channels {
-            case 0: break
-            case 1: parts.append("Mono")
-            case 2: parts.append("Stereo")
-            default: parts.append("\(channels) ch")
+            if kind == .audio, bitsPerSample > 0, ["PCM", "FLAC", "Apple Lossless"].contains(Codecs.audioName(audioCodec)) {
+                parts.append("\(bitsPerSample)-bit")
             }
+            if let name = Channels.name(channels) { parts.append(name) }
             if audioTrackCount > 1 { parts.append("\(audioTrackCount) sound tracks") }
         }
         switch kind {
@@ -103,6 +110,11 @@ extension MediaInfo {
                 parts.append(frameRate == frameRate.rounded() ? "\(Int(frameRate)) fps" : String(format: "%.2f fps", frameRate))
             }
             sound()
+            switch subtitleTracks.count {
+            case 0: break
+            case 1: parts.append("Subtitles")
+            default: parts.append("\(subtitleTracks.count) subtitles")
+            }
             if duration > 0 { parts.append(Durations.string(duration)) }
         case .audio:
             sound()
@@ -140,12 +152,7 @@ public struct AudioTrackInfo: Equatable, Sendable {
         var parts = ["Track \(index + 1)"]
         if let language { parts.append(language) }
         if let codec { parts.append(Codecs.audioName(codec)) }
-        switch channels {
-        case 0: break
-        case 1: parts.append("Mono")
-        case 2: parts.append("Stereo")
-        default: parts.append("\(channels) channels")
-        }
+        if let name = Channels.name(channels) { parts.append(name) }
         return parts.joined(separator: " · ")
     }
 
@@ -163,7 +170,7 @@ public struct AudioTrackInfo: Equatable, Sendable {
                     info.channels = Int(asbd.mChannelsPerFrame)
                     info.sampleRate = asbd.mSampleRate
                     info.bitsPerSample = Int(asbd.mBitsPerChannel)
-                    if info.codec == "alac" {
+                    if info.codec == "alac" || info.codec == "flac" {
                         info.bitsPerSample = [1: 16, 2: 20, 3: 24, 4: 32][Int(asbd.mFormatFlags)] ?? 16
                     }
                 }
@@ -205,6 +212,21 @@ extension MediaInfo {
     }
 }
 
+/// "Mono", "Stereo", "5.1", "7.1".
+public enum Channels {
+    public static func name(_ count: Int) -> String? {
+        switch count {
+        case 0: nil
+        case 1: "Mono"
+        case 2: "Stereo"
+        case 6: "5.1"
+        case 7: "6.1"
+        case 8: "7.1"
+        default: "\(count) channels"
+        }
+    }
+}
+
 /// Human names for codec FourCCs.
 public enum Codecs {
     public static func fourCC(_ code: FourCharCode) -> String {
@@ -241,6 +263,7 @@ public enum Codecs {
         case "ac-3": "AC-3"
         case "ec-3": "E-AC-3"
         case "samr": "AMR"
+        case "vorb": "Vorbis"
         default: fourCC.trimmingCharacters(in: CharacterSet(charactersIn: " .")).uppercased()
         }
     }
@@ -265,14 +288,26 @@ public enum Durations {
 public enum MediaProbe {
     /// Images by ImageIO; audio and video by AVFoundation. Throws `ConvertError` with a
     /// plain reason when the file can't be read.
-    public static func probe(_ url: URL) async throws -> MediaInfo {
+    public static func probe(_ url: URL, decoders: DecoderCapabilities = .system) async throws -> MediaInfo {
         let name = url.lastPathComponent
-        if let format = MediaTypes.unreadableFormatName(for: url) {
-            throw ConvertError.unreadableFormat(name: name, format: format)
-        }
+        if MatroskaBridge.handles(url) { return try MatroskaBridge.probe(url, capabilities: decoders) }
         guard let kind = MediaTypes.kind(of: url) else { throw ConvertError.unsupported(name: name) }
-        if kind == .image { return try probeImage(url) }
-        return try await probeAsset(AVURLAsset(url: url), name: name, kind: kind)
+        if kind == .image {
+            var info = try probeImage(url)
+            if let bytes = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize { info.fileBytes = Int64(bytes) }
+            return info
+        }
+        do {
+            var info = try await probeAsset(AVURLAsset(url: url), name: name, kind: kind, decoders: decoders)
+            if let bytes = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize { info.fileBytes = Int64(bytes) }
+            return info
+        } catch ConvertError.damaged(let damaged) {
+            // Tried and failed: a format macOS has no reader for says so by name.
+            if let format = MediaTypes.unreadableFormatName(for: url) {
+                throw ConvertError.unreadableFormat(name: name, format: format)
+            }
+            throw ConvertError.damaged(name: damaged)
+        }
     }
 
     static func probeImage(_ url: URL) throws -> MediaInfo {
@@ -311,7 +346,8 @@ public enum MediaProbe {
         return type.preferredFilenameExtension?.uppercased() ?? "Image"
     }
 
-    static func probeAsset(_ asset: AVURLAsset, name: String, kind: MediaKind) async throws -> MediaInfo {
+    static func probeAsset(_ asset: AVURLAsset, name: String, kind: MediaKind,
+                           decoders: DecoderCapabilities = .system) async throws -> MediaInfo {
         let tracks: [AVAssetTrack]
         let duration: CMTime
         do {
@@ -334,7 +370,11 @@ public enum MediaProbe {
             if let format = formats.first {
                 info.videoCodec = Codecs.fourCC(CMFormatDescriptionGetMediaSubType(format))
             }
+            if let codec = info.videoCodec, !decoders.canDecode(codec) {
+                throw ConvertError.unreadableCodec(name: name, codec: "\(Codecs.videoName(codec)) video")
+            }
             info.isHDR = (try? await video.load(.mediaCharacteristics))?.contains(.containsHDRVideo) ?? false
+            info.videoBitRate = Double((try? await video.load(.estimatedDataRate)) ?? 0)
         } else {
             // A "movie" with no picture (e.g. an .mp4 of a podcast) is audio.
             info.kind = .audio
@@ -352,12 +392,20 @@ public enum MediaProbe {
                     info.channels = Int(asbd.mChannelsPerFrame)
                     info.sampleRate = asbd.mSampleRate
                     info.bitsPerSample = Int(asbd.mBitsPerChannel)
-                    if info.audioCodec == "alac" {
-                        // Apple Lossless keeps the source bit depth in its flags.
+                    if info.audioCodec == "alac" || info.audioCodec == "flac" {
+                        // Apple Lossless and FLAC keep the source bit depth in their flags.
                         info.bitsPerSample = [1: 16, 2: 20, 3: 24, 4: 32][Int(asbd.mFormatFlags)] ?? 16
                     }
                 }
             }
+        }
+        for (index, track) in tracks.filter({ $0.mediaType == .subtitle || $0.mediaType == .closedCaption }).enumerated() {
+            let (formats, language, characteristics) = (try? await track.load(.formatDescriptions, .languageCode, .mediaCharacteristics))
+                ?? ([], nil, [])
+            let code = formats.first.map { Codecs.fourCC(CMFormatDescriptionGetMediaSubType($0)) } ?? "tx3g"
+            let languageName = language.flatMap { $0 == "und" ? nil : (Locale.current.localizedString(forLanguageCode: $0) ?? $0) }
+            info.subtitleTracks.append(SubtitleTrackInfo(index: index, format: code, language: languageName,
+                                                         isForced: characteristics.contains(.containsOnlyForcedSubtitles)))
         }
         if !info.hasVideo && !info.hasAudio {
             // No usable tracks: either damaged or not a real media file.

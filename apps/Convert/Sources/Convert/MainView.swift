@@ -35,6 +35,9 @@ struct MainView: View {
         .sheet(item: $model.trimming) { entry in
             TrimSheet(model: model, entry: entry)
         }
+        .sheet(item: $model.cropping) { entry in
+            CropSheet(model: model, entry: entry)
+        }
         .sheet(isPresented: Binding(get: { model.merging != nil }, set: { if !$0 { model.merging = nil } })) {
             if let urls = model.merging { MergeSheet(model: model, files: urls) }
         }
@@ -177,15 +180,19 @@ struct CardQueueView: View {
         .accessibilityLabel("Files")
     }
 
-    /// One row of cards. Its id (also the scroll target) is its first card's.
+    /// One row of cards. Its id (also the scroll target) is its group's and its first card's:
+    /// a file that turns out to be another kind once read (an MKV whose picture can't be
+    /// read is sound) moves group, and two rows in different groups must never share an id
+    /// (the lazy stack reused the old row's view and showed a stale card).
     struct CardRow: Identifiable {
+        let group: String
         let entries: [CardEntry]
-        var id: String { "row-" + (entries.first?.id.uuidString ?? "") }
+        var id: String { "row-\(group)-" + (entries.first?.id.uuidString ?? "") }
     }
 
     private func rows(of group: CardGroup) -> [CardRow] {
         stride(from: 0, to: group.entries.count, by: columns).map {
-            CardRow(entries: Array(group.entries[$0..<min($0 + columns, group.entries.count)]))
+            CardRow(group: group.id, entries: Array(group.entries[$0..<min($0 + columns, group.entries.count)]))
         }
     }
 
@@ -398,6 +405,20 @@ struct CardContextMenu: View {
         if model.canTrim(entry), targets.count == 1 {
             Button("Trim…") { model.trimming = entry }
         }
+        if targets.count == 1, model.canCrop(entry) {
+            Button(model.options(for: entry.input).crop == nil ? "Crop…" : "Change Crop…") { model.cropping = entry }
+        }
+        if targets.count == 1, model.hasSubtitles(entry) {
+            Menu("Subtitles") {
+                let current = model.options(for: entry.input).subtitles
+                Toggle("Keep Subtitles", isOn: Binding(get: { current == .keep }, set: { if $0 { model.updateOptions(for: [entry]) { $0.subtitles = .keep } } }))
+                ForEach(model.facts(for: entry.input).info?.subtitleTracks.filter(\.canBurn) ?? [], id: \.index) { track in
+                    Toggle("Burn In: \(track.title)", isOn: Binding(get: { current == .burn(track.index) },
+                                                                    set: { if $0 { model.updateOptions(for: [entry]) { $0.subtitles = .burn(track.index) } } }))
+                }
+                Toggle("No Subtitles", isOn: Binding(get: { current == .none }, set: { if $0 { model.updateOptions(for: [entry]) { $0.subtitles = .none } } }))
+            }
+        }
         if targets.allSatisfy(model.canTurn) {
             Menu("Rotate and Flip") {
                 Button("Rotate Right") { model.updateOptions(for: targets) { $0.transform = $0.transform.rotatedRight() } }
@@ -542,8 +563,9 @@ struct FormatMenus: View {
                           help: "Set every format, quality and size in one go, for a device or a job") {
                 model.presetEntries()
             }
-            BarMenuButton(name: "Quality", value: settings.quality.title, symbol: "dial.medium",
-                          help: "Quality: \(settings.quality.detail).") {
+            BarMenuButton(name: "Quality", value: model.qualityTitle, symbol: settings.fileSize == nil ? "dial.medium" : "scalemass",
+                          help: settings.fileSize.map { "Each file is made to fit \($0.title.lowercased()). Convert picks the bit rate." }
+                              ?? "Quality: \(settings.quality.detail).") {
                 MenuEntries.quality(model)
             }
             BarMenuButton(name: "Size", value: settings.size.shortTitle, symbol: "arrow.up.left.and.arrow.down.right",
@@ -577,7 +599,7 @@ enum MenuEntries {
     }
 
     static func audio(_ model: AppModel) -> [BarMenuEntry] {
-        AudioTarget.allCases.map { target in
+        model.capabilities.audioTargets.map { target in
             .choice(target.title, detail: target.detail, isOn: model.settings.audio == target) { model.settings.audio = target }
         }
     }
@@ -590,8 +612,10 @@ enum MenuEntries {
 
     static func quality(_ model: AppModel) -> [BarMenuEntry] {
         Quality.allCases.map { quality in
-            .choice(quality.title, detail: quality.detail, isOn: model.settings.quality == quality) { model.settings.quality = quality }
-        }
+            .choice(quality.title, detail: quality.detail, isOn: model.settings.fileSize == nil && model.settings.quality == quality) {
+                model.useQuality(quality)
+            }
+        } + [.separator] + model.fileSizeEntries()
     }
 
     static func size(_ model: AppModel) -> [BarMenuEntry] {
@@ -656,7 +680,7 @@ struct AudioMenuItems: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        ForEach(AudioTarget.allCases) { target in
+        ForEach(model.capabilities.audioTargets) { target in
             ChoiceItem(title: target.title, detail: target.detail, isOn: model.settings.audio == target) {
                 model.settings.audio = target
             }
@@ -684,8 +708,8 @@ struct QualityMenuItems: View {
     var body: some View {
         ForEach(Array(Quality.allCases.enumerated()), id: \.element) { index, quality in
             let item = ChoiceItem(title: quality.title, detail: withShortcuts ? nil : quality.detail,
-                                  isOn: model.settings.quality == quality) {
-                model.settings.quality = quality
+                                  isOn: model.settings.fileSize == nil && model.settings.quality == quality) {
+                model.useQuality(quality)
             }
             if withShortcuts {
                 item.keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
@@ -708,6 +732,20 @@ struct SizeMenuItems: View {
         }
         Divider()
         Text(GIFText.menuNote(model.settings.quality))
+    }
+}
+
+/// The Format menu's File Size submenu: any size, or Quality decides.
+struct FileSizeMenuItems: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        ChoiceItem(title: "No Size Limit", detail: nil, isOn: model.settings.fileSize == nil) { model.settings.fileSize = nil }
+        Divider()
+        ForEach(FileSizeLimit.choices, id: \.self) { limit in
+            ChoiceItem(title: limit.title, detail: nil, isOn: model.settings.fileSize == limit) { model.settings.fileSize = limit }
+        }
+        Button("Other Size…") { model.askForFileSize() }
     }
 }
 
