@@ -5,7 +5,7 @@ Uninstall apps completely and clear out the junk.
 Part of [Slopapp](../../README.md), a free, open-source collection of Mac apps.
 An open alternative to CleanMyMac.
 
-**Status:** beta (0.2.0)
+**Status:** beta (0.3.0)
 
 ## What it does
 

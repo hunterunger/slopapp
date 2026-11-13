@@ -46,8 +46,8 @@
       "hub": true,
       "priority": 0,
       "status": "beta",
-      "version": "0.2.2",
-      "build": 4,
+      "version": "0.2.3",
+      "build": 5,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.slopapp",
       "dmg": true,
@@ -91,8 +91,8 @@
         }
       ],
       "shotsVersion": "0.2.0-1",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.2/Slopapp.zip",
-      "dmgUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.2/Slopapp.dmg"
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.3/Slopapp.zip",
+      "dmgUrl": "https://github.com/hunterunger/slopapp/releases/download/slopapp-v0.2.3/Slopapp.dmg"
     },
     {
       "slug": "switchboard",
@@ -457,12 +457,12 @@
       "favourite": true,
       "priority": 1,
       "status": "beta",
-      "version": "0.2.0",
-      "build": 1,
+      "version": "0.3.0",
+      "build": 2,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.tidy",
       "dir": "apps/Tidy",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/tidy-v0.2.0/Tidy.zip"
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/tidy-v0.3.0/Tidy.zip"
     },
     {
       "slug": "dropper",
@@ -598,8 +598,8 @@
       "favourite": true,
       "priority": 2,
       "status": "beta",
-      "version": "0.2.0",
-      "build": 2,
+      "version": "0.3.0",
+      "build": 3,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.crate",
       "infoPlist": {
@@ -726,7 +726,7 @@
         ]
       },
       "dir": "apps/Crate",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/crate-v0.2.0/Crate.zip"
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/crate-v0.3.0/Crate.zip"
     },
     {
       "slug": "paper",

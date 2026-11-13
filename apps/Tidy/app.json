@@ -9,8 +9,8 @@
   "icon": "brush-cleaning",
   "menuBarOnly": false,
   "status": "beta",
-  "version": "0.2.0",
-  "build": 1,
+  "version": "0.3.0",
+  "build": 2,
   "minimumMacOS": "14.0",
   "bundleId": "app.slopapp.tidy"
 }

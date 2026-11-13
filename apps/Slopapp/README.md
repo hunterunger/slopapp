@@ -6,7 +6,7 @@ Part of [Slopapp](../../README.md), a free, open-source collection of Mac apps. 
 hub: browse the catalog, install an app in one click, keep them all current, remove them
 cleanly, with no account and no subscription.
 
-**Status:** beta (0.2.2)
+**Status:** beta (0.2.3)
 
 ## What it does
 

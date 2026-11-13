@@ -37,7 +37,7 @@ The Slopapp app itself: the hub that installs and updates the rest, like Setapp'
   apps we don't rebuild (Rectangle, Maccy, IINA, Keka, AlDente).
 - Apps downloaded outside the launcher update through Sparkle (the standard open-source
   Mac updater), reading the same feed.
-- Status: the launcher is built and released (beta 0.2.2, 2026-11-09) as a `.dmg`, signed with
+- Status: the launcher is built and released (beta 0.2.3, 2026-11-13) as a `.dmg`, signed with
   Developer ID and notarized in CI.
 
 ## Phase 3: The favourites, priority 1
