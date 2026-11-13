@@ -369,6 +369,64 @@ Also this round: the capture components moved to SlopKit (`apps/SlopKit/Sources/
 Ship: status beta, version 0.2.0 (build 2).
 
 
+### Round 3 (2026-11-12, recording features)
+
+Fresh tester on the feature-round release build (test scene, isolated test env). Screen was
+unlocked for this round's fixes, so everything below was also checked on screen.
+
+| Finding | Severity | Decision | Why / fix |
+|---|---|---|---|
+| F1 No menu bar item for the whole first session of the test copy | major | Accept (cause environmental) | Investigated: the status item exists, but macOS left its window at (0, −33) on no screen (`statusItemInfo` hook) because the crowded notched menu bar had no room. Same with the build under another bundle id (`app.slopapp.snapper.alttest`), and it appeared in a later launch when there was room. Fixes for the person it happens to: a one-time HUD when macOS has no room ("The menu bar is full. Open Snapper again to get its menus."), the Show menu bar icon row now says how to get back in, and opening Snapper again opens Settings with the app's menus (verified). Test copies no longer write the installed copy's icon setting on reopen. |
+| F2 Trim window: video under the title bar (the recorded window's own title and buttons drew over ours), trim bar over the video, grey filmstrip | major | Accept | Plain titled window; the picture in its own `AVPlayerLayer` view, and AVKit's trimming bar in its own strip below it (the player view's own small picture hidden behind the bar), so nothing overlaps. Live Text off. On screen: filmstrip fully drawn (the grey placeholders were thumbnails still being made), light and dark. |
+| F3 Thumbnail still said "Video, 0:23" after trimming | minor | Accept | The card's SwiftUI view got the same capture object, so it didn't redraw. Captures now carry a revision that the card passes in; after a trim it reads "Video, 0:02" (4.3 s → 2.8 s) with the new poster. |
+| F4 Edits to an opened image lost on ⌘Q with no prompt | minor | Accept | On quit, edited images that exist nowhere else are kept in History (edits stay editable; verified: `scene.png` + `original.png` + `annotations.json`). With History off, Snapper asks "Quit and lose your edits to an image?" with Cancel (default) and Quit Anyway (both verified). |
+| F5 Recordings more saturated than the screen; MP4 had no colour tags | minor | Accept | The writer now tags BT.709 primaries and matrix with the sRGB transfer function (the stream already delivered sRGB). Measured in sRGB: screen (255,66,70) vs recording (254,66,68). The tester's numbers compared a Display P3 shot with untagged video values. Unit test checks the tags. |
+| F6 Single-key tool shortcuts not in the Tools menu or tooltips | minor | Accept | SwiftUI dropped the menu items' second line and segment help: the Tools menu delegate now sets each item's `subtitle` ("Press A"), and the tool segments get AppKit tooltips ("Arrow (A)"). Real key equivalents would fire while typing text, so they stay subtitles. |
+| F7 Capture Text split "a · b · c" into lines and changed "·" | nit | Accept (line split) / Reject (character) | Pieces Vision reads apart on one visual line now stay on one line, left to right (tested). How Vision reads "·" is its own recognition. |
+| F8 History search said "Search Apps" | nit | Accept | It searches the app and the kind (not image text): "App or Kind". |
+| F8 "Hide Desktop Icons" checked item ambiguous | nit | Accept | "Hide Desktop Icons in Captures". |
+| F8 "Open Image…" vs "Annotate Image File…" | nit | Accept | The status menu now says "Annotate Image File…" and "Pin Image File…", like the File menu. |
+| F8 Settings › Recording mentions Shortcuts Only when hidden | nit | Accept | The note shows only while Show keystrokes is on. |
+| F8 Scrolling capture said "Height, 0 pixels" after the first frame | nit | Accept | The readout starts at the first frame's height. |
+| F8 Same "Drag to capture…" hint for Record Screen and Scrolling Capture | nit | Defer | The hint is drawn by SlopKit's capture overlay; needs a per-mode hint option there (other agents' area). |
+| F9 Default shortcuts ⇧⌘3/4/2 collide with macOS's | nit | Reject | Those were the installed copy's own choices: the owner set ⇧⌘ on purpose, and the shortcuts library reads the app's shared defaults. Snapper's defaults are ⌥⇧⌘ (README explains). Fixed the leak behind it: a test copy with its own defaults suite now shows Snapper's defaults (argument domain, nothing written; the installed copy's values verified unchanged). |
+| F10 Trim window: 7 unlabeled text areas; thumbnail-size slider ends both "Photo" | nit | Accept | Live Text off (`allowsVideoFrameAnalysis = false`): 0 unlabeled in the trim window. Slider ends are "Smaller" and "Larger". |
+| Missing: click the Saved toast to show in Finder | — | Defer | SlopKit's HUD is click-through by design; needs a HUD with an action there. Show in Finder is on the thumbnail and in History. |
+| Missing: a visible tool-shortcut list | — | Accept | F6. |
+| Missing: an error for a broken image file | — | Accept | The Open panel path did nothing at all; both it and Open With now say "Not a readable image: name" (verified with a text file named `.png`). |
+
+Found while verifying on screen (now that it was unlocked):
+
+- **Clicks and keys never reached a recording** (major). ScreenCaptureKit doesn't list a fully
+  transparent window as on screen, so the overlay window was never in the stream, test or
+  real. The recorder now looks up our kept windows among all windows. Verified in the video:
+  the accent ring at the click and the "⇧⌘4" caption, plus the camera bubble.
+- The keystroke caption's glass was sized before its text arrived (text spilled out of a
+  56 pt circle): the text is now set synchronously and measured.
+- The Microphone button was two accessibility elements with a 10 × 14 frame: one 28 × 28
+  element now.
+- AVKit's own Trim button ignores accessibility presses (Apple's control); Return trims
+  (verified 4.3 s → 2.8 s after setting the start handle by accessibility).
+- Several hooks posted at once are partly dropped by distributed notifications; scripts post
+  them one at a time.
+
+On-screen verification (debug and release builds, `--direct`, test env, owner idle ≥ 60 s
+before each launch): a recording with test microphone, test-scene tone, camera bubble, a
+click and a shortcut → one mixed AAC track (1 kHz mic throughout, 440 Hz tone at its share in
+seconds 2–3), sRGB-tagged H.264, bubble/ring/caption in the frames; record bar and recording
+bar on real glass, 0 unlabeled; trim window light and dark, 0 unlabeled; Settings General;
+reopen → Settings; the quit alert; the unreadable-file HUD.
+
+Gates after the fixes: 120 tests in 31 suites; `scripts/check.sh Snapper` all pass (SlopKit
+test, lint, icon, test, bundle, smoke, catalog; no catalog change); `scripts/perf.sh Snapper
+--direct`: launch 89 ms, first status item 180 ms, idle CPU 0.004 %, footprint 23.6 MB, all
+within budget. Also fixed: a test helper (`TestMedia.makeVideo`) could spin forever when the
+writer waited on one sound track while the other wasn't ready, which hung whole test runs on
+a loaded machine; each track is now fed on its own (five clean runs in a row). A last
+release-build run on screen was cut short when the Mac locked (no frames once locked);
+up to then: 0 unlabeled in the ready and recording states, ring and caption shown. The
+on-screen checks above ran on debug builds of the same code.
+
 ## Parity pass (2026-11-03)
 
 Per [`docs/parity-pass.md`](../parity-pass.md): look and work like the original, no missing

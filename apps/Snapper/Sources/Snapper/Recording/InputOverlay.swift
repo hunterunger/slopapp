@@ -88,7 +88,6 @@ final class InputOverlay {
     private let showsClicks: Bool
     private let keyMode: KeystrokeMode?
     private var caption: KeystrokeCaption
-    private let captionModel = CaptionModel()
     private var captionView: NSView?
     private var captionHost: NSHostingView<CaptionView>?
     private var expiry: Timer?
@@ -143,6 +142,7 @@ final class InputOverlay {
     /// A ring that grows and fades where the click was (`point`: AppKit global points).
     func showClick(at point: CGPoint, secondary: Bool = false) {
         guard showsClicks, area.contains(point), let layer = root.layer else { return }
+        Diagnostics.record("click ring shown")
         let local = CGPoint(x: point.x - area.minX, y: point.y - area.minY)
         let radius: CGFloat = 22
         let ring = CAShapeLayer()
@@ -180,6 +180,8 @@ final class InputOverlay {
     func show(_ stroke: KeyStroke) {
         guard keyMode != nil else { return }
         guard caption.feed(stroke, at: Diagnostics.now()) else { return }
+        // Never the key itself: only that the caption changed.
+        Diagnostics.record("key caption changed")
         update()
         if expiry == nil {
             let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -199,8 +201,9 @@ final class InputOverlay {
     }
 
     private func update() {
-        captionModel.text = caption.text
         guard let captionView else { return }
+        // Set synchronously (not through observation) so the size below is the new text's.
+        if let text = caption.text { captionHost?.rootView = CaptionView(text: text) }
         let visible = caption.text != nil
         if visible { layoutCaption() }
         NSAnimationContext.runAnimationGroup { context in
@@ -210,7 +213,7 @@ final class InputOverlay {
     }
 
     private func makeCaption() {
-        let hosting = NSHostingView(rootView: CaptionView(model: captionModel))
+        let hosting = NSHostingView(rootView: CaptionView(text: " "))
         hosting.translatesAutoresizingMaskIntoConstraints = true
         hosting.autoresizingMask = [.width, .height]
         captionHost = hosting
@@ -224,6 +227,7 @@ final class InputOverlay {
     /// Bottom center of the area, as wide as the text.
     private func layoutCaption() {
         guard let captionView, let captionHost else { return }
+        captionHost.layoutSubtreeIfNeeded()
         let fitting = captionHost.fittingSize
         let width = min(max(fitting.width, CaptionView.height), area.width - 2 * Spacing.l)
         let bottom = min(Spacing.xxl * 2, area.height / 6)
@@ -232,19 +236,13 @@ final class InputOverlay {
     }
 }
 
-@MainActor
-@Observable
-final class CaptionModel {
-    var text: String?
-}
-
 /// The keys, large and legible over anything.
 struct CaptionView: View {
     static let height: CGFloat = 56
-    let model: CaptionModel
+    let text: String
 
     var body: some View {
-        Text(model.text ?? " ")
+        Text(text)
             .font(.title.weight(.semibold))
             .lineLimit(1)
             .truncationMode(.head)

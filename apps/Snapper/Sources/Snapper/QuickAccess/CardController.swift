@@ -79,7 +79,7 @@ final class CardController {
 
     private func content(for item: CaptureItem) -> CardView {
         CardView(item: item, thumbnailSize: Self.thumbnailSize(for: item.size, width: width),
-                 codes: shownCodes[item.id] ?? [], model: model, controller: self)
+                 codes: shownCodes[item.id] ?? [], model: model, controller: self, revision: item.revision)
     }
 
     /// Redraws a card whose capture changed (a trimmed video's new poster and length).

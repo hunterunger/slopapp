@@ -256,9 +256,17 @@ struct TextRecognitionTests {
             RecognizedLine(text: "right", box: CGRect(x: 0.6, y: 0.81, width: 0.2, height: 0.1)),
             RecognizedLine(text: "first", box: CGRect(x: 0.1, y: 0.8, width: 0.3, height: 0.1)),
         ]
-        #expect(TextLayout.join(lines, keepLineBreaks: true) == "first\nright\nsecond")
+        #expect(TextLayout.join(lines, keepLineBreaks: true) == "first right\nsecond")
         #expect(TextLayout.join(lines, keepLineBreaks: false) == "first right second")
         #expect(TextLayout.join([], keepLineBreaks: true) == "")
+        // Pieces read apart on one visual line stay on that line.
+        let spread = [
+            RecognizedLine(text: "c", box: CGRect(x: 0.7, y: 0.5, width: 0.1, height: 0.1)),
+            RecognizedLine(text: "·", box: CGRect(x: 0.4, y: 0.51, width: 0.05, height: 0.08)),
+            RecognizedLine(text: "a", box: CGRect(x: 0.1, y: 0.5, width: 0.1, height: 0.1)),
+            RecognizedLine(text: "next", box: CGRect(x: 0.1, y: 0.3, width: 0.3, height: 0.1)),
+        ]
+        #expect(TextLayout.join(spread, keepLineBreaks: true) == "a · c\nnext")
     }
 
     @Test func visionReadsRenderedText() async throws {

@@ -35,3 +35,27 @@ enum AppPresence {
         if wanted == .regular { NSApp.activate() }
     }
 }
+
+/// When the menu bar has no room (a full bar beside the notch), macOS leaves a new icon off
+/// every screen. Say so once, with the way in: opening Snapper again shows Settings and its
+/// menus (`applicationShouldHandleReopen`).
+@MainActor
+enum HiddenIconHint {
+    private static let key = "hiddenMenuBarIconHintShown"
+
+    static func checkSoon() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            guard Preferences.store.object(forKey: MenuBarIcon.storageKey) as? Bool ?? true,
+                  !Preferences.store.bool(forKey: key), isHidden else { return }
+            Preferences.store.set(true, forKey: key)
+            Diagnostics.record("menu bar icon hidden by a full menu bar")
+            HUD.show("The menu bar is full. Open Snapper again to get its menus.", systemImage: "menubar.rectangle", duration: .seconds(6))
+        }
+    }
+
+    /// The status item's window is on no screen.
+    static var isHidden: Bool {
+        let windows = NSApp.windows.filter { String(describing: type(of: $0)).contains("StatusBar") }
+        return !windows.isEmpty && windows.allSatisfy { $0.screen == nil }
+    }
+}

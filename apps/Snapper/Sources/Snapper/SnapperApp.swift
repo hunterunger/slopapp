@@ -48,6 +48,11 @@ struct SnapperApp: App {
     @State private var model = AppModel.shared
     private let info = AppInfo.current(fallbackName: "Snapper")
 
+    init() {
+        // Before any menu reads a shortcut.
+        AppDelegate.isolateShortcuts()
+    }
+
     var body: some Scene {
         MenuBarExtra(isInserted: $showMenuBarIcon) {
             SnapperMenu(model: model, info: info)
@@ -141,11 +146,12 @@ struct SnapperMenu: View {
         }
         Divider()
 
-        Toggle("Hide Desktop Icons", isOn: $model.hideDesktopIcons)
+        // "in Captures": the icons are only left out of captures; the desktop doesn't change.
+        Toggle("Hide Desktop Icons in Captures", isOn: $model.hideDesktopIcons)
         Divider()
 
-        Button("Open Image…") { model.chooseImage { EditorWindowController.open($0, model: model) } }
-        Button("Pin Image to the Screen…") { model.chooseImage { model.pins.pin($0) } }
+        Button("Annotate Image File…") { model.chooseImage { EditorWindowController.open($0, model: model) } }
+        Button("Pin Image File…") { model.chooseImage { model.pins.pin($0) } }
         Button("Annotate Clipboard Image") { model.annotateClipboard() }
         Button("Pin Clipboard Image") { model.pinClipboard() }
         Divider()
@@ -209,6 +215,30 @@ extension KeyboardShortcuts.Shortcut {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let standard = SlopAppDelegate()
 
+    /// Every global shortcut name (Settings → Shortcuts lists the same).
+    static var shortcutNames: [KeyboardShortcuts.Name] {
+        CaptureMode.allCases.map(KeyboardShortcuts.Name.forMode) + [.toggleDesktopIcons, .pinFile, .reopenLast, .closeAllCards, .openHistory]
+    }
+
+    /// A test copy (`SNAPPER_DEFAULTS_SUITE`) shows Snapper's default shortcuts, not the
+    /// installed copy's own choices: the shortcuts library reads the app's standard defaults,
+    /// so the defaults go in this process's argument domain, which is read first and never
+    /// written to disk.
+    static func isolateShortcuts() {
+        guard Diagnostics.defaultsSuite != nil else { return }
+        var values = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        for name in shortcutNames {
+            let key = "KeyboardShortcuts_\(name.rawValue)"
+            if let shortcut = name.defaultShortcut, let data = try? JSONEncoder().encode(shortcut) {
+                values[key] = String(decoding: data, as: UTF8.self)
+            } else {
+                values[key] = false // "no shortcut"
+            }
+        }
+        UserDefaults.standard.setVolatileDomain(values, forName: UserDefaults.argumentDomain)
+        Diagnostics.record("test shortcuts isolated area=\(KeyboardShortcuts.getShortcut(for: .captureArea)?.description ?? "none")")
+    }
+
     func applicationWillFinishLaunching(_ notification: Notification) {
         switch Diagnostics.forcedAppearance {
         case "light": NSApp.appearance = NSAppearance(named: .aqua)
@@ -228,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Diagnostics.testHooks { installTestHooks(model) }
         TestScene.showIfRequested()
         if let scene = Showcase.scene { ShowcaseScenes.run(scene, model: model) }
+        HiddenIconHint.checkSoon()
         Diagnostics.record("launched permission=\(model.hasPermission) shortcuts=\(!Diagnostics.noShortcuts)")
     }
 
@@ -263,8 +294,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             opened += 1
         }
         Diagnostics.record("opened files=\(urls.count) images=\(opened)")
-        if opened == 0, !urls.isEmpty {
-            HUD.show("Snapper can only open images", systemImage: "photo")
+        if opened < urls.count {
+            // The fixed part first: a long file name is what gets cut off.
+            let message = urls.count == 1 ? "Not a readable image: \(urls[0].lastPathComponent)" : "\(urls.count - opened) files aren't readable images"
+            HUD.show(message, systemImage: "exclamationmark.triangle", duration: .seconds(2.5))
         }
     }
 
@@ -279,6 +312,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             KeyboardShortcuts.setShortcut(nil, for: .captureWindow)
             if KeyboardShortcuts.getShortcut(for: .allInOne) == nil { KeyboardShortcuts.setShortcut(old, for: .allInOne) }
         }
+    }
+
+    /// Edited images that would be lost (opened files aren't in History, and with History
+    /// off nothing is): with History on they're kept there, like every capture; with it off,
+    /// Snapper asks first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let model = AppModel.shared
+        EditorWindowController.commitAll()
+        let unsaved = model.unsavedEdits
+        guard !unsaved.isEmpty else { return .terminateNow }
+        if model.history.isOn {
+            Task {
+                for item in unsaved { await model.history.recordNow(item, kind: .screenshot, source: nil) }
+                Diagnostics.record("quit kept edited images in history count=\(unsaved.count)")
+                sender.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
+        }
+        let alert = NSAlert()
+        alert.messageText = unsaved.count == 1 ? "Quit and lose your edits to an image?" : "Quit and lose your edits to \(unsaved.count) images?"
+        alert.informativeText = "History is off, so edits that aren't saved, copied or dragged out are gone when Snapper quits."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Quit Anyway")
+        alert.buttons.last?.hasDestructiveAction = true
+        NSApp.activate()
+        return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -371,6 +430,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let duration = await MediaEditor.duration(of: url)
                     model.deliver(poster, scale: 2, displayID: nil, started: Diagnostics.now(), kind: "video", media: MediaFile(url: url, duration: duration))
                 }
+            },
+            "openTestImage": {
+                // `SNAPPER_TEST_IMAGE`: opened as Finder's Open With would (never through
+                // LaunchServices, which could hand it to an installed copy).
+                guard let path = ProcessInfo.processInfo.environment["SNAPPER_TEST_IMAGE"] else { return }
+                NSApp.delegate?.application?(NSApp, open: [URL(fileURLWithPath: path)])
             },
             "sceneTone": { TestScene.playTone(seconds: 2.5) },
             "trimWindowLast": { if let item = model.cards.newest { model.openTrimmer(item) } },
@@ -472,12 +537,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // A live appearance change while windows are open (layers must follow it).
             "appearanceLight": { NSApp.appearance = NSAppearance(named: .aqua) },
             "appearanceDark": { NSApp.appearance = NSAppearance(named: .darkAqua) },
-            "openSettings": {
-                // The app menu's own Settings… item (the SwiftUI Settings scene has no API).
-                NSApp.activate()
-                guard let menu = NSApp.mainMenu?.items.first?.submenu,
-                      let index = menu.items.firstIndex(where: { $0.keyEquivalent == "," }) else { return }
-                menu.performActionForItem(at: index)
+            "openSettings": { AppDelegate.openSettings() },
+            "reopen": { _ = NSApp.delegate?.applicationShouldHandleReopen?(NSApp, hasVisibleWindows: false) },
+            "statusItemInfo": {
+                // Where the menu bar icon's window is (diagnostics: a full menu bar hides it).
+                for window in NSApp.windows where String(describing: type(of: window)).contains("StatusBar") {
+                    let screen = window.screen.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "none"
+                    Diagnostics.record("status item frame=\(window.frame) visible=\(window.isVisible) occluded=\(!window.occlusionState.contains(.visible)) screen=\(screen)")
+                }
             },
         ]
         for pane in SettingsPane.allCases {
@@ -492,8 +559,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Opening Snapper again (Finder, Spotlight, the Dock) brings the menu bar icon back and
+    /// opens Settings: the way in when a full menu bar hides the icon.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        standard.applicationShouldHandleReopen(sender, hasVisibleWindows: flag)
+        Diagnostics.record("reopened visibleWindows=\(flag)")
+        guard Diagnostics.defaultsSuite != nil else {
+            return standard.applicationShouldHandleReopen(sender, hasVisibleWindows: flag)
+        }
+        // A test copy: SlopKit's handler writes the icon setting to the app's own defaults
+        // (the installed copy's); write ours instead and open Settings the same way.
+        Preferences.store.set(true, forKey: MenuBarIcon.storageKey)
+        if !flag { Self.openSettings() }
+        return true
+    }
+
+    /// The app menu's own Settings… item (the SwiftUI Settings scene has no API).
+    static func openSettings() {
+        NSApp.activate()
+        guard let menu = NSApp.mainMenu?.items.first?.submenu,
+              let index = menu.items.firstIndex(where: { $0.keyEquivalent == "," }) else { return }
+        menu.performActionForItem(at: index)
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {

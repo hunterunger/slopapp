@@ -14,6 +14,8 @@ struct CardView: View {
     let codes: [ScannedCode]
     let model: AppModel
     let controller: CardController
+    /// `item.revision` when the card was built: a new value redraws it.
+    var revision = 0
     @State private var hoveringNow = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var hovering: Bool {

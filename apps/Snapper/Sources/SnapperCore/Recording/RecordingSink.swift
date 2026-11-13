@@ -53,6 +53,9 @@ public final class RecordingSink: @unchecked Sendable {
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
+            // The frames are sRGB (the stream asks for it): say so, or players treat them as
+            // untagged video and show them more saturated than the screen.
+            AVVideoColorPropertiesKey: RecordingSink.colorProperties,
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: bitRate,
                 AVVideoExpectedSourceFrameRateKey: options.frameRate,
@@ -74,6 +77,13 @@ public final class RecordingSink: @unchecked Sendable {
         computerAudio = options.audio.computer ? try audioInput(channels: 2) : nil
         microphoneAudio = options.audio.microphone ? try audioInput(channels: 1) : nil
     }
+
+    /// sRGB: BT.709 primaries and matrix with the sRGB transfer function.
+    public static let colorProperties: [String: String] = [
+        AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+        AVVideoTransferFunctionKey: kCVImageBufferTransferFunction_sRGB as String, // AVVideoTransferFunction_IEC_sRGB is macOS 15+
+        AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+    ]
 
     public static var hostNow: CMTime { CMClockGetTime(CMClockGetHostTimeClock()) }
 

@@ -323,6 +323,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         controller.window?.makeKeyAndOrderFront(nil)
+        // Once SwiftUI has built the title bar's tools (and again whenever it becomes key).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak controller] in
+            ToolsMenuMarks.installToolTips(in: controller?.window)
+        }
         Diagnostics.record("editor opened pixels=\(item.pixelSizeDescription)")
     }
 
@@ -330,6 +334,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     /// Captures open in editors (history never prunes them).
     static var openItems: [CaptureItem] { open.map(\.model.item) }
+
+    /// Writes every open editor's edits to its capture (before quitting).
+    static func commitAll() {
+        for controller in open { controller.model.commitToItem() }
+    }
 
     /// Settings → Annotate → Always on top.
     static func applyLevel() {
@@ -378,6 +387,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidBecomeKey(_ notification: Notification) {
         ToolsMenuMarks.install()
+        ToolsMenuMarks.installToolTips(in: window)
         if let canvas = model.canvas {
             window?.makeFirstResponder(canvas.editingField ?? canvas)
             canvas.needsDisplay = true
@@ -904,10 +914,38 @@ final class ToolsMenuMarks: NSObject, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        // Each tool's single-key shortcut under its name (SwiftUI drops a menu button's
+        // second line, and a real key equivalent would fire while typing text).
+        let letters = Dictionary(Tool.allCases.map { ($0.title, String($0.key).uppercased()) }, uniquingKeysWith: { a, _ in a })
+            .merging(["Background": "B"]) { a, _ in a }
+        if #available(macOS 14.4, *) {
+            for item in menu.items where item.submenu == nil {
+                if let letter = letters[item.title] { item.subtitle = "Press \(letter)" }
+            }
+        }
         guard let editor = EditorWindowController.front else { return }
         let marked = [editor.tool.title, editor.color.name, editor.width.title, editor.redaction.title]
         for item in menu.items where item.submenu == nil {
             item.state = marked.contains(item.title) ? .on : .off
+        }
+    }
+
+    /// Tooltips on the title bar's tool segments ("Arrow (A)"): SwiftUI doesn't pass a
+    /// segment's help on to the segmented control.
+    static func installToolTips(in window: NSWindow?) {
+        DispatchQueue.main.async {
+            guard let window else { return }
+            func controls(in view: NSView) -> [NSSegmentedControl] {
+                ((view as? NSSegmentedControl).map { [$0] } ?? []) + view.subviews.flatMap(controls)
+            }
+            // The toolbar lives in the title bar's own view tree (the theme frame).
+            let roots = [window.contentView?.superview, window.standardWindowButton(.closeButton)?.superview?.superview].compactMap { $0 }
+                + (window.toolbar?.items.compactMap(\.view) ?? [])
+            for control in roots.flatMap(controls) where control.segmentCount == ToolPicker.tools.count {
+                for (index, tool) in ToolPicker.tools.enumerated() {
+                    control.setToolTip("\(tool.title) (\(String(tool.key).uppercased()))", forSegment: index)
+                }
+            }
         }
     }
 }

@@ -314,10 +314,11 @@ enum TestMedia {
         let block = 4800 // 0.1 s
         let frames = Int(seconds * Double(fps))
         let blocks = Int(seconds * 48_000) / block
-        var frame = 0, written = 0
-        while frame < frames || written < blocks {
-            // Feed whichever input the writer is ready for (it interleaves non-real-time
-            // inputs, so waiting on just one of them can deadlock).
+        var frame = 0
+        var written = [Int](repeating: 0, count: audio.count)
+        while frame < frames || written.contains(where: { $0 < blocks }) {
+            // Feed every input the writer is ready for, each on its own (it interleaves
+            // non-real-time inputs, so waiting for several of them at once can deadlock).
             var progressed = false
             if frame < frames, video.isReadyForMoreMediaData {
                 let buffer = try #require(pixelBuffer(shade: UInt8(frame * 255 / max(1, frames)), pool: adaptor.pixelBufferPool))
@@ -325,13 +326,10 @@ enum TestMedia {
                 frame += 1
                 progressed = true
             }
-            if written < blocks, audio.allSatisfy(\.isReadyForMoreMediaData) {
-                let time = CMTime(value: CMTimeValue(written * block), timescale: 48_000)
-                for (index, input) in audio.enumerated() {
-                    let samples = generators[index].next(block)
-                    #expect(input.append(try #require(AudioSamples.makeBuffer(samples, time: time))))
-                }
-                written += 1
+            for (index, input) in audio.enumerated() where written[index] < blocks && input.isReadyForMoreMediaData {
+                let time = CMTime(value: CMTimeValue(written[index] * block), timescale: 48_000)
+                #expect(input.append(try #require(AudioSamples.makeBuffer(generators[index].next(block), time: time))))
+                written[index] += 1
                 progressed = true
             }
             if !progressed { try await Task.sleep(for: .milliseconds(2)) }
@@ -415,6 +413,12 @@ struct RecordingSinkTests {
         let counts = await sink.audioSampleCounts()
         #expect((counts[.computer] ?? 0) > 48_000 * 3 / 2 && (counts[.microphone] ?? 0) > 48_000 * 3 / 2)
         #expect(await MediaEditor.audioTrackCount(url) == 2)
+        // Tagged sRGB, so players show the colours the screen had.
+        let video = try #require(try await AVURLAsset(url: url).loadTracks(withMediaType: .video).first)
+        let format = try #require(try await video.load(.formatDescriptions).first)
+        let extensions = CMFormatDescriptionGetExtensions(format) as? [String: Any] ?? [:]
+        #expect(extensions[kCVImageBufferColorPrimariesKey as String] as? String == kCVImageBufferColorPrimaries_ITU_R_709_2 as String)
+        #expect(extensions[kCVImageBufferTransferFunctionKey as String] as? String == kCVImageBufferTransferFunction_sRGB as String)
         let mixed = folder.appendingPathComponent("mixed.mp4")
         try await MediaEditor.mixAudio(url, output: mixed)
         #expect(await MediaEditor.audioTrackCount(mixed) == 1)

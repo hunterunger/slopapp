@@ -98,6 +98,8 @@ final class ScrollingCapture {
             return
         }
         stitcher = initial
+        // The first frame already counts: the readout starts at its height, not 0.
+        state.height = initial.height
         updatePreview()
         var lastPreview = Date()
         while !Task.isCancelled {
@@ -253,7 +255,7 @@ struct ScrollingBar: View {
                 FixedWidthText(text: "\(state.height.formatted()) px", variants: ["40,000 px"], alignment: .trailing)
                     .font(.body.monospacedDigit())
                     .padding(.trailing, Spacing.xs)
-                    .accessibilityLabel("Height, \(state.height) pixels")
+                    .accessibilityLabel("Height, \(state.height.formatted()) pixels")
             }
             if state.started {
                 BarTextButton(title: "Done", systemImage: "checkmark", prominent: true) { session.finish() }

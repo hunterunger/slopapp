@@ -113,11 +113,12 @@ struct GeneralPane: View {
         Pane {
             Section("App") {
                 LaunchAtLoginToggle()
-                Toggle("Show menu bar icon", isOn: $showMenuBarIcon)
-                if !showMenuBarIcon {
-                    Text("To bring the icon back, open \(info.name) again.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Toggle(isOn: $showMenuBarIcon) {
+                    Text("Show menu bar icon")
+                    // Also the way in when a full menu bar (or the notch) hides the icon.
+                    Text(showMenuBarIcon
+                         ? "If a full menu bar hides it, open \(info.name) again to get back here."
+                         : "To bring the icon back, open \(info.name) again.")
                 }
             }
             Section("Capture") {
@@ -241,8 +242,10 @@ struct QuickAccessPane: View {
                         Text("Thumbnail size")
                     } minimumValueLabel: {
                         Image(systemName: "photo").imageScale(.small)
+                            .accessibilityLabel("Smaller")
                     } maximumValueLabel: {
                         Image(systemName: "photo").imageScale(.large)
+                            .accessibilityLabel("Larger")
                     }
                     .labelsHidden()
                     .frame(width: 220)
@@ -392,9 +395,11 @@ struct RecordingPane: View {
             } header: {
                 Text("Clicks and Keys")
             } footer: {
-                Text("Shortcuts Only never shows what you type, like passwords or messages.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if model.recordShowKeys {
+                    Text("Shortcuts Only never shows what you type, like passwords or messages.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Section("Video") {
                 Picker("Frame rate", selection: $model.recordFrameRate) {

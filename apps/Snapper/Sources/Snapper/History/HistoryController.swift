@@ -77,29 +77,42 @@ final class HistoryController {
     // MARK: Recording captures
 
     /// Writes a fresh capture to history in the background (after its card is on screen).
+    /// The capture gets its history id at once; the files follow.
     func record(_ item: CaptureItem, kind: HistoryKind, source: SourceApp?) {
-        guard isOn, item.historyID == nil else { return }
+        guard let capture = begin(item, kind: kind, source: source) else { return }
+        Task { await write(capture, for: item) }
+    }
+
+    /// `record`, finished when it returns (quitting waits for it).
+    func recordNow(_ item: CaptureItem, kind: HistoryKind, source: SourceApp?) async {
+        guard let capture = begin(item, kind: kind, source: source) else { return }
+        await write(capture, for: item)
+    }
+
+    private func begin(_ item: CaptureItem, kind: HistoryKind, source: SourceApp?) -> HistoryCapture? {
+        guard isOn, item.historyID == nil else { return nil }
         let id = UUID()
         item.historyID = id
-        let capture = HistoryCapture(id: id, createdAt: item.createdAt, kind: kind, scale: item.scale, image: item.image,
-                                     original: item.isMedia ? nil : item.original, document: item.document,
-                                     media: item.media?.url, duration: item.media?.duration, format: model.format,
-                                     baseName: item.fileBaseName, source: source)
+        return HistoryCapture(id: id, createdAt: item.createdAt, kind: kind, scale: item.scale, image: item.image,
+                              original: item.isMedia ? nil : item.original, document: item.document,
+                              media: item.media?.url, duration: item.media?.duration, format: model.format,
+                              baseName: item.fileBaseName, source: source)
+    }
+
+    private func write(_ capture: HistoryCapture, for item: CaptureItem) async {
         let started = Diagnostics.now()
-        Task {
-            do {
-                let entry = try await store.add(capture)
-                insert(entry)
-                item.historyFile = store.fileURL(for: entry)
-                if let media = item.media {
-                    // The recording now lives in history; the temporary copy goes at quit.
-                    item.media = MediaFile(url: store.fileURL(for: entry), duration: media.duration)
-                }
-                Diagnostics.record("history saved kind=\(kind.rawValue) ms=\(Diagnostics.milliseconds(since: started)) bytes=\(entry.byteSize)")
-            } catch {
-                item.historyID = nil
-                Diagnostics.record("history write failed error=\(error)")
+        do {
+            let entry = try await store.add(capture)
+            insert(entry)
+            item.historyFile = store.fileURL(for: entry)
+            if let media = item.media {
+                // The recording now lives in history; the temporary copy goes at quit.
+                item.media = MediaFile(url: store.fileURL(for: entry), duration: media.duration)
             }
+            Diagnostics.record("history saved kind=\(capture.kind.rawValue) ms=\(Diagnostics.milliseconds(since: started)) bytes=\(entry.byteSize)")
+        } catch {
+            item.historyID = nil
+            Diagnostics.record("history write failed error=\(error)")
         }
     }
 

@@ -33,6 +33,10 @@ final class StreamRecorder: ScreenRecording {
                microphone: SampleTap?, to url: URL) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         let ownPID = ProcessInfo.processInfo.processIdentifier
+        // Our kept windows, looked up among all windows: the click and key overlay is
+        // transparent until something shows in it, and isn't listed as on screen until then.
+        let all = keepWindows.isEmpty ? content : try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        let ownKept = all.windows.filter { $0.owningApplication?.processID == ownPID && keepWindows.contains($0.windowID) }
         let filter: SCContentFilter
         var testMode = false
         var sourceRect = plan.sourceRect
@@ -40,8 +44,8 @@ final class StreamRecorder: ScreenRecording {
         case .display(let id):
             guard let display = content.displays.first(where: { $0.displayID == id }) else { throw RecordingError.sourceGone }
             let own = content.applications.filter { $0.processID == ownPID }
-            let keep = content.windows.filter { $0.owningApplication?.processID == ownPID && keepWindows.contains($0.windowID) }
-            filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: keep)
+            Diagnostics.record("display stream kept=\(ownKept.count) of \(keepWindows.count)")
+            filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: ownKept)
         case .testScene(let sceneID, let displayID):
             // Only our own windows: the scene and the overlays. Nothing else on screen, not
             // even surfaces no app owns, can be in the stream.
@@ -50,10 +54,9 @@ final class StreamRecorder: ScreenRecording {
                 throw RecordingError.sourceGone
             }
             if let display = content.displays.first(where: { $0.displayID == displayID }) {
-                let windows = content.windows.filter {
-                    $0.owningApplication?.processID == ownPID && ($0.windowID == sceneID || keepWindows.contains($0.windowID))
-                }
+                let windows = [scene] + ownKept.filter { $0.windowID != sceneID }
                 filter = SCContentFilter(display: display, including: windows)
+                Diagnostics.record("test stream windows=\(windows.count) kept=\(keepWindows.count)")
             } else {
                 // The display isn't shareable (asleep or locked): the scene window on its own,
                 // without the overlays, so scripted tests of sound, pause and trim still run.
