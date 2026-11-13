@@ -239,16 +239,17 @@ node scripts/feed.mjs --stdout         # print it
 ### What a tagged release does
 
 `release.yml` (tag `<slug>-v<version>`): test, bundle, smoke, optional sign + notarize,
-create the GitHub Release with `<Name>.zip` and `<Name>-icon.png`, then call `feed.yml`, which
-downloads the newest release zip of every app, runs `feed.mjs`, and commits `feed.json` to the
-`gh-pages` branch. `feed.yml` also runs when the app list changes on `main`, and by hand
-(`gh workflow run Feed`). Each tag releases in its own queue (`concurrency: release-<tag>`),
-so tags pushed together build, sign and notarize at the same time. Feed runs
-(`concurrency: feed`) go one at a time so `gh-pages` never races. GitHub keeps only one
-waiting run per group, so when several releases finish close together the older waiting
-feed jobs show as cancelled. That's expected: their releases are published, and the feed run
-that goes reads every app's newest release. One-time setup: Settings > Pages > Deploy from a
-branch > `gh-pages` / root.
+and create the GitHub Release with `<Name>.zip` and `<Name>-icon.png`. Each tag releases in
+its own queue (`concurrency: release-<tag>`), so tags pushed together build, sign and notarize
+at the same time.
+
+When a release succeeds, `feed.yml` starts on its own (`workflow_run`): it downloads the
+newest release zip of every app, runs `feed.mjs` against `main`'s app list, and commits
+`feed.json` to the `gh-pages` branch. It also runs when the app list changes on `main`, and by
+hand (`gh workflow run Feed`). Feed runs go one at a time (`concurrency: feed`) so `gh-pages`
+never races. GitHub keeps only the newest waiting run, so after several releases some Feed
+runs show as cancelled; the one that goes lists every release. Release runs aren't affected.
+One-time setup: Settings > Pages > Deploy from a branch > `gh-pages` / root.
 
 ### Testing the launcher against a local feed
 

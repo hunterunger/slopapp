@@ -4,8 +4,9 @@ name: Feed
 # gh-pages branch: the newest release of every app, plus built and planned apps that have no
 # release yet ("coming soon", or "installed" when they're already on the Mac).
 #
-# Runs after every release (release.yml calls it), whenever the app list changes on main,
-# and by hand: gh workflow run Feed
+# Runs after every successful release (when a "Release app" run finishes), whenever the app
+# list changes on main, and by hand: gh workflow run Feed. It always uses main's copy of the
+# app list, and reads each app's newest release, so a run picks up every release so far.
 on:
   push:
     branches: [main]
@@ -19,7 +20,9 @@ on:
       - "scripts/shots-feed.mjs"
       - ".github/workflows/feed.yml"
   workflow_dispatch:
-  workflow_call:
+  workflow_run:
+    workflows: ["Release app"]
+    types: [completed]
 
 permissions:
   contents: write
@@ -28,7 +31,11 @@ jobs:
   feed:
     runs-on: macos-latest
     timeout-minutes: 20
-    # One at a time, so a release and a catalog change can't race on gh-pages.
+    # Skip releases that failed (nothing new to list).
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    # One at a time, so two releases or a catalog change can't race on gh-pages. When several
+    # runs queue, GitHub keeps only the newest waiting one and cancels the rest; that's fine,
+    # since the run that goes reads every app's newest release.
     concurrency:
       group: feed
       cancel-in-progress: false
@@ -55,6 +62,8 @@ jobs:
         run: node scripts/feed.mjs
 
       - name: Publish feed.json to gh-pages
+        env:
+          TRIGGER: ${{ github.event.workflow_run.head_branch || github.ref_name }}
         run: |
           PAGES="$RUNNER_TEMP/pages"
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
@@ -71,7 +80,7 @@ jobs:
           if git -C "$PAGES" diff --cached --quiet; then echo "feed unchanged"; exit 0; fi
           git -C "$PAGES" -c user.name="github-actions[bot]" \
             -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit --quiet -m "feed: ${GITHUB_REF_NAME} ${GITHUB_SHA::7}"
+            commit --quiet -m "feed: ${TRIGGER} ${GITHUB_SHA::7}"
           git -C "$PAGES" push origin gh-pages
 
       - name: Upload feed

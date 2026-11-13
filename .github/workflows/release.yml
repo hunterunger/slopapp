@@ -11,8 +11,8 @@
 # releases/latest/download/Slopapp.dmg) always mean the launcher. App releases are
 # published with --latest=false.
 #
-# Then the update feed is regenerated from the latest release of every app (feed.yml,
-# scripts/feed.mjs) and published to the gh-pages branch as feed.json, which is what the
+# When a release succeeds, feed.yml (its own workflow, started by this one finishing)
+# regenerates the update feed from the latest release of every app (scripts/feed.mjs) and published to the gh-pages branch as feed.json, which is what the
 # Slopapp launcher reads (brand.json feedUrl). Turn on GitHub Pages for the repo with
 # "Deploy from a branch: gh-pages / (root)". See docs/pipeline.md, "Releases and the feed".
 #
@@ -41,10 +41,8 @@ on:
 permissions:
   contents: write
 
-# Each tag gets its own queue, so several apps release at once. Only the feed step at the end
-# goes one at a time (feed.yml's `feed` group). GitHub keeps one waiting run per group, so
-# when releases finish close together the older waiting feed job is cancelled: its release
-# is already published, and the feed run that does go reads every app's newest release.
+# Each tag gets its own queue, so several apps release at once. The feed is a separate
+# workflow that goes one at a time (feed.yml), so these runs never wait on it.
 concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
@@ -175,10 +173,3 @@ jobs:
         run: |
           security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
           rm -f "$RUNNER_TEMP/notary.p8"
-
-  # Then the launcher's feed, with this release in it.
-  feed:
-    needs: release
-    uses: ./.github/workflows/feed.yml
-    permissions:
-      contents: write
