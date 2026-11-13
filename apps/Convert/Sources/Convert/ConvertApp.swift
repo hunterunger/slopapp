@@ -88,6 +88,23 @@ struct ConvertCommands: Commands {
                 .disabled(!turnable)
             Button("Flip Vertical") { model.updateOptions(for: selected) { $0.transform = $0.transform.flippedVertically() } }
                 .disabled(!turnable)
+            Button("Crop…") { model.cropping = selected.first }
+                .keyboardShortcut("c", modifiers: [.command, .option])
+                .disabled(selected.count != 1 || !selected.allSatisfy(model.canCrop))
+            Divider()
+            let withSubtitles = selected.filter(model.hasSubtitles)
+            Menu("Subtitles") {
+                Button("Keep Subtitles") { model.updateOptions(for: withSubtitles) { $0.subtitles = .keep } }
+                Button("Burn Into the Picture") { model.burnFirstSubtitles(for: withSubtitles) }
+                Button("Remove Subtitles") { model.updateOptions(for: withSubtitles) { $0.subtitles = .none } }
+            }
+            .disabled(withSubtitles.isEmpty)
+            let surround = selected.filter(model.isSurround)
+            Button(surround.allSatisfy { model.options(for: $0.input).stereo } && !surround.isEmpty ? "Keep Surround Sound" : "Mix Surround to Stereo") {
+                let toStereo = !surround.allSatisfy { model.options(for: $0.input).stereo }
+                model.updateOptions(for: surround) { $0.stereo = toStereo }
+            }
+            .disabled(surround.isEmpty)
             Divider()
             Button("Merge Selected Files…") { model.merge(selected) }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
@@ -118,6 +135,7 @@ struct ConvertCommands: Commands {
             Divider()
             QualityMenuItems(model: model, withShortcuts: true)
             Divider()
+            Menu("File Size") { FileSizeMenuItems(model: model) }
             Menu("Size") { SizeMenuItems(model: model) }
             Menu("Save To") { DestinationMenuItems(model: model) }
             Divider()
@@ -161,6 +179,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var escapeMonitor: Any?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // MKV/WebM previews for the trim and crop sheets.
+        PlayablePreviews.shared.removeAll()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Snapshot.startIfAsked()

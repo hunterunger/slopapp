@@ -13,11 +13,14 @@ public struct Preset: Codable, Equatable, Hashable, Sendable, Identifiable {
     public var image: ImageTarget
     public var quality: Quality
     public var size: SizeLimit
+    /// Fit each file in this size instead of using Quality (saved presets only; optional so
+    /// presets saved by older versions still load).
+    public var fileSize: FileSizeLimit?
     public var isBuiltIn: Bool
 
     public init(id: String = UUID().uuidString, name: String, symbol: String = "slider.horizontal.3",
                 video: VideoTarget, audio: AudioTarget, image: ImageTarget, quality: Quality,
-                size: SizeLimit, isBuiltIn: Bool = false) {
+                size: SizeLimit, fileSize: FileSizeLimit? = nil, isBuiltIn: Bool = false) {
         self.id = id
         self.name = name
         self.symbol = symbol
@@ -26,24 +29,25 @@ public struct Preset: Codable, Equatable, Hashable, Sendable, Identifiable {
         self.image = image
         self.quality = quality
         self.size = size
+        self.fileSize = fileSize
         self.isBuiltIn = isBuiltIn
     }
 
     /// The window's current choices as a preset to save.
     public init(name: String, from settings: ConvertSettings) {
         self.init(name: name, video: settings.video, audio: settings.audio, image: settings.image,
-                  quality: settings.quality, size: settings.size)
+                  quality: settings.quality, size: settings.size, fileSize: settings.fileSize)
     }
 
     /// "MP4 (HEVC), M4A (AAC), HEIC · Balanced · Up to 4K".
     public var detail: String {
-        "\(video.title), \(audio.title), \(image.title) · \(quality.title) · \(size.shortTitle)"
+        "\(video.title), \(audio.title), \(image.title) · \(fileSize?.title ?? quality.title) · \(size.shortTitle)"
     }
 
     /// Whether `settings` already match this preset.
     public func matches(_ settings: ConvertSettings) -> Bool {
         settings.video == video && settings.audio == audio && settings.image == image
-            && settings.quality == quality && settings.size == size
+            && settings.quality == quality && settings.size == size && settings.fileSize == fileSize
     }
 
     /// Presets for devices and common jobs. Every Apple device since 2017 plays HEVC; the
@@ -65,7 +69,7 @@ public struct Preset: Codable, Equatable, Hashable, Sendable, Identifiable {
 
     /// The built-in presets this Mac can do (ProRes, HEVC and HEIC depend on the Mac).
     public static func available(_ capabilities: Capabilities) -> [Preset] {
-        builtIn.filter { capabilities.canWrite($0.video) && capabilities.canWrite($0.image) }
+        builtIn.filter { capabilities.canWrite($0.video) && capabilities.canWrite($0.image) && capabilities.canWrite($0.audio) }
     }
 }
 
@@ -77,6 +81,7 @@ extension ConvertSettings {
         image = preset.image
         quality = preset.quality
         size = preset.size
+        fileSize = preset.fileSize
     }
 }
 

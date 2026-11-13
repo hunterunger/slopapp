@@ -138,7 +138,10 @@ struct CardView: View {
             return (message, true)
         default:
             if case .staged = entry, let problem = row.readError { return (problem, true) }
-            let edits = CardText.edits(row.options, kind: kind)
+            var edits = CardText.edits(row.options, kind: kind)
+            if let crop = row.options.crop {
+                edits = [model.cropTitle(crop, for: entry.input), edits].filter { !$0.isEmpty }.joined(separator: " · ")
+            }
             return edits.isEmpty ? nil : (edits, false)
         }
     }
@@ -279,11 +282,16 @@ struct CardStatusBar: View {
                                highlighted: row.options.trim != nil) { model.trimming = entry }
                 }
                 if model.canTurn(entry) {
-                    BarMenuButton(name: "Rotate and Flip", value: "", symbol: "rotate.right",
-                                  help: row.options.transform.isIdentity ? "Rotate or flip" : row.options.transform.title,
-                                  dark: true, highlighted: !row.options.transform.isIdentity, active: activeState.isActiveWindow,
+                    // Crop, rotate and flip: one tool for the picture's shape.
+                    let edited = !row.options.transform.isIdentity || row.options.crop != nil
+                    let help = [row.options.crop.map { model.cropTitle($0, for: entry.input) },
+                                row.options.transform.isIdentity ? nil : row.options.transform.title]
+                        .compactMap { $0 }.joined(separator: ", ")
+                    BarMenuButton(name: "Picture", value: "", symbol: "crop.rotate",
+                                  help: help.isEmpty ? "Crop, rotate or flip" : help,
+                                  dark: true, highlighted: edited, active: activeState.isActiveWindow,
                                   size: CGSize(width: CardMetrics.control, height: CardMetrics.control)) {
-                        model.turnEntries(for: targets)
+                        model.pictureEntries(for: targets)
                     }
                 }
                 if kind == .video, let info = row.info, info.hasAudio, !info.isAnimatedImage {
@@ -292,6 +300,23 @@ struct CardStatusBar: View {
                                   highlighted: row.options.sound != .all, active: activeState.isActiveWindow,
                                   size: CGSize(width: CardMetrics.control, height: CardMetrics.control)) {
                         model.soundEntries(for: entry)
+                    }
+                }
+                if kind == .audio, model.isSurround(entry), let info = row.info {
+                    BarMenuButton(name: "Sound", value: "", symbol: "hifispeaker.2",
+                                  help: row.options.stereo ? "Sound: mixed to stereo" : "Sound: \(Channels.name(info.channels) ?? "surround") kept",
+                                  dark: true, highlighted: row.options.stereo, active: activeState.isActiveWindow,
+                                  size: CGSize(width: CardMetrics.control, height: CardMetrics.control)) {
+                        model.surroundEntries(for: entry)
+                    }
+                }
+                if kind == .video, model.hasSubtitles(entry) {
+                    BarMenuButton(name: "Subtitles", value: "",
+                                  symbol: row.options.subtitles == .none ? "captions.bubble.fill" : "captions.bubble",
+                                  help: CardText.subtitles(row.options.subtitles, info: row.info), dark: true,
+                                  highlighted: row.options.subtitles != .keep, active: activeState.isActiveWindow,
+                                  size: CGSize(width: CardMetrics.control, height: CardMetrics.control)) {
+                        model.subtitleEntries(for: entry)
                     }
                 }
                 BarMenuButton(name: "Format", value: CardText.shortTarget(model.targetTitle(for: entry.input, kind: kind)),
@@ -346,7 +371,23 @@ enum CardText {
         case .none: parts.append("No sound")
         case .track(let index): parts.append("Sound track \(index + 1)")
         }
+        switch options.subtitles {
+        case .keep: break
+        case .burn: parts.append("Subtitles burned in")
+        case .none: parts.append("No subtitles")
+        }
+        if options.stereo { parts.append("Mixed to stereo") }
         return parts.joined(separator: " · ")
+    }
+
+    static func subtitles(_ choice: SubtitleChoice, info: MediaInfo?) -> String {
+        let tracks = info?.subtitleTracks ?? []
+        switch choice {
+        case .keep: return tracks.count > 1 ? "Subtitles: all \(tracks.count) kept" : "Subtitles: kept"
+        case .none: return "Subtitles: removed"
+        case .burn(let index):
+            return "Subtitles: \(tracks.first { $0.index == index }?.title ?? "track \(index + 1)") burned into the picture"
+        }
     }
 
     static func sound(_ choice: SoundChoice, info: MediaInfo) -> String {
@@ -426,6 +467,14 @@ final class CardThumbnails {
     func thumbnail(for url: URL, scale: CGFloat) async -> NSImage? {
         if let cached = cache.object(forKey: url as NSURL) { return cached }
         guard let kind = MediaTypes.kind(of: url), kind != .audio, MediaTypes.unreadableFormatName(for: url) == nil else { return nil }
+        if PlayablePreviews.shared.needsPreview(url) {
+            // Quick Look has no picture for MKV or WebM: take the first frame ourselves.
+            guard let frame = await PlayablePreviews.shared.thumbnail(url, maxSize: CGSize(width: 420 * scale, height: 240 * scale))
+            else { return nil }
+            let image = NSImage(cgImage: frame, size: NSSize(width: CGFloat(frame.width) / scale, height: CGFloat(frame.height) / scale))
+            cache.setObject(image, forKey: url as NSURL)
+            return image
+        }
         let request = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: 420, height: 240), scale: scale,
                                                    representationTypes: .thumbnail)
         guard let representation = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)

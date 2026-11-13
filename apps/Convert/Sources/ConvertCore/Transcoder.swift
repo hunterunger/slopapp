@@ -62,13 +62,26 @@ final class Transcoder: @unchecked Sendable {
 
         var pairs: [Pair] = []
         defer { activePairs.withLock { $0 = [] } }
+        var overlay: SubtitleOverlay?
+        if case .burn(let index) = plan.subtitles {
+            overlay = SubtitleOverlay(cues: try await SubtitleReader.cues(asset, trackIndex: index))
+        }
         if let videoPlan = plan.video {
             guard let videoTrack else { throw ConvertError.damaged(name: name) }
-            pairs.append(try await videoPair(videoPlan, track: videoTrack, reader: reader, writer: writer))
+            pairs.append(try await videoPair(videoPlan, track: videoTrack, reader: reader, writer: writer, subtitles: overlay))
         }
         if plan.audio != .none {
             guard !audioTracks.isEmpty else { throw ConvertError.noSound(name: name) }
             pairs.append(try await audioPair(plan.audio, tracks: audioTracks, reader: reader, writer: writer))
+        }
+        var notes: [String] = []
+        if case .copy(let indices) = plan.subtitles {
+            let (added, skipped) = try await subtitlePairs(indices, reader: reader, writer: writer)
+            pairs += added
+            if skipped > 0 {
+                notes.append(skipped == 1 ? "One subtitle track can't go in \(plan.fileExtension.uppercased()) files, so it was left out."
+                             : "\(skipped) subtitle tracks can't go in \(plan.fileExtension.uppercased()) files, so they were left out.")
+            }
         }
         if let urlAsset = asset as? AVURLAsset {
             writer.metadata = await Self.metadata(of: urlAsset, for: plan.fileType)
@@ -106,7 +119,6 @@ final class Transcoder: @unchecked Sendable {
             writer.cancelWriting()
             throw CancellationError()
         }
-        var notes: [String] = []
         if reader.status == .failed {
             log.error("reading failed: \(String(describing: reader.error))")
             // Files cut short by a recorder or a download often have a few bad frames at
@@ -178,7 +190,8 @@ final class Transcoder: @unchecked Sendable {
         }
     }
 
-    private func videoPair(_ plan: VideoPlan, track: AVAssetTrack, reader: AVAssetReader, writer: AVAssetWriter) async throws -> Pair {
+    private func videoPair(_ plan: VideoPlan, track: AVAssetTrack, reader: AVAssetReader, writer: AVAssetWriter,
+                           subtitles: SubtitleOverlay? = nil) async throws -> Pair {
         let (formats, sourceTransform, naturalSize, frameRate) = try await track.load(.formatDescriptions, .preferredTransform, .naturalSize, .nominalFrameRate)
         // A turn travels as the track's matrix (lossless, like a phone's own rotation).
         let shown = CGRect(origin: .zero, size: naturalSize).applying(sourceTransform)
@@ -203,8 +216,8 @@ final class Transcoder: @unchecked Sendable {
             if composition == nil, e.upright {
                 composition = Self.uprightComposition(
                     track: track, naturalSize: naturalSize, sourceTransform: sourceTransform, turn: self.plan.transform,
-                    renderSize: CGSize(width: e.width, height: e.height), frameRate: Double(frameRate),
-                    duration: try await asset.load(.duration))
+                    crop: e.crop, renderSize: CGSize(width: e.width, height: e.height), frameRate: Double(frameRate),
+                    duration: try await asset.load(.duration), subtitles: subtitles)
             }
             if let composition {
                 // Drawn through a composition: every video track, upright, at the render size.
@@ -220,6 +233,11 @@ final class Transcoder: @unchecked Sendable {
 
             var compression: [String: Any] = [:]
             if let quality = e.quality { compression[AVVideoQualityKey] = quality }
+            if let bitRate = e.bitRate {
+                compression[AVVideoAverageBitRateKey] = bitRate
+                // Keeps short bursts in check, so the file lands close to the size asked for.
+                compression[kVTCompressionPropertyKey_DataRateLimits as String] = [bitRate / 8 * 3 / 2, 1] as [Int]
+            }
             if e.frameRate > 0 { compression[AVVideoExpectedSourceFrameRateKey] = e.frameRate }
             switch e.codec {
             case .h264: compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel
@@ -271,20 +289,15 @@ final class Transcoder: @unchecked Sendable {
             input = AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: formats.first)
         case .encode(let e):
             // Decode (and mix every enabled track) to float PCM at the target rate and layout.
-            let mix = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: [
-                AVFormatIDKey: kAudioFormatLinearPCM,
-                AVLinearPCMBitDepthKey: 32,
-                AVLinearPCMIsFloatKey: true,
-                AVLinearPCMIsBigEndianKey: false,
-                AVLinearPCMIsNonInterleaved: false,
-                AVSampleRateKey: e.sampleRate,
-                AVNumberOfChannelsKey: e.channels,
-            ])
+            var mixSettings: [String: Any] = Self.floatPCM(sampleRate: e.sampleRate, channels: e.channels)
+            if let layout = e.layout { mixSettings[AVChannelLayoutKey] = Self.layoutData(layout) }
+            let mix = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: mixSettings)
             readerOutput = mix
             var settings: [String: Any] = [
                 AVSampleRateKey: e.sampleRate,
                 AVNumberOfChannelsKey: e.channels,
             ]
+            if let layout = e.layout { settings[AVChannelLayoutKey] = Self.layoutData(layout) }
             switch e.format {
             case .aac(let bitRate):
                 settings[AVFormatIDKey] = kAudioFormatMPEG4AAC
@@ -295,6 +308,8 @@ final class Transcoder: @unchecked Sendable {
             case .alac(let bits):
                 settings[AVFormatIDKey] = kAudioFormatAppleLossless
                 settings[AVEncoderBitDepthHintKey] = bits
+            case .flac:
+                preconditionFailure("FLAC is written by AudioFileWriter")
             case .pcm(let bits, let bigEndian):
                 settings[AVFormatIDKey] = kAudioFormatLinearPCM
                 settings[AVLinearPCMBitDepthKey] = bits
@@ -399,29 +414,59 @@ final class Transcoder: @unchecked Sendable {
 
     // MARK: Helpers
 
-    /// Draws one video track upright (its own rotation, then `turn`), scaled to `renderSize`.
-    static func uprightComposition(track: AVAssetTrack, naturalSize: CGSize, sourceTransform: CGAffineTransform,
-                                   turn: PictureTransform, renderSize: CGSize, frameRate: Double,
-                                   duration: CMTime) -> AVVideoComposition {
-        let shown = CGRect(origin: .zero, size: naturalSize).applying(sourceTransform)
-        var (w, h) = (abs(shown.width), abs(shown.height))
-        var t = sourceTransform.concatenating(CGAffineTransform(translationX: -shown.minX, y: -shown.minY))
-        t = t.concatenating(turn.affine(width: w, height: h))
-        if turn.swapsSides { swap(&w, &h) }
-        t = t.concatenating(CGAffineTransform(scaleX: renderSize.width / max(1, w), y: renderSize.height / max(1, h)))
-        let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
-        layer.setTransform(t, at: .zero)
-        let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
-        instruction.layerInstructions = [layer]
-        let composition = AVMutableVideoComposition()
-        composition.renderSize = renderSize
-        composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(frameRate > 0 ? min(120, frameRate.rounded()) : 30))
-        composition.instructions = [instruction]
-        composition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
-        composition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
-        composition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
-        return composition
+    /// Decoded sound as the mix output gives it (interleaved 32-bit float).
+    static func floatPCM(sampleRate: Double, channels: Int) -> [String: Any] {
+        [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: channels,
+        ]
+    }
+
+    static func layoutData(_ tag: AudioChannelLayoutTag) -> Data {
+        var layout = AudioChannelLayout()
+        layout.mChannelLayoutTag = tag
+        return Data(bytes: &layout, count: MemoryLayout<AudioChannelLayout>.size)
+    }
+
+    /// Copies subtitle and caption tracks as they are. Returns the feeds and how many tracks
+    /// the container refused.
+    private func subtitlePairs(_ indices: [Int], reader: AVAssetReader, writer: AVAssetWriter) async throws -> ([Pair], Int) {
+        let tracks = try await SubtitleReader.subtitleTracks(asset)
+        var pairs: [Pair] = []
+        var inputs: [AVAssetWriterInput] = []
+        var defaultInput: AVAssetWriterInput?
+        var skipped = 0
+        for index in indices where tracks.indices.contains(index) {
+            let track = tracks[index]
+            let (formats, language, extended, enabled) = try await track.load(.formatDescriptions, .languageCode,
+                                                                                .extendedLanguageTag, .isEnabled)
+            let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+            let input = AVAssetWriterInput(mediaType: track.mediaType, outputSettings: nil, sourceFormatHint: formats.first)
+            input.expectsMediaDataInRealTime = false
+            if let language { input.languageCode = language }
+            if let extended { input.extendedLanguageTag = extended }
+            guard reader.canAdd(output), writer.canAdd(input) else {
+                skipped += 1
+                continue
+            }
+            output.alwaysCopiesSampleData = false
+            reader.add(output)
+            writer.add(input)
+            if enabled, defaultInput == nil { defaultInput = input }
+            inputs.append(input)
+            pairs.append(Pair(output: output, input: input, label: "subtitles"))
+        }
+        if !inputs.isEmpty {
+            // One group, so players offer them as choices.
+            let group = AVAssetWriterInputGroup(inputs: inputs, defaultInput: defaultInput)
+            if writer.canAdd(group) { writer.add(group) }
+        }
+        return (pairs, skipped)
     }
 
     static var rec709: [String: Any] { [

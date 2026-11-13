@@ -217,6 +217,17 @@ public enum FixtureMaker {
     public static func audio(_ url: URL, seconds: Double = 2, channels: Int = 2, sampleRate: Double = 44_100, bits: Int = 16) throws {
         try? FileManager.default.removeItem(at: url)
         var settings: [String: Any] = [AVSampleRateKey: sampleRate, AVNumberOfChannelsKey: channels]
+        // Surround needs its layout: 5.1 and 7.1 in WAV order (L R C LFE Ls Rs …).
+        let tag: AudioChannelLayoutTag? = switch channels {
+        case 6: kAudioChannelLayoutTag_MPEG_5_1_A
+        case 8: kAudioChannelLayoutTag_MPEG_7_1_C
+        default: nil
+        }
+        if let tag {
+            var layout = AudioChannelLayout()
+            layout.mChannelLayoutTag = tag
+            settings[AVChannelLayoutKey] = Data(bytes: &layout, count: MemoryLayout<AudioChannelLayout>.size)
+        }
         switch url.pathExtension.lowercased() {
         case "m4a":
             settings[AVFormatIDKey] = kAudioFormatMPEG4AAC
@@ -327,9 +338,21 @@ public enum FixtureMaker {
         try add("Sideways Photo.jpg") { try image($0, type: .jpeg, width: 1200, height: 900, orientation: 6) }
         try add("Logo.png") { try image($0, type: .png, width: 512, height: 512, alpha: true) }
         try add("Animated.gif") { try image($0, type: .gif, width: 200, height: 150, frames: 4) }
-        try add("Movie.mkv") { try Data("not really a matroska file".utf8).write(to: $0) }
+        try add("Surround.wav") { try audio($0, seconds: 4, channels: 6, sampleRate: 48_000) }
+        try add("Not Really.mkv") { try Data("not really a matroska file".utf8).write(to: $0) }
         try add("Broken.mp4") { try Data((0..<4096).map { UInt8(truncatingIfNeeded: $0 &* 31) }).write(to: $0) }
         try add("Notes.txt") { try Data("Convert should say it can't convert this.".utf8).write(to: $0) }
         return made
+    }
+
+    /// The Matroska part of the set (needs the clips above): a real MKV with subtitles, made
+    /// from "Clip H264.mov".
+    public static func matroskaSet(in folder: URL) async throws -> [URL] {
+        let source = folder.appendingPathComponent("Clip H264.mov")
+        let movie = folder.appendingPathComponent("Movie with Subtitles.mkv")
+        var spec = MatroskaFixture.Spec()
+        spec.subtitles = [(0.3, 1.6, "This line is a subtitle"), (1.8, 3.6, "<i>And this is the second one</i>")]
+        try await MatroskaFixture.make(movie, from: source, spec: spec)
+        return [movie]
     }
 }

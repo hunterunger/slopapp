@@ -1,3 +1,4 @@
+import AudioToolbox
 import AVFoundation
 import CoreGraphics
 import Foundation
@@ -11,11 +12,27 @@ public struct Capabilities: Sendable, Equatable {
     public var writableImageTypes: Set<String>
     public var canEncodeHEVC: Bool
     public var canEncodeProRes: Bool
+    /// Audio encoders by FourCC ("flac", "aac "…), from AudioToolbox.
+    public var audioEncoders: Set<String>
+    public var decoders: DecoderCapabilities
 
-    public init(writableImageTypes: Set<String>, canEncodeHEVC: Bool, canEncodeProRes: Bool) {
+    public init(writableImageTypes: Set<String>, canEncodeHEVC: Bool, canEncodeProRes: Bool,
+                audioEncoders: Set<String> = ["aac ", "alac", "lpcm", "flac"],
+                decoders: DecoderCapabilities = DecoderCapabilities(vp9: true, av1: true)) {
         self.writableImageTypes = writableImageTypes
         self.canEncodeHEVC = canEncodeHEVC
         self.canEncodeProRes = canEncodeProRes
+        self.audioEncoders = audioEncoders
+        self.decoders = decoders
+    }
+
+    /// AudioToolbox's encoders, by FourCC.
+    static func systemAudioEncoders() -> Set<String> {
+        var size: UInt32 = 0
+        guard AudioFormatGetPropertyInfo(kAudioFormatProperty_EncodeFormatIDs, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ids = [UInt32](repeating: 0, count: Int(size) / 4)
+        guard AudioFormatGetProperty(kAudioFormatProperty_EncodeFormatIDs, 0, nil, &size, &ids) == noErr else { return [] }
+        return Set(ids.map(Codecs.fourCC))
     }
 
     public static let system: Capabilities = {
@@ -27,9 +44,20 @@ public struct Capabilities: Sendable, Equatable {
         return Capabilities(
             writableImageTypes: Set((CGImageDestinationCopyTypeIdentifiers() as? [String]) ?? []),
             canEncodeHEVC: codecs.contains(kCMVideoCodecType_HEVC),
-            canEncodeProRes: codecs.contains(kCMVideoCodecType_AppleProRes422)
+            canEncodeProRes: codecs.contains(kCMVideoCodecType_AppleProRes422),
+            audioEncoders: systemAudioEncoders(),
+            decoders: .system
         )
     }()
+
+    public func canWrite(_ target: AudioTarget) -> Bool {
+        switch target {
+        case .flac: audioEncoders.contains("flac")
+        default: true
+        }
+    }
+
+    public var audioTargets: [AudioTarget] { AudioTarget.allCases.filter(canWrite) }
 
     public func canWrite(_ target: ImageTarget) -> Bool {
         writableImageTypes.contains(target.type.identifier)
@@ -58,8 +86,10 @@ enum ImageConverter {
     }
 
     /// True when the output would be the same format at the same size: nothing to do.
-    static func isNoOp(_ info: MediaInfo, inputType: UTType?, target: ImageTarget, size: SizeLimit) -> Bool {
+    static func isNoOp(_ info: MediaInfo, inputType: UTType?, target: ImageTarget, size: SizeLimit,
+                       fileSize: FileSizeLimit? = nil) -> Bool {
         guard let inputType, info.frameCount == 1 else { return false }
+        if let fileSize, info.fileBytes == 0 || info.fileBytes > fileSize.bytes { return false }
         let same = inputType.conforms(to: target.type)
             || (target == .heic && inputType.conforms(to: .heif))
         let (w, h) = Planner.fit(info.width, info.height, in: size.box)
@@ -67,7 +97,8 @@ enum ImageConverter {
     }
 
     static func convert(_ url: URL, to output: URL, target: ImageTarget, quality: Quality, size: SizeLimit,
-                        turn: PictureTransform = .identity, progress: (Double) -> Void) throws -> Result {
+                        turn: PictureTransform = .identity, crop: CropRect? = nil, fileSize: FileSizeLimit? = nil,
+                        progress: (Double) -> Void) throws -> Result {
         let name = url.lastPathComponent
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
               CGImageSourceGetCount(source) > 0
@@ -79,11 +110,26 @@ enum ImageConverter {
         var notes: [String] = []
         if CGImageSourceGetCount(source) > 1 { notes.append("Only the first frame was kept.") }
 
-        let (fitW, fitH) = Planner.fit(width, height, in: size.box)
-        // Turned or mirrored pictures are decoded upright and redrawn, like resized ones.
-        let resizing = fitW < width || fitH < height || !turn.isIdentity
+        // A crop is in the picture as shown (upright).
+        let rotated = orientation >= 5 && orientation <= 8
+        let (uprightW, uprightH) = rotated ? (height, width) : (width, height)
+        let cropPixels = crop.flatMap { $0.isWhole ? nil : $0.pixels(width: uprightW, height: uprightH) }
+        let (fitW, fitH) = cropPixels.map { Planner.fit(Int($0.width), Int($0.height), in: size.box) }
+            ?? Planner.fit(width, height, in: size.box)
+        // Turned, mirrored or cropped pictures are decoded upright and redrawn, like resized ones.
+        let resizing = fitW < width || fitH < height || !turn.isIdentity || cropPixels != nil
         let decoded: CGImage?
-        if resizing {
+        if let cropPixels {
+            // Upright at full size, then the crop, then down to the size limit.
+            decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: max(uprightW, uprightH),
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+            ] as CFDictionary)
+                .flatMap { $0.cropping(to: cropPixels) }
+                .flatMap { fitW < Int(cropPixels.width) ? scaled($0, width: fitW, height: fitH) : $0 }
+        } else if resizing {
             // Decode straight to the smaller size, upright.
             decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -105,8 +151,6 @@ enum ImageConverter {
         if target == .jpeg, hasAlpha(image) {
             image = flattened(image) ?? image
         }
-        guard let destination = CGImageDestinationCreateWithURL(output as CFURL, target.type.identifier as CFString, 1, nil)
-        else { throw ConvertError.encodeFailed(name: name) }
 
         // Keep camera, location and other metadata; fix up what changed.
         let outOrientation: UInt32 = resizing ? 1 : orientation
@@ -124,32 +168,99 @@ enum ImageConverter {
         } else if target == .tiff {
             options[kCGImagePropertyTIFFDictionary] = [kCGImagePropertyTIFFCompression: 5]
         }
-        if resizing, var exif = options[kCGImagePropertyExifDictionary] as? [CFString: Any] {
-            exif[kCGImagePropertyExifPixelXDimension] = image.width
-            exif[kCGImagePropertyExifPixelYDimension] = image.height
-            options[kCGImagePropertyExifDictionary] = exif
-        }
-        if target.isLossy {
-            options[kCGImageDestinationLossyCompressionQuality] = QualityTable.imageQuality(quality, target: target)
-        }
-        CGImageDestinationAddImage(destination, image, options as CFDictionary)
+        let auxSource: CGImageSource? = !resizing && (target == .heic || target == .jpeg) ? source : nil
 
-        // iPhone HDR photos keep their brightness (gain map) when the size doesn't change.
-        if !resizing, target == .heic || target == .jpeg {
-            var auxTypes = [kCGImageAuxiliaryDataTypeHDRGainMap]
-            if #available(macOS 15, *) { auxTypes.insert(kCGImageAuxiliaryDataTypeISOGainMap, at: 0) }
-            for auxType in auxTypes {
-                if let info = CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, auxType) {
-                    CGImageDestinationAddAuxiliaryDataInfo(destination, auxType, info)
-                    break
+        /// Encodes `picture` at a lossy quality into a destination.
+        func encode(_ picture: CGImage, quality q: Double, into destination: CGImageDestination) {
+            var options = options
+            if resizing || picture.width != image.width, var exif = options[kCGImagePropertyExifDictionary] as? [CFString: Any] {
+                exif[kCGImagePropertyExifPixelXDimension] = picture.width
+                exif[kCGImagePropertyExifPixelYDimension] = picture.height
+                options[kCGImagePropertyExifDictionary] = exif
+            }
+            if target.isLossy { options[kCGImageDestinationLossyCompressionQuality] = q }
+            CGImageDestinationAddImage(destination, picture, options as CFDictionary)
+            // iPhone HDR photos keep their brightness (gain map) when the size doesn't change.
+            if let auxSource, picture.width == image.width {
+                var auxTypes = [kCGImageAuxiliaryDataTypeHDRGainMap]
+                if #available(macOS 15, *) { auxTypes.insert(kCGImageAuxiliaryDataTypeISOGainMap, at: 0) }
+                for auxType in auxTypes {
+                    if let info = CGImageSourceCopyAuxiliaryDataInfoAtIndex(auxSource, 0, auxType) {
+                        CGImageDestinationAddAuxiliaryDataInfo(destination, auxType, info)
+                        break
+                    }
                 }
             }
         }
+        let wanted = QualityTable.imageQuality(quality, target: target)
+
+        if let fileSize, !(target.isLossy == false && fileSize.bytes <= 0) {
+            // Aim at a size: the best quality that fits, then smaller pictures if none does.
+            func data(_ picture: CGImage, _ q: Double) -> Data? {
+                let buffer = NSMutableData()
+                guard let destination = CGImageDestinationCreateWithData(buffer, target.type.identifier as CFString, 1, nil)
+                else { return nil }
+                encode(picture, quality: q, into: destination)
+                return CGImageDestinationFinalize(destination) ? buffer as Data : nil
+            }
+            let limit = Int(fileSize.bytes)
+            var picture = image
+            var chosen: Data?
+            var lowered = false
+            for _ in 0..<6 {
+                try Task.checkCancellation()
+                guard let first = data(picture, wanted) else { throw ConvertError.encodeFailed(name: name) }
+                if first.count <= limit { chosen = first; break }
+                var tooBig = first.count
+                if target.isLossy {
+                    // Binary search between a floor and the asked-for quality.
+                    var low = 0.1, high = wanted
+                    var best: Data?
+                    for _ in 0..<7 {
+                        let mid = (low + high) / 2
+                        guard let candidate = data(picture, mid) else { break }
+                        if candidate.count <= limit { best = candidate; low = mid } else { high = mid; tooBig = candidate.count }
+                    }
+                    if let best { chosen = best; lowered = true; break }
+                }
+                // Even the lowest quality is too big: a smaller picture.
+                let scale = max(0.3, min(0.9, (Double(limit) / Double(tooBig)).squareRoot() * 0.95))
+                guard let smaller = scaled(picture, width: max(1, Int(Double(picture.width) * scale)),
+                                           height: max(1, Int(Double(picture.height) * scale))) else { break }
+                picture = smaller
+            }
+            guard let chosen else {
+                throw ConvertError.cantFit(name: name, size: fileSize.title)
+            }
+            progress(0.8)
+            do { try chosen.write(to: output) } catch { throw ConvertError.diskFull(name: output.lastPathComponent) }
+            if picture.width != image.width {
+                notes.append("Made \(picture.width)×\(picture.height) to fit in \(FileSizeLimit.number(fileSize.megabytes)) MB.")
+            } else if lowered {
+                notes.append("Quality lowered to fit in \(FileSizeLimit.number(fileSize.megabytes)) MB.")
+            }
+            return Result(width: picture.width, height: picture.height, notes: notes)
+        }
+
+        guard let destination = CGImageDestinationCreateWithURL(output as CFURL, target.type.identifier as CFString, 1, nil)
+        else { throw ConvertError.encodeFailed(name: name) }
+        encode(image, quality: wanted, into: destination)
         progress(0.7)
         try Task.checkCancellation()
         guard CGImageDestinationFinalize(destination) else { throw ConvertError.encodeFailed(name: name) }
-        let rotated = !resizing && orientation >= 5 && orientation <= 8
-        return Result(width: rotated ? image.height : image.width, height: rotated ? image.width : image.height, notes: notes)
+        let shownRotated = !resizing && rotated
+        return Result(width: shownRotated ? image.height : image.width, height: shownRotated ? image.width : image.height, notes: notes)
+    }
+
+    /// The picture drawn at a new size.
+    static func scaled(_ image: CGImage, width: Int, height: Int) -> CGImage? {
+        let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        let alpha: CGImageAlphaInfo = hasAlpha(image) ? .premultipliedLast : .noneSkipLast
+        guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: image.bitsPerComponent > 8 ? 16 : 8,
+                                  bytesPerRow: 0, space: space, bitmapInfo: alpha.rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return ctx.makeImage()
     }
 
     /// The picture turned and/or mirrored, drawn into a new bitmap.
@@ -203,10 +314,15 @@ enum GIFMaker {
     /// Long edge and frame rate for this clip: the Quality's values, the Size limit if
     /// smaller, never bigger than the source.
     static func shape(_ info: MediaInfo, quality: Quality, size: SizeLimit,
-                      turn: PictureTransform = .identity) -> (width: Int, height: Int, fps: Double) {
+                      turn: PictureTransform = .identity, crop: CropRect? = nil) -> (width: Int, height: Int, fps: Double) {
         let q = QualityTable.gif(quality)
         let long = min(q.longEdge, size.box?.long ?? Int.max)
-        let (dw, dh) = turn.swapsSides ? (info.displayHeight, info.displayWidth) : (info.displayWidth, info.displayHeight)
+        var (cw, ch) = (info.displayWidth, info.displayHeight)
+        if let crop {
+            let pixels = crop.pixels(width: cw, height: ch)
+            (cw, ch) = (Int(pixels.width), Int(pixels.height))
+        }
+        let (dw, dh) = turn.swapsSides ? (ch, cw) : (cw, ch)
         let (w, h) = Planner.fit(dw, dh, in: (long, long))
         let fps = info.frameRate > 0 ? min(Double(q.fps), info.frameRate) : Double(q.fps)
         return (w, h, fps)
@@ -228,9 +344,10 @@ enum GIFMaker {
     }
 
     static func make(_ asset: AVURLAsset, info: MediaInfo, quality: Quality, size: SizeLimit,
-                     trim: TrimRange? = nil, turn: PictureTransform = .identity, to output: URL,
-                     name: String, progress: @escaping @Sendable (Double) -> Void) async throws -> Result {
-        let shape = shape(info, quality: quality, size: size, turn: turn)
+                     trim: TrimRange? = nil, turn: PictureTransform = .identity, crop: CropRect? = nil,
+                     subtitles: SubtitleOverlay? = nil, shape fixed: (width: Int, height: Int, fps: Double)? = nil,
+                     to output: URL, name: String, progress: @escaping @Sendable (Double) -> Void) async throws -> Result {
+        let shape = fixed ?? shape(info, quality: quality, size: size, turn: turn, crop: crop)
         let step = 1 / shape.fps
         let start = trim.map { $0.isWhole(of: info.duration) ? 0 : $0.start } ?? 0
         let end = trim.map { $0.isWhole(of: info.duration) ? info.duration : min($0.end, info.duration) } ?? info.duration
@@ -239,15 +356,15 @@ enum GIFMaker {
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        if !turn.isIdentity, let track = try await asset.loadTracks(withMediaType: .video).first {
-            // Turned or mirrored: draw the frames upright through a composition.
+        if !turn.isIdentity || crop != nil || subtitles != nil, let track = try await asset.loadTracks(withMediaType: .video).first {
+            // Turned, mirrored, cropped or captioned: draw the frames through a composition,
+            // straight at the GIF's size.
             let (natural, transform, rate) = try await track.load(.naturalSize, .preferredTransform, .nominalFrameRate)
-            let shown = CGRect(origin: .zero, size: natural).applying(transform)
-            var render = CGSize(width: abs(shown.width), height: abs(shown.height))
-            if turn.swapsSides { render = CGSize(width: render.height, height: render.width) }
+            let cropPixels = crop.map { $0.pixels(width: info.displayWidth, height: info.displayHeight) }
             generator.videoComposition = Transcoder.uprightComposition(
-                track: track, naturalSize: natural, sourceTransform: transform, turn: turn, renderSize: render,
-                frameRate: Double(rate), duration: try await asset.load(.duration))
+                track: track, naturalSize: natural, sourceTransform: transform, turn: turn, crop: cropPixels,
+                renderSize: CGSize(width: shape.width, height: shape.height),
+                frameRate: Double(rate), duration: try await asset.load(.duration), subtitles: subtitles)
         }
         generator.maximumSize = CGSize(width: shape.width, height: shape.height)
         generator.requestedTimeToleranceBefore = .zero

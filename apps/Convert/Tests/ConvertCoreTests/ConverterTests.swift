@@ -212,9 +212,10 @@ import UniformTypeIdentifiers
     }
 
     @Test func refusesWhatItCantRead() async throws {
-        let mkv = try fixture("Movie.mkv") { try Data("nope".utf8).write(to: $0) }
-        await #expect(throws: ConvertError.unreadableFormat(name: "Movie.mkv", format: "MKV")) {
-            try await converter().run(mkv)
+        // Tried first, then refused by name (MKV and WebM have their own reader now).
+        let wmv = try fixture("Movie.wmv") { try Data("nope".utf8).write(to: $0) }
+        await #expect(throws: ConvertError.unreadableFormat(name: "Movie.wmv", format: "WMV")) {
+            try await converter().run(wmv)
         }
         let broken = try fixture("Broken.mp4") { try Data(repeating: 7, count: 4096).write(to: $0) }
         await #expect(throws: ConvertError.damaged(name: "Broken.mp4")) {

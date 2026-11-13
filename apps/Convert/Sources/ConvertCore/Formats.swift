@@ -64,13 +64,16 @@ public enum VideoTarget: String, Codable, Sendable, CaseIterable, Identifiable {
 }
 
 public enum AudioTarget: String, Codable, Sendable, CaseIterable, Identifiable {
-    case m4a, alac, wav, aiff
+    // An MP3 target would slot in here, written through `AudioFileWriter` like FLAC, once
+    // there's an encoder (macOS has none; see the README).
+    case m4a, alac, flac, wav, aiff
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .m4a: "M4A (AAC)"
         case .alac: "Apple Lossless (M4A)"
+        case .flac: "FLAC"
         case .wav: "WAV"
         case .aiff: "AIFF"
         }
@@ -80,6 +83,7 @@ public enum AudioTarget: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .m4a: "Small, plays everywhere"
         case .alac: "Lossless, about half the size of WAV"
+        case .flac: "Lossless, plays in most apps and players"
         case .wav: "Uncompressed, for editors"
         case .aiff: "Uncompressed, for Mac audio apps"
         }
@@ -88,22 +92,29 @@ public enum AudioTarget: String, Codable, Sendable, CaseIterable, Identifiable {
     public var shortName: String {
         switch self {
         case .m4a, .alac: "M4A"
+        case .flac: "FLAC"
         case .wav: "WAV"
         case .aiff: "AIFF"
         }
     }
 
+    /// The container AVFoundation writes. FLAC files are written by `AudioFileWriter`.
     public var fileType: AVFileType {
         switch self {
         case .m4a, .alac: .m4a
+        case .flac: AVFileType(rawValue: "org.xiph.flac")
         case .wav: .wav
         case .aiff: .aiff
         }
     }
 
+    /// Written as an audio file (decoded sound in, a `.flac` out) rather than by AVAssetWriter.
+    public var usesAudioFile: Bool { self == .flac }
+
     public var fileExtension: String {
         switch self {
         case .m4a, .alac: "m4a"
+        case .flac: "flac"
         case .wav: "wav"
         case .aiff: "aiff"
         }
@@ -114,7 +125,9 @@ public enum AudioTarget: String, Codable, Sendable, CaseIterable, Identifiable {
 }
 
 public enum ImageTarget: String, Codable, Sendable, CaseIterable, Identifiable {
-    case jpeg, png, heic, avif, tiff
+    // WebP is offered only where ImageIO can write it (no macOS can yet, so menus don't show
+    // it); a bundled encoder would make `Capabilities.canWrite(.webp)` true.
+    case jpeg, png, heic, avif, webp, tiff
     public var id: String { rawValue }
 
     public var title: String {
@@ -123,6 +136,7 @@ public enum ImageTarget: String, Codable, Sendable, CaseIterable, Identifiable {
         case .png: "PNG"
         case .heic: "HEIC"
         case .avif: "AVIF"
+        case .webp: "WebP"
         case .tiff: "TIFF"
         }
     }
@@ -133,6 +147,7 @@ public enum ImageTarget: String, Codable, Sendable, CaseIterable, Identifiable {
         case .png: "Lossless, keeps transparency"
         case .heic: "Smaller than JPEG, Apple devices"
         case .avif: "Smallest, recent browsers"
+        case .webp: "Small, for websites"
         case .tiff: "Lossless, for print and editing"
         }
     }
@@ -143,6 +158,7 @@ public enum ImageTarget: String, Codable, Sendable, CaseIterable, Identifiable {
         case .png: .png
         case .heic: .heic
         case .avif: UTType("public.avif") ?? .image
+        case .webp: .webP
         case .tiff: .tiff
         }
     }
@@ -153,11 +169,12 @@ public enum ImageTarget: String, Codable, Sendable, CaseIterable, Identifiable {
         case .png: "png"
         case .heic: "heic"
         case .avif: "avif"
+        case .webp: "webp"
         case .tiff: "tiff"
         }
     }
 
-    public var isLossy: Bool { self == .jpeg || self == .heic || self == .avif }
+    public var isLossy: Bool { self == .jpeg || self == .heic || self == .avif || self == .webp }
 }
 
 /// Quality as intent. Each target maps it to its own numbers (see `QualityTable`).
@@ -237,6 +254,9 @@ public struct ConvertSettings: Codable, Equatable, Sendable {
     public var destination: Destination = .alongside
     /// Copy the original's creation and modification dates to the new file.
     public var keepDates = false
+    /// Make each file fit in this size (Convert picks the bit rate). Replaces Quality where
+    /// a size can be aimed at.
+    public var fileSize: FileSizeLimit?
 
     public init() {}
 
@@ -261,6 +281,7 @@ public struct ConvertSettings: Codable, Equatable, Sendable {
         size = (try? c.decode(SizeLimit.self, forKey: .size)) ?? d.size
         destination = (try? c.decode(Destination.self, forKey: .destination)) ?? d.destination
         keepDates = (try? c.decode(Bool.self, forKey: .keepDates)) ?? d.keepDates
+        fileSize = try? c.decodeIfPresent(FileSizeLimit.self, forKey: .fileSize)
     }
 }
 
@@ -275,14 +296,20 @@ public enum QualityTable {
         }
     }
 
-    /// AAC bit rate in bits per second for this many channels (after downmixing to ≤ 2).
+    /// AAC bit rate in bits per second for this many channels: mono, stereo, 5.1 or 7.1.
     public static func aacBitRate(_ quality: Quality, channels: Int) -> Int {
-        let stereo: Int = switch quality {
-        case .smaller: 96_000
-        case .balanced: 160_000
-        case .best: 256_000
+        switch (quality, channels) {
+        case (_, ...1): aacBitRate(quality, channels: 2) / 2
+        case (.smaller, 2): 96_000
+        case (.balanced, 2): 160_000
+        case (.best, 2): 256_000
+        case (.smaller, 3...6): 256_000
+        case (.balanced, 3...6): 384_000
+        case (.best, 3...6): 512_000
+        case (.smaller, _): 320_000
+        case (.balanced, _): 448_000
+        case (.best, _): 640_000
         }
-        return channels <= 1 ? stereo / 2 : stereo
     }
 
     /// Lossy image quality (0...1) for JPEG, HEIC and AVIF.
@@ -334,11 +361,12 @@ public enum MediaTypes {
         return nil
     }
 
-    /// Containers macOS can't open at all, with the name people know them by.
+    /// Containers macOS often can't open, with the name people know them by. Used to explain
+    /// a file AVFoundation couldn't read (it's always tried first: newer macOS versions read
+    /// more, Ogg for one). MKV and WebM have their own reader (`MatroskaBridge`).
     public static func unreadableFormatName(for url: URL) -> String? {
         switch url.pathExtension.lowercased() {
-        case "mkv", "mka", "mk3d": "MKV"
-        case "webm": "WebM"
+        case "avi": "AVI"
         case "wmv", "asf": "WMV"
         case "wma": "WMA"
         case "flv", "f4v": "FLV"

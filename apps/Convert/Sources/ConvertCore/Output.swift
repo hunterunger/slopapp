@@ -20,11 +20,15 @@ public enum ConvertError: LocalizedError, Equatable {
     case cantWriteFormat(format: String, kind: MediaKind)
     /// Files that can't be merged, with the reason.
     case cantMerge(reason: String)
+    /// A codec macOS can't decode ("VP8 video"), in a container we can read.
+    case unreadableCodec(name: String, codec: String)
+    /// Couldn't get it under the size asked for, even small.
+    case cantFit(name: String, size: String)
 
     /// Trying the same file again can't work (only another file or another app can help).
     public var isFinal: Bool {
         switch self {
-        case .unreadableFormat, .unsupported, .damaged, .protected, .empty: true
+        case .unreadableFormat, .unsupported, .damaged, .protected, .empty, .unreadableCodec: true
         default: false
         }
     }
@@ -44,12 +48,14 @@ public enum ConvertError: LocalizedError, Equatable {
         case .tooManyNames(let name): "Couldn't find a free name for \(name)."
         case .cantWriteFormat(let format, _): "This Mac can't save \(format) files."
         case .cantMerge(let reason): "Couldn't merge these files. \(reason)"
+        case .unreadableCodec(_, let codec): "Convert can't read \(codec). macOS has no decoder for it."
+        case .cantFit(let name, let size): "Couldn't make \(name) \(size.prefix(1).lowercased() + size.dropFirst())."
         }
     }
 
     public var recoverySuggestion: String? {
         switch self {
-        case .unreadableFormat: "A free tool like HandBrake can convert it."
+        case .unreadableFormat, .unreadableCodec: "A free tool like HandBrake can convert it."
         case .unsupported: "Convert works with videos, audio files and images."
         case .damaged: "It may be damaged or use a codec macOS can't play. Try opening it in QuickTime Player or Preview."
         case .protected: "Files bought with copy protection can only be played in the app they came from."
@@ -62,6 +68,7 @@ public enum ConvertError: LocalizedError, Equatable {
         case .tooManyNames: "Rename or move some files, then try again."
         case .cantWriteFormat(_, let kind): "Choose another format under \(kind.title)."
         case .cantMerge: nil
+        case .cantFit: "Choose a bigger size under Quality, or another format."
         }
     }
 }

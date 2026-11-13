@@ -197,7 +197,9 @@ func h264Clip(width: Int = 1920, height: Int = 1080, audio: String? = "aac ", bi
         info.videoCodec = "hvc1"
         #expect(info.summary == "HEVC · 1920×1080 · 0:10")
         #expect(Codecs.audioName(".mp3") == "MP3")
-        #expect(MediaTypes.unreadableFormatName(for: URL(fileURLWithPath: "/a/b.MKV")) == "MKV")
+        #expect(MediaTypes.unreadableFormatName(for: URL(fileURLWithPath: "/a/b.WMV")) == "WMV")
+        // MKV and WebM have their own reader now.
+        #expect(MediaTypes.unreadableFormatName(for: URL(fileURLWithPath: "/a/b.mkv")) == nil)
         #expect(MediaTypes.kind(of: URL(fileURLWithPath: "/a/b.mov")) == .video)
         #expect(MediaTypes.kind(of: URL(fileURLWithPath: "/a/b.mp3")) == .audio)
         #expect(MediaTypes.kind(of: URL(fileURLWithPath: "/a/b.heic")) == .image)
