@@ -107,9 +107,9 @@
       "menuBarOnly": true,
       "favourite": true,
       "priority": 1,
-      "status": "beta",
-      "version": "0.2.0",
-      "build": 2,
+      "status": "stable",
+      "version": "1.0.0",
+      "build": 3,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.switchboard",
       "infoPlist": {
@@ -211,7 +211,7 @@
         }
       ],
       "shotsVersion": "0.2.0-1",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/switchboard-v0.2.0/Switchboard.zip"
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/switchboard-v1.0.0/Switchboard.zip"
     },
     {
       "slug": "clips",
@@ -226,13 +226,13 @@
       "menuBarOnly": true,
       "favourite": true,
       "priority": 1,
-      "status": "beta",
-      "version": "0.3.0",
-      "build": 3,
+      "status": "stable",
+      "version": "1.0.0",
+      "build": 4,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.clips",
       "dir": "apps/Clips",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/clips-v0.3.0/Clips.zip"
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/clips-v1.0.0/Clips.zip"
     },
     {
       "slug": "dictate",
@@ -247,9 +247,9 @@
       "size": "L",
       "menuBarOnly": true,
       "priority": 1,
-      "status": "alpha",
-      "version": "0.1.0",
-      "build": 1,
+      "status": "stable",
+      "version": "1.0.0",
+      "build": 2,
       "minimumMacOS": "26.4",
       "bundleId": "app.slopapp.dictate",
       "infoPlist": {
@@ -267,7 +267,7 @@
         ]
       },
       "dir": "apps/Dictate",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/dictate-v0.1.0/Dictate.zip"
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/dictate-v1.0.0/Dictate.zip"
     },
     {
       "slug": "squish",
@@ -331,9 +331,9 @@
       "menuBarOnly": true,
       "favourite": true,
       "priority": 1,
-      "status": "beta",
-      "version": "0.2.0",
-      "build": 2,
+      "status": "stable",
+      "version": "1.0.0",
+      "build": 3,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.snapper",
       "infoPlist": {
@@ -406,7 +406,7 @@
         }
       ],
       "shotsVersion": "0.2.0-1",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/snapper-v0.2.0/Snapper.zip"
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/snapper-v1.0.0/Snapper.zip"
     },
     {
       "slug": "convert",

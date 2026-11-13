@@ -8,9 +8,9 @@
   "category": "Utilities",
   "icon": "route",
   "menuBarOnly": true,
-  "status": "beta",
-  "version": "0.2.0",
-  "build": 2,
+  "status": "stable",
+  "version": "1.0.0",
+  "build": 3,
   "minimumMacOS": "14.0",
   "bundleId": "app.slopapp.switchboard",
   "infoPlist": {

@@ -9,9 +9,9 @@
   "category": "Productivity",
   "icon": "audio-lines",
   "menuBarOnly": true,
-  "status": "alpha",
-  "version": "0.1.0",
-  "build": 1,
+  "status": "stable",
+  "version": "1.0.0",
+  "build": 2,
   "minimumMacOS": "26.4",
   "bundleId": "app.slopapp.dictate",
   "infoPlist": {

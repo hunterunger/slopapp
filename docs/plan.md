@@ -22,6 +22,7 @@ cycle in [`dev-cycle.md`](dev-cycle.md). Status as of 2026-11-09.
 - [x] Research, build, self-test (57 tests, every v1 item)
 - [x] Blind test rounds until clean (2 rounds, 2026-11-03); released as beta 0.2.0
 - [ ] Owner uses it as the default browser for a week, then beta
+- [x] Stable 1.0.0 (2026-11-13, owner's call; a third blind round found one major, fixed)
 
 Switchboard replaces the owner's most-used app, so a week of daily use is the real test.
 
@@ -49,7 +50,7 @@ The Slopapp app itself: the hub that installs and updates the rest, like Setapp'
 | 4 | Convert | Permute | M | File drop queue |
 | 5 | Tidy | CleanMyMac | L | Library window, file scanning |
 
-All five are built. Beta: Clips, Snapper, Tidy. Alpha: Squish, Convert.
+All five are built. Stable 1.0.0: Clips, Snapper (2026-11-13, owner's call). Beta: Tidy. Alpha: Squish, Convert.
 
 Squish moves ahead of Snapper: it's small, an early second release, and it builds the
 file drop queue that Convert, Iconsmith and Crate reuse. Snapper is split into v1
@@ -85,7 +86,8 @@ Built (alpha): Paper, Commit, Tally, Devkit, Focus, Gauge.
 Built on 2026-11-07 (alpha, installed on the owner's Mac, Developer ID signed):
 **Commit** (Gitfox), **Dictate** (the owner's Better Transcriber, moved in), **Gauge** (iStat Menus,
 public APIs only), **Triggers** (BetterTouchTool), **Shorthand** (TextExpander) and a real **disk map
-in Tidy** (DaisyDisk). Also: herbarium icons for every app, the Nordic launcher and website, store
+in Tidy** (DaisyDisk). Dictate went straight to stable 1.0.0 on 2026-11-13 (owner's call,
+after one blind round whose two majors were fixed). Also: herbarium icons for every app, the Nordic launcher and website, store
 screenshots (Snapper, Switchboard).
 
 Still owed for each new app: the on-screen walkthrough (needs an unlocked Mac with the owner away),

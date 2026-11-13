@@ -126,7 +126,7 @@ folder has its own README.
 | <img src="web/public/icons/crate.webp" width="56" height="56" alt=""> | **[Crate](apps/Crate)**<br>Open, preview and make archives. | Archiver | Beta |
 | <img src="web/public/icons/gauge.webp" width="56" height="56" alt=""> | **[Gauge](apps/Gauge)**<br>CPU, memory, network and battery in your menu bar. | iStat Menus | Alpha |
 | <img src="web/public/icons/squish.webp" width="56" height="56" alt=""> | **[Squish](apps/Squish)**<br>Drop in images and PDFs, get smaller files out. | Squash, PDF Squeezer | Alpha |
-| <img src="web/public/icons/switchboard.webp" width="56" height="56" alt=""> | **[Switchboard](apps/Switchboard)**<br>Open every link in the right browser. | OpenIn | Beta |
+| <img src="web/public/icons/switchboard.webp" width="56" height="56" alt=""> | **[Switchboard](apps/Switchboard)**<br>Open every link in the right browser. | OpenIn | Stable |
 | <img src="web/public/icons/tidy.webp" width="56" height="56" alt=""> | **[Tidy](apps/Tidy)**<br>Uninstall apps completely and clear out the junk. | CleanMyMac | Beta |
 | <img src="web/public/icons/triggers.webp" width="56" height="56" alt=""> | **[Triggers](apps/Triggers)**<br>Your own gestures, shortcuts and actions. | BetterTouchTool | Alpha |
 
@@ -134,12 +134,12 @@ folder has its own README.
 
 | | App | Instead of | Status |
 |:-:|---|---|---|
-| <img src="web/public/icons/clips.webp" width="56" height="56" alt=""> | **[Clips](apps/Clips)**<br>Clipboard history you can search. | Paste | Beta |
-| <img src="web/public/icons/dictate.webp" width="56" height="56" alt=""> | **[Dictate](apps/Dictate)**<br>Talk, and your words appear wherever you're typing. | Superwhisper, Wispr Flow | Alpha |
+| <img src="web/public/icons/clips.webp" width="56" height="56" alt=""> | **[Clips](apps/Clips)**<br>Clipboard history you can search. | Paste | Stable |
+| <img src="web/public/icons/dictate.webp" width="56" height="56" alt=""> | **[Dictate](apps/Dictate)**<br>Talk, and your words appear wherever you're typing. | Superwhisper, Wispr Flow | Stable |
 | <img src="web/public/icons/focus.webp" width="56" height="56" alt=""> | **[Focus](apps/Focus)**<br>A calm focus timer that lives in your menu bar. | Session | Alpha |
 | <img src="web/public/icons/paper.webp" width="56" height="56" alt=""> | **[Paper](apps/Paper)**<br>Read, annotate and edit PDFs. | Nitro PDF Pro | Alpha |
 | <img src="web/public/icons/shorthand.webp" width="56" height="56" alt=""> | **[Shorthand](apps/Shorthand)**<br>Type a few letters, get the whole thing. | TextExpander, Rocket Typist | Alpha |
-| <img src="web/public/icons/snapper.webp" width="56" height="56" alt=""> | **[Snapper](apps/Snapper)**<br>Screenshots, annotated and shared in seconds. | CleanShot X | Beta |
+| <img src="web/public/icons/snapper.webp" width="56" height="56" alt=""> | **[Snapper](apps/Snapper)**<br>Screenshots, annotated and shared in seconds. | CleanShot X | Stable |
 | <img src="web/public/icons/tally.webp" width="56" height="56" alt=""> | **[Tally](apps/Tally)**<br>A notepad that does the math as you type. | Numi | Alpha |
 | <img src="web/public/icons/zones.webp" width="56" height="56" alt=""> | **[Zones](apps/Zones)**<br>World clocks and meeting times, in the menu bar. | World Clock Pro | Beta |
 

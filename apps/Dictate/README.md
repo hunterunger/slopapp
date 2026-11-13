@@ -5,7 +5,7 @@ Talk, and your words appear wherever you're typing.
 Part of [Slopapp](../../README.md), a free, open-source collection of Mac apps.
 An open alternative to Superwhisper and Wispr Flow.
 
-**Status:** alpha. Needs macOS 26.4 or later (on-device AI cleanup and the speech engines).
+**Status:** stable (1.0.0). Needs macOS 26.4 or later (on-device AI cleanup and the speech engines).
 
 ## What it does
 

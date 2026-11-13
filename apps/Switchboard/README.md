@@ -5,7 +5,7 @@ Open every link in the right browser.
 Part of [Slopapp](../../README.md), a free, open-source collection of Mac apps.
 An open alternative to OpenIn.
 
-**Status:** beta (0.2.0)
+**Status:** stable (1.0.0)
 
 ## What it does
 

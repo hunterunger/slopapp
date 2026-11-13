@@ -5,7 +5,7 @@ Clipboard history you can search.
 Part of [Slopapp](../../README.md), a free, open-source collection of Mac apps.
 An open alternative to Paste.
 
-**Status:** beta
+**Status:** stable (1.0.0)
 
 ## What it does
 

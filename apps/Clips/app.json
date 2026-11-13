@@ -8,9 +8,9 @@
   "category": "Productivity",
   "icon": "clipboard-list",
   "menuBarOnly": true,
-  "status": "beta",
-  "version": "0.3.0",
-  "build": 3,
+  "status": "stable",
+  "version": "1.0.0",
+  "build": 4,
   "minimumMacOS": "14.0",
   "bundleId": "app.slopapp.clips"
 }
