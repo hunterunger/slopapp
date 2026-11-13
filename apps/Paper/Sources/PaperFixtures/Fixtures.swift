@@ -252,6 +252,71 @@ public enum Fixtures {
         return rep.representation(using: .png, properties: [:]) ?? Data()
     }
 
+    public static let editParagraph = [
+        "Paper keeps the original file untouched until",
+        "you save, and every change can be undone with",
+        "Command-Z, one step at a time, like any Mac app.",
+    ]
+
+    /// A page to edit: a heading, a three-line paragraph in Times, a line on a tinted box,
+    /// and a picture.
+    public static func editableDocument() -> Data {
+        pdf(pages: 1) { _, context in
+            text("Quarterly report", at: CGPoint(x: 72, y: 700), size: 24)
+            let times = NSFont(name: "Times New Roman", size: 13) ?? NSFont.systemFont(ofSize: 13)
+            for (index, line) in editParagraph.enumerated() {
+                (line as NSString).draw(at: CGPoint(x: 72, y: 640 - CGFloat(index) * 17),
+                                        withAttributes: [.font: times, .foregroundColor: NSColor(srgbRed: 0.15, green: 0.2, blue: 0.5, alpha: 1)]) // lint:allow fixture page content
+            }
+            context.setFillColor(CGColor(red: 0.85, green: 0.93, blue: 1, alpha: 1)) // lint:allow fixture page content
+            context.fill(CGRect(x: 60, y: 520, width: 420, height: 40))
+            text("Total due: forty dollars", at: CGPoint(x: 72, y: 532), size: 16)
+            context.draw(gradientImage(), in: CGRect(x: 72, y: 300, width: 200, height: 100))
+            text("Figure 1 sits above this caption.", at: CGPoint(x: 72, y: 270), size: 11)
+        }
+    }
+
+    /// A line of text in a font that isn't installed (and isn't embedded), as many PDFs from
+    /// Windows arrive.
+    public static func missingFontDocument() -> Data {
+        let content = "BT /F1 16 Tf 72 700 Td (Hello from Calibri) Tj ET BT /F2 14 Tf 72 660 Td (A Garamond line) Tj ET"
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 7 0 R >> >> >>",
+            "<< /Length \(content.utf8.count) >>\nstream\n\(content)\nendstream",
+            "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Calibri-Bold /FirstChar 32 /LastChar 126 /Encoding /WinAnsiEncoding /FontDescriptor 6 0 R >>",
+            "<< /Type /FontDescriptor /FontName /ABCDEF+Calibri-Bold /Flags 32 /FontBBox [0 -250 1000 750] /ItalicAngle 0 /Ascent 750 /Descent -250 /CapHeight 640 /StemV 120 >>",
+            "<< /Type /Font /Subtype /TrueType /BaseFont /XYZABC+GaramondPremrPro-It /FirstChar 32 /LastChar 126 /Encoding /WinAnsiEncoding /FontDescriptor 8 0 R >>",
+            "<< /Type /FontDescriptor /FontName /XYZABC+GaramondPremrPro-It /Flags 98 /FontBBox [0 -250 1000 750] /ItalicAngle -12 /Ascent 750 /Descent -250 /CapHeight 640 /StemV 80 >>",
+        ]
+        var out = "%PDF-1.7\n"
+        var offsets: [Int] = []
+        for (index, body) in objects.enumerated() {
+            offsets.append(out.utf8.count)
+            out += "\(index + 1) 0 obj\n\(body)\nendobj\n"
+        }
+        let xref = out.utf8.count
+        out += "xref\n0 \(objects.count + 1)\n0000000000 65535 f \n"
+        for offset in offsets { out += String(format: "%010d 00000 n \n", offset) }
+        out += "trailer\n<< /Size \(objects.count + 1) /Root 1 0 R >>\nstartxref\n\(xref)\n%%EOF\n"
+        return Data(out.utf8)
+    }
+
+    /// The text document with one sentence changed, for Compare.
+    public static func revisedTextDocument() -> Data {
+        pdf(pages: 3, info: [kCGPDFContextTitle: "Paper test document"]) { index, context in
+            text("Paper test page \(index + 1)", at: CGPoint(x: 72, y: 700))
+            text("Account number \(secret)-\(index + 1) belongs to nobody.", at: CGPoint(x: 72, y: 650))
+            text(index == 1 ? "This revised sentence should survive review." : "This public sentence should survive redaction.", at: CGPoint(x: 72, y: 600))
+            if index != 2 {
+                text("Contact jane@example.com about the Example project.", at: CGPoint(x: 72, y: 560), size: 14)
+            }
+            context.setFillColor(CGColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1)) // lint:allow fixture page content
+            context.fill(CGRect(x: 72, y: 400, width: 200, height: 120))
+        }
+    }
+
     /// Writes every fixture into `directory`. Returns the file names written.
     @discardableResult
     public static func writeAll(to directory: URL) throws -> [String] {
@@ -273,6 +338,9 @@ public enum Fixtures {
             ("damaged.pdf", textDocument().prefix(900)),
             ("not-a-pdf.pdf", Data("This is plain text, not a PDF.\n".utf8)),
             ("foreign-redact.pdf", foreignRedactDocument()),
+            ("editable.pdf", editableDocument()),
+            ("missing-font.pdf", missingFontDocument()),
+            ("text-revised.pdf", revisedTextDocument()),
         ]
         for (name, data) in files {
             try data.write(to: directory.appendingPathComponent(name))

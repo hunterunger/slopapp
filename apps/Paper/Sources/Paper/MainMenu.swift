@@ -68,6 +68,7 @@ enum MainMenu {
         add(menu, "Open…", #selector(NSDocumentController.openDocument(_:)), "o")
         // AppKit adds File > Open Recent itself, right after Open…, for document-based apps.
         add(menu, "Combine Files…", #selector(PaperAppDelegate.showCombine(_:)), target: NSApp.delegate as AnyObject?)
+        add(menu, "Compare With…", #selector(W.compareDocuments(_:)), "k", [.command, .option])
         menu.addItem(.separator())
         add(menu, "Close", #selector(NSWindow.performClose(_:)), "w")
         add(menu, "Save", #selector(NSDocument.save(_:)), "s")
@@ -82,6 +83,7 @@ enum MainMenu {
         menu.addItem(.separator())
         add(menu, "Export Flattened Copy…", #selector(W.exportFlattened(_:)))
         add(menu, "Export as Images…", #selector(W.exportImages(_:)))
+        add(menu, "Export as Word Document…", #selector(W.exportWord(_:)))
         add(menu, "Export Text…", #selector(W.exportText(_:)))
         add(menu, "Save Protected Copy…", #selector(W.saveProtectedCopy(_:)))
         menu.addItem(.separator())
@@ -146,6 +148,7 @@ enum MainMenu {
         add(menu, "Thumbnails", #selector(W.showSidebarMode(_:)), "2", [.command, .option], object: SidebarMode.thumbnails.rawValue)
         add(menu, "Outline", #selector(W.showSidebarMode(_:)), "3", [.command, .option], object: SidebarMode.outline.rawValue)
         add(menu, "Notes", #selector(W.showSidebarMode(_:)), "4", [.command, .option], object: SidebarMode.annotations.rawValue)
+        add(menu, "Fields", #selector(W.showSidebarMode(_:)), "5", [.command, .option], object: SidebarMode.fields.rawValue)
         menu.addItem(.separator())
         add(menu, "Highlight Form Fields", #selector(W.toggleFieldHighlight(_:)))
         menu.addItem(.separator())
@@ -193,6 +196,12 @@ enum MainMenu {
             add(colorMenu, ink.title, #selector(W.chooseHighlightColor(_:)), object: ink.rawValue).image = ColorSwatch.image(ink.nsColor)
         }
         color.submenu = colorMenu
+        let forms = add(menu, "Form Field", nil)
+        let formMenu = NSMenu(title: "Form Field")
+        for kind in FormFieldKind.allCases {
+            add(formMenu, kind.title, #selector(W.chooseFormKind(_:)), object: kind.rawValue)
+        }
+        forms.submenu = formMenu
         let shapes = add(menu, "Shape", nil)
         let shapeMenu = NSMenu(title: "Shape")
         for kind in ShapeKind.allCases {
@@ -202,9 +211,11 @@ enum MainMenu {
         menu.addItem(.separator())
         add(menu, "New Signature…", #selector(W.newSignature(_:)))
         add(menu, "New Signature from Image…", #selector(W.newSignatureFromImage(_:)))
+        add(menu, "Sign with Certificate…", #selector(W.signWithCertificate(_:)))
         add(menu, "Add Today's Date", #selector(W.insertTodaysDate(_:)))
         menu.addItem(.separator())
         add(menu, "Edit Text or Note", #selector(W.editSelectedAnnotation(_:)), "'")
+        add(menu, "Add Image…", #selector(W.addImageToPage(_:)))
         return menu
     }
 
@@ -221,6 +232,8 @@ enum MainMenu {
         add(menu, "Insert from File…", #selector(W.insertFromFile(_:)), "i", [.command, .shift])
         add(menu, "Insert Blank Page", #selector(W.insertBlankPage(_:)), "b", [.command, .option])
         add(menu, "Headers & Footers…", #selector(W.addHeadersFooters(_:)))
+        add(menu, "Crop Pages", #selector(W.chooseTool(_:)), object: Tool.crop.rawValue)
+        add(menu, "Remove Crop", #selector(W.removeCrop(_:)))
         menu.addItem(.separator())
         add(menu, "Extract Selected Pages…", #selector(W.extractPages(_:)), "e", [.command, .option])
         add(menu, "Split Document…", #selector(W.splitDocument(_:)))

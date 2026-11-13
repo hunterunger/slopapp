@@ -17,11 +17,13 @@ extension NSToolbarItem.Identifier {
 /// The toolbar's tool groups. Each is a button and a dropdown: the button repeats the last
 /// tool used from the group, the dropdown lists them all (the original's layout, research §2).
 enum ToolGroup: String, CaseIterable {
-    case select, highlight, draw, comment, sign, redact
+    case select, edit, highlight, draw, comment, forms, sign, redact
 
     var label: String {
         switch self {
         case .select: "Select"
+        case .edit: "Edit"
+        case .forms: "Forms"
         case .highlight: "Highlight"
         case .draw: "Draw"
         case .comment: "Comment"
@@ -33,6 +35,8 @@ enum ToolGroup: String, CaseIterable {
     func contains(_ tool: Tool) -> Bool {
         switch self {
         case .select: tool == .select
+        case .edit: tool == .edit || tool == .crop
+        case .forms: tool == .form
         case .highlight: tool == .highlight
         case .draw: tool == .draw || tool == .shape
         case .comment: tool == .text || tool == .note
@@ -47,6 +51,8 @@ enum ToolGroup: String, CaseIterable {
     func tool(in model: DocumentModel) -> Tool {
         switch self {
         case .select: .select
+        case .edit: model.editUsesCrop ? .crop : .edit
+        case .forms: .form
         case .highlight: .highlight
         case .draw: model.drawUsesShape ? .shape : .draw
         case .comment: model.commentUsesNote ? .note : .text
@@ -72,6 +78,14 @@ enum ToolGroup: String, CaseIterable {
             case .line: return "line.diagonal"
             case .arrow: return "arrow.up.right"
             }
+        case .forms:
+            switch model.formKind {
+            case .text: return "rectangle.and.pencil.and.ellipsis"
+            case .checkbox: return "checkmark.square"
+            case .radio: return "circle.inset.filled"
+            case .dropdown: return "filemenu.and.selection"
+            case .signature: return "pencil.line"
+            }
         default:
             return tool(in: model).symbol
         }
@@ -81,9 +95,10 @@ enum ToolGroup: String, CaseIterable {
     func help(in model: DocumentModel) -> String {
         let tool = tool(in: model)
         switch self {
-        case .highlight: return "\(model.markupStyle.title) (⌘\(tool.shortcut))"
-        case .draw where model.drawUsesShape: return "\(model.shapeKind.title) (⌘\(tool.shortcut))"
-        default: return "\(tool.title) (⌘\(tool.shortcut))"
+        case .highlight: return "\(model.markupStyle.title)\(tool.shortcutLabel)"
+        case .draw where model.drawUsesShape: return "\(model.shapeKind.title)\(tool.shortcutLabel)"
+        case .forms: return "Add \(model.formKind.title)"
+        default: return "\(tool.title)\(tool.shortcutLabel)"
         }
     }
 }
@@ -109,9 +124,8 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDelegat
     }
 
     func makeToolbar() -> NSToolbar {
-        // "3": the default set changed in 0.1's polish pass (Fit Width moved into the zoom
-        // menu, search and share sit over the inspector), so saved layouts start fresh.
-        let toolbar = NSToolbar(identifier: "PaperDocumentToolbar3")
+        // "4": the default set gained the Edit and Forms groups, so saved layouts start fresh.
+        let toolbar = NSToolbar(identifier: "PaperDocumentToolbar4")
         toolbar.delegate = self
         toolbar.displayMode = .iconAndLabel
         toolbar.allowsUserCustomization = true
@@ -225,7 +239,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDelegat
 
     nonisolated func items(for pickerToolbarItem: NSSharingServicePickerToolbarItem) -> [Any] {
         // Share items are file URLs, which are Sendable.
-        let urls: [URL] = MainActor.assumeIsolated { owner?.shareItems().compactMap { $0 as? URL } ?? [] }
+        let urls: [URL] = MainActor.assumeIsolated { owner?.shareItems(finishEditing: false).compactMap { $0 as? URL } ?? [] }
         return urls
     }
 
@@ -462,6 +476,18 @@ enum ToolMenus {
         switch group {
         case .select, .sign:
             break
+        case .edit:
+            add("Edit Text & Images", #selector(W.chooseTool(_:)), Tool.edit.rawValue)
+            add("Add Image…", #selector(W.addImageToPage(_:)))
+            menu.addItem(.separator())
+            add("Crop Pages", #selector(W.chooseTool(_:)), Tool.crop.rawValue)
+            add("Remove Crop", #selector(W.removeCrop(_:)))
+        case .forms:
+            for kind in FormFieldKind.allCases {
+                add(kind.title, #selector(W.chooseFormKind(_:)), kind.rawValue)
+            }
+            menu.addItem(.separator())
+            add("Arrange Fields in Tab Order…", #selector(W.showFieldsSidebar(_:)))
         case .highlight:
             for style in MarkupStyle.allCases {
                 add(style.title, #selector(W.chooseMarkupStyle(_:)), style.rawValue)
@@ -513,6 +539,10 @@ enum SignatureMenu {
             menu.addItem(item)
         }
         if !signatures.isEmpty { menu.addItem(.separator()) }
+        let certificate = NSMenuItem(title: "Sign with Certificate…", action: #selector(PaperWindowController.signWithCertificate(_:)), keyEquivalent: "")
+        certificate.target = target
+        menu.addItem(certificate)
+        menu.addItem(.separator())
         let new = NSMenuItem(title: "New Signature…", action: #selector(PaperWindowController.newSignature(_:)), keyEquivalent: "")
         new.target = target
         menu.addItem(new)

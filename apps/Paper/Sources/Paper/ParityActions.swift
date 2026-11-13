@@ -34,6 +34,8 @@ extension PaperWindowController {
         case .shape: model.drawUsesShape = true
         case .text: model.commentUsesNote = false
         case .note: model.commentUsesNote = true
+        case .edit: model.editUsesCrop = false
+        case .crop: model.editUsesCrop = true
         default: break
         }
     }
@@ -145,12 +147,20 @@ extension PaperWindowController {
 
     /// What the Share button and menu hand to the share sheet: the saved file, or for an
     /// untitled or edited document, a fresh copy of what's on screen.
-    func shareItems() -> [Any] {
-        commitEditing()
+    ///
+    /// The toolbar item asks for these whenever AppKit validates the toolbar, so asking
+    /// mustn't end text editing (`finishEditing: false`); form entries are still picked up.
+    func shareItems(finishEditing: Bool = true) -> [Any] {
+        if finishEditing { commitEditing() } else { canvasFormMayHaveChanged() }
         guard let document = paperDocument else { return [] }
         if let url = document.fileURL, !document.isDocumentEdited { return [url] }
+        // The same copy until the document changes, however often the toolbar asks.
+        if let cached = shareCopy, cached.revision == model.annotationsRevision &* 1_000 &+ model.infoRevision, FileManager.default.fileExists(atPath: cached.url.path) {
+            return [cached.url]
+        }
         guard let data = try? document.data(ofType: "com.adobe.pdf"),
               let url = ShareFiles.write(data, name: Exporting.baseName(document) + ".pdf") else { return [] }
+        shareCopy = (model.annotationsRevision &* 1_000 &+ model.infoRevision, url)
         return [url]
     }
 

@@ -4,12 +4,15 @@ import PDFKit
 import PaperCore
 
 enum Tool: String, CaseIterable, Identifiable {
-    case select, highlight, draw, text, note, shape, sign, redact
+    case select, edit, highlight, draw, text, note, shape, form, crop, sign, redact
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .select: "Select"
+        case .edit: "Edit Text & Images"
+        case .form: "Form Fields"
+        case .crop: "Crop"
         case .highlight: "Highlight"
         case .draw: "Draw"
         case .text: "Text Box"
@@ -23,6 +26,9 @@ enum Tool: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .select: "cursorarrow"
+        case .edit: "character.cursor.ibeam"
+        case .form: "rectangle.and.pencil.and.ellipsis"
+        case .crop: "crop"
         case .highlight: "highlighter"
         case .draw: "scribble"
         case .text: "character.textbox"
@@ -33,10 +39,13 @@ enum Tool: String, CaseIterable, Identifiable {
         }
     }
 
-    /// ⌘1–⌘9 (⌘7 is left free, per the research doc's menu plan).
+    /// ⌘1–⌘9, and ⌘K for Crop (Preview's). Form Fields has none: making forms is rare.
     var shortcut: String {
         switch self {
         case .select: "1"
+        case .edit: "7"
+        case .form: ""
+        case .crop: "k"
         case .highlight: "2"
         case .draw: "3"
         case .text: "4"
@@ -47,8 +56,33 @@ enum Tool: String, CaseIterable, Identifiable {
         }
     }
 
+    /// " (⌘7)" for tooltips, empty when the tool has no shortcut.
+    var shortcutLabel: String { shortcut.isEmpty ? "" : " (⌘\(shortcut.uppercased()))" }
+
     /// Tools that change the document; off in read-only documents.
     var edits: Bool { self != .select }
+}
+
+/// The thing the Edit tool has selected: an image in the page content.
+struct ImageTarget: Equatable {
+    let page: PDFPage
+    var image: PageImage
+    static func == (a: ImageTarget, b: ImageTarget) -> Bool { a.page === b.page && a.image == b.image }
+}
+
+/// A crop rectangle being drawn with the Crop tool.
+struct CropDraft: Equatable {
+    let page: PDFPage
+    var rect: CGRect
+    static func == (a: CropDraft, b: CropDraft) -> Bool { a.page === b.page && a.rect == b.rect }
+}
+
+/// Signing with a certificate, waiting for the person to draw where it goes.
+struct CertificatePlan {
+    var identity: SigningIdentity
+    var reason: String
+    var location: String
+    var ink: Signature?
 }
 
 enum InspectorTab: String, CaseIterable, Identifiable {
@@ -71,13 +105,14 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 }
 
 enum SidebarMode: String, CaseIterable, Identifiable {
-    case thumbnails, outline, annotations, search, redact
+    case thumbnails, outline, annotations, fields, search, redact
     var id: String { rawValue }
     var title: String {
         switch self {
         case .thumbnails: "Thumbnails"
         case .outline: "Outline"
         case .annotations: "Notes"
+        case .fields: "Fields"
         case .search: "Search Results"
         case .redact: "Find and Redact"
         }
@@ -121,6 +156,23 @@ final class DocumentModel {
         didSet { Prefs.defaults.set(textColor.rawValue, forKey: Prefs.textColor) }
     }
     var fillShapes = false
+    var formKind: FormFieldKind = FormFieldKind(rawValue: Prefs.defaults.string(forKey: Prefs.formKind) ?? "") ?? .text {
+        didSet { Prefs.defaults.set(formKind.rawValue, forKey: Prefs.formKind) }
+    }
+    /// New radio buttons join this group until another name is chosen.
+    var lastRadioGroup: String?
+    /// The Edit group's button repeats Edit or Crop.
+    var editUsesCrop = false
+    /// What the Edit tool has selected, and what the editing bar says about the font of the
+    /// text being edited.
+    var imageTarget: ImageTarget?
+    var editNotice: String?
+    var editNoticeIsWarning = false
+    var cropDraft: CropDraft?
+    var certificatePlan: CertificatePlan?
+    /// Calculated fields (written as form scripts on save).
+    var formScripts = FormScripts()
+    var signatures: [SignatureStatus] = []
     /// The Draw group's button repeats the last drawing tool: freehand, or the last shape.
     var drawUsesShape = Prefs.defaults.bool(forKey: Prefs.drawUsesShape) {
         didSet { Prefs.defaults.set(drawUsesShape, forKey: Prefs.drawUsesShape) }
@@ -146,7 +198,7 @@ final class DocumentModel {
     // Sidebar.
     var sidebarMode: SidebarMode = SidebarMode(rawValue: Prefs.defaults.string(forKey: Prefs.sidebarMode) ?? "") ?? .thumbnails {
         didSet {
-            if sidebarMode == .thumbnails || sidebarMode == .outline || sidebarMode == .annotations {
+            if sidebarMode == .thumbnails || sidebarMode == .outline || sidebarMode == .annotations || sidebarMode == .fields {
                 Prefs.defaults.set(sidebarMode.rawValue, forKey: Prefs.sidebarMode)
             }
         }

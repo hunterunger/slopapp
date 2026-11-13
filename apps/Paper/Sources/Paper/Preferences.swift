@@ -31,6 +31,7 @@ enum Prefs {
     static let commentUsesNote = "commentUsesNote"
     static let hidesEditingBar = "hidesEditingBar"
     static let inspectorTab = "inspectorTab"
+    static let formKind = "formKind"
     static let imageFormat = "imageExportFormat"
     static let imageDPI = "imageExportDPI"
 

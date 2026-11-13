@@ -17,6 +17,16 @@ struct HeaderActions {
     var toggleFields: () -> Void
     var duplicate: () -> Void
     var recognizeText: () -> Void
+    var replaceImage: () -> Void
+    var deleteImage: () -> Void
+    var addImage: () -> Void
+    var crop: (PaperWindowController.CropScope) -> Void
+    var removeCrop: () -> Void
+    var setFormKind: (FormFieldKind) -> Void
+    var renameField: (String) -> Void
+    var showFieldDetails: () -> Void
+    var showSignatures: () -> Void
+    var cancelCertificate: () -> Void
 }
 
 /// Slim bars above the page: document notices, then the style strip for the current tool
@@ -48,7 +58,12 @@ struct CanvasHeader: View {
         if model.facts.hasXFA {
             InfoBar(symbol: "exclamationmark.triangle", text: "This is a dynamic (XFA) form. It may only work in Adobe Acrobat Reader.")
         }
-        if model.facts.hasDigitalSignature, !model.facts.isReadOnly {
+        if let status = signatureSummary {
+            InfoBar(symbol: status.symbol, text: status.text) {
+                Button("Details…", action: actions.showSignatures)
+                if !model.facts.isReadOnly { Button("Duplicate", action: actions.duplicate) }
+            }
+        } else if model.facts.hasDigitalSignature, !model.facts.isReadOnly {
             InfoBar(symbol: "checkmark.seal", text: "This PDF is digitally signed. Saving changes will invalidate the signature.") {
                 Button("Duplicate", action: actions.duplicate)
             }
@@ -85,7 +100,8 @@ struct CanvasHeader: View {
         }
         if model.facts.formFieldCount > 0, !model.dismissedFormBar {
             InfoBar(symbol: "list.bullet.rectangle",
-                    text: "This form has \(model.facts.formFieldCount) \(model.facts.formFieldCount == 1 ? "field" : "fields"). Click a field to fill it, Tab moves to the next.") {
+                    text: "This form has \(model.facts.formFieldCount) \(model.facts.formFieldCount == 1 ? "field" : "fields"). "
+                        + (model.tool == .form ? "The Fields sidebar (⌥⌘5) sets the order Tab moves through them." : "Click a field to fill it, Tab moves to the next.")) {
                 Toggle("Highlight Fields", isOn: Binding(get: { model.highlightFields }, set: { _ in actions.toggleFields() }))
                     .toggleStyle(.button)
                 Button {
@@ -100,7 +116,31 @@ struct CanvasHeader: View {
         }
     }
 
+    /// One line about the document's certificate signatures: the newest signature's status,
+    /// or the first problem.
+    private var signatureSummary: (symbol: String, text: String)? {
+        let statuses = model.signatures
+        guard let last = statuses.last else { return nil }
+        let edit = model.facts.isReadOnly ? "" : " Saving changes in Paper will break it; sign or share a duplicate instead."
+        if let bad = statuses.first(where: { !$0.isValid }) {
+            return ("xmark.seal", bad.summary + (statuses.count > 1 ? " (\(statuses.count) signatures)" : ""))
+        }
+        let all = statuses.count > 1 ? "\(statuses.count) signatures, all valid. Newest: " : ""
+        return (last.trusted ? "checkmark.seal" : "exclamationmark.triangle", all + last.summary + edit)
+    }
+
     private var styleContext: StyleStrip.Context? {
+        if model.tool == .edit, !model.isReadOnly {
+            if model.editNotice != nil { return .editingText }
+            if model.imageTarget != nil { return .editImage }
+            return .editTool
+        }
+        if model.tool == .crop, !model.isReadOnly { return .cropTool }
+        if model.tool == .sign, model.certificatePlan != nil { return .certificateTool }
+        if let annotation = model.selectedAnnotation, annotation.page != nil, !model.isReadOnly, annotation.type == "Widget" {
+            return .selectedField
+        }
+        if model.tool == .form, !model.isReadOnly { return .formTool }
         if let annotation = model.selectedAnnotation, annotation.page != nil, !model.isReadOnly {
             if RedactionMarks.isMark(annotation) { return .mark }
             switch annotation.type ?? "" {
@@ -119,7 +159,7 @@ struct CanvasHeader: View {
         case .text: return .textTool
         case .redact: return .redactTool
         case .sign: return model.pendingSignature == nil ? nil : .signTool
-        case .select, .note: return nil
+        case .select, .note, .edit, .form, .crop: return nil
         }
     }
 }
@@ -162,6 +202,7 @@ struct StyleStrip: View {
     enum Context: Equatable {
         case idle, markupTool, drawTool, shapeTool, textTool, redactTool, signTool
         case selectedMarkup, selectedText, selectedNote, selectedShape(fillable: Bool), selectedOther, mark
+        case editTool, editingText, editImage, cropTool, formTool, selectedField, certificateTool
     }
 
     @Bindable var model: DocumentModel
@@ -221,6 +262,43 @@ struct StyleStrip: View {
                 hint("Click where the signature goes. Esc cancels.")
             case .mark:
                 hint("Pending redaction mark. Delete removes it.")
+            case .editTool:
+                Button("Add Image…", action: actions.addImage)
+                hint("Click text to change it, or an image to move, resize or replace it.")
+            case .editingText:
+                if model.editNoticeIsWarning {
+                    Image(systemName: "exclamationmark.triangle")
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                hint(model.editNotice.map { model.editNoticeIsWarning ? $0 : "Font: \($0). Esc or a click outside finishes." })
+            case .editImage:
+                Button("Replace Image…", action: actions.replaceImage)
+                Button(role: .destructive, action: actions.deleteImage) { Label("Delete Image", systemImage: "trash") }
+                hint("Drag to move. Drag a corner to resize; Shift lets it stretch.")
+            case .cropTool:
+                if model.cropDraft != nil {
+                    Button("Crop This Page") { actions.crop(.page) }.keyboardShortcut(.defaultAction)
+                    if model.selectedPages.count > 1 { Button("Crop Selected Pages") { actions.crop(.selected) } }
+                    Button("Crop All Pages") { actions.crop(.all) }
+                }
+                Button("Remove Crop", action: actions.removeCrop)
+                    .disabled(!(0..<model.pdf.pageCount).contains { model.pdf.page(at: $0).map(PageCrop.isCropped) ?? false })
+                hint(model.cropDraft == nil ? "Drag over the part of the page to keep. Nothing outside it is deleted." : "Return crops this page. Esc cancels.")
+            case .formTool:
+                Picker("Field", selection: Binding(get: { model.formKind }, set: actions.setFormKind)) {
+                    ForEach(FormFieldKind.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+                hint("Click or drag on the page to add a field. Click a field to move or resize it.")
+            case .selectedField:
+                FieldNameField(model: model, rename: actions.renameField)
+                Button("Properties…", action: actions.showFieldDetails)
+            case .certificateTool:
+                Button("Cancel", action: actions.cancelCertificate)
+                hint("Drag a box where the signature should appear. Esc cancels.")
             case .selectedOther:
                 Spacer()
             case .idle:
@@ -248,7 +326,7 @@ struct StyleStrip: View {
 
     private var isSelection: Bool {
         switch context {
-        case .selectedMarkup, .selectedText, .selectedNote, .selectedShape, .selectedOther, .mark: true
+        case .selectedMarkup, .selectedText, .selectedNote, .selectedShape, .selectedOther, .mark, .selectedField: true
         default: false
         }
     }
@@ -473,5 +551,30 @@ struct PressDimmingButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(isEnabled ? (configuration.isPressed ? 0.55 : 1) : 0.4)
+    }
+}
+
+
+/// The selected field's name in the editing bar; renames on Return or when focus leaves.
+struct FieldNameField: View {
+    @Bindable var model: DocumentModel
+    let rename: (String) -> Void
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let _ = model.annotationsRevision
+        HStack(spacing: Spacing.xs) {
+            Text(model.selectedAnnotation.flatMap(FormFieldKind.of)?.title ?? "Field")
+                .font(.callout).foregroundStyle(.secondary).fixedSize()
+                .accessibilityHidden(true)
+            TextField("Field name", text: $draft)
+                .frame(width: 160)
+                .focused($focused)
+                .onSubmit { rename(draft) }
+                .onChange(of: focused) { _, now in if !now { rename(draft) } }
+        }
+        .onAppear { draft = model.selectedAnnotation?.fieldName ?? "" }
+        .onChange(of: model.selectedAnnotation.map(ObjectIdentifier.init)) { draft = model.selectedAnnotation?.fieldName ?? "" }
     }
 }

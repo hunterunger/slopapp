@@ -50,6 +50,8 @@ public struct DocumentFacts: Sendable, Equatable {
         if let raw {
             facts.isPDFA = RawScan.contains("pdfaid:part", in: raw)
             facts.hasXFA = RawScan.contains("/XFA", in: raw)
+            // PDFKit doesn't expose a signature field's value; a signed file has a byte range.
+            if RawScan.contains("/ByteRange", in: raw) { facts.hasDigitalSignature = true }
         }
         return facts
     }
