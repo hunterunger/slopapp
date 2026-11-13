@@ -35,7 +35,11 @@ struct DetailColumn: View {
         case .stashes:
             StashDetailView(model: model)
         default:
-            DiffPane(model: model)
+            if case .workingCopy(let entry, _) = model.diff.source, entry.isConflicted {
+                ConflictResolverView(model: model, entry: entry)
+            } else {
+                DiffPane(model: model)
+            }
         }
     }
 }
@@ -287,8 +291,22 @@ struct FileMenu: View {
                                    keepStaged: staged.isEmpty)
             }
         }
+        if !conflicted.isEmpty {
+            Button("Use Our Whole File") { model.takeWholeFile(ours: true, entries: conflicted) }
+            Button("Use Their Whole File") { model.takeWholeFile(ours: false, entries: conflicted) }
+            if conflicted.count == 1, model.mergeTool.name != nil {
+                Button("Open in \(model.mergeTool.name ?? "Merge Tool")") { model.openInMergeTool(conflicted[0]) }
+                    .disabled(!model.canUseMergeTool)
+            }
+        }
         if entries.count == 1, let entry = entries.first?.1 {
             Divider()
+            if !entry.isUntracked && !entry.path.hasSuffix("/") {
+                Button("Show File History") { model.openFileHistory(entry.path, blame: false) }
+                Button("Show Blame") { model.openFileHistory(entry.path, blame: true) }
+                    .disabled(entry.unstaged == .deleted || entry.staged == .deleted)
+                Divider()
+            }
             Button("Open in Default App") { model.openInEditor(entry) }
             Button("Show in Finder") { model.revealInFinder(entry.path) }
             Button("Copy Path") {

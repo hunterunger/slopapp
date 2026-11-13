@@ -11,13 +11,17 @@ public struct GitRef: Sendable, Equatable, Identifiable, Hashable {
     /// Full upstream name (refs/remotes/origin/main) for local branches that track one.
     public var upstream: String?
     public var isHead: Bool
+    /// A tag with its own message (an annotated tag). `target` is the commit it points at.
+    public var isAnnotated: Bool
 
-    public init(fullName: String, kind: Kind, target: ObjectID?, upstream: String? = nil, isHead: Bool = false) {
+    public init(fullName: String, kind: Kind, target: ObjectID?, upstream: String? = nil, isHead: Bool = false,
+                isAnnotated: Bool = false) {
         self.fullName = fullName
         self.kind = kind
         self.target = target
         self.upstream = upstream
         self.isHead = isHead
+        self.isAnnotated = isAnnotated
     }
 
     public var id: String { fullName }
@@ -68,7 +72,7 @@ public struct RefList: Sendable, Equatable {
     }
 
     /// `git for-each-ref --format=<format> refs/heads refs/remotes refs/tags`.
-    public static let format = "--format=%(refname)%1f%(objectname)%1f%(upstream)%1f%(HEAD)%1f%(symref)"
+    public static let format = "--format=%(refname)%1f%(objectname)%1f%(upstream)%1f%(HEAD)%1f%(symref)%1f%(*objectname)"
 
     public static func parse(_ data: Data) -> RefList {
         var list = RefList()
@@ -84,7 +88,9 @@ public struct RefList: Sendable, Equatable {
             } else if name.hasPrefix("refs/remotes/") {
                 list.remote.append(GitRef(fullName: name, kind: .remote, target: target))
             } else if name.hasPrefix("refs/tags/") {
-                list.tags.append(GitRef(fullName: name, kind: .tag, target: target))
+                // Annotated tags: point at the commit (the peeled object), not the tag object.
+                let peeled = fields.count > 5 ? ObjectID(hex: fields[5]) : nil
+                list.tags.append(GitRef(fullName: name, kind: .tag, target: peeled ?? target, isAnnotated: peeled != nil))
             }
         }
         return list

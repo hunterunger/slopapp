@@ -174,7 +174,7 @@ struct RepoSplitView: View {
         .background {
             // The prompt sheet sits on its own view so it can stack with other sheets.
             Color.clear.sheet(item: promptBinding) { pending in
-                AskpassSheet(pending: pending, model: model)
+                AskpassSheet(pending: pending) { model.answerPrompt($0) }
             }
         }
     }
@@ -322,8 +322,8 @@ struct BannerStack: View {
                        message: model.status.conflicted.isEmpty
                            ? "No conflicts left. Continue to finish it."
                            : model.status.conflicted.count == 1
-                               ? "1 conflicted file. Fix it in your editor, then mark it resolved."
-                               : "\(model.status.conflicted.count) conflicted files. Fix them in your editor, then mark them resolved.") {
+                               ? "1 conflicted file. Choose what to keep in each conflict, then mark it resolved."
+                               : "\(model.status.conflicted.count) conflicted files. Choose what to keep in each conflict, then mark them resolved.") {
                     Button("Abort…") { model.confirmAbort() }
                     Button("Continue") { model.continueOperation() }
                         .disabled(!model.status.conflicted.isEmpty)
@@ -348,6 +348,10 @@ struct ProblemBanner: View {
         Banner(symbol: "exclamationmark.triangle.fill", tint: .orange, title: problem.explanation.title,
                message: problem.explanation.message) {
             if problem.explanation.action == .pull {
+                if model.canForcePush && problem.explanation.cause == .rejectedPush {
+                    Button("Force Push…") { model.problem = nil; model.confirmForcePush() }
+                        .help("Only if you meant to rewrite the remote branch (after a rebase or amend)")
+                }
                 Button("Pull") { model.problem = nil; model.pull() }
             }
             if problem.explanation.action == .openPrivacySettings {
@@ -451,6 +455,14 @@ struct SheetContent: View {
             DivergentPullSheet(model: model)
         case .identity:
             IdentitySheet(model: model)
+        case .integrate(let kind, let preselected):
+            IntegrateSheet(model: model, kind: kind, preselected: preselected)
+        case .interactiveRebase(let plan, let pushed):
+            InteractiveRebaseSheet(model: model, plan: plan, pushedCount: pushed)
+        case .remotes:
+            RemotesSheet(model: model)
+        case .newTag(let commit, let label):
+            NewTagSheet(model: model, commit: commit, label: label)
         }
     }
 }

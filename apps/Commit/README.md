@@ -36,8 +36,34 @@ The daily loop, without memorising `git add -p`:
   up tracking. Divergent pulls ask Merge or Rebase. Rejected pushes and sign-in problems are
   explained in a sentence.
 - **Stash** with a message and untracked files; apply, apply and remove, drop (undoable).
+- **Clone** (⇧⌘O): an address (a pasted `git clone …` line works), a folder, submodules on or
+  off, progress and Cancel. Sign-in problems, a wrong address and a taken folder are explained;
+  a cancelled clone leaves nothing behind.
+- **Merge and rebase** any branch, remote branch or tag into or under the current branch, from
+  the Branch menu or a branch's context menu. The sheet says how far apart they are; local
+  changes are set aside and put back. ⌘Z undoes it.
+- **Cherry-pick and revert**: select one or more commits in History and use the context menu,
+  or drag them onto the current branch in the sidebar. Commits already on the branch are
+  skipped. ⌘Z undoes it.
+- **Edit history** (interactive rebase) from any commit, or just the unpushed ones: reorder by
+  dragging, Keep, Reword, Squash, Fixup or Drop each commit (P R S F D keys), edit the
+  messages, see the result in a sentence before you start, and get a warning for commits that
+  are already pushed. Merges in the range are refused rather than flattened. ⌘Z undoes it.
+- **Resolve conflicts**: a conflicted file shows each conflict with both sides (and the base,
+  for diff3 files). Choose Ours, Theirs or Both (or theirs first, the base, neither), or edit
+  the whole result as text, then Mark Resolved; it stages the file and moves to the next one,
+  and ⌘Z puts the conflict back exactly. Deleted-on-one-side and binary conflicts pick a side.
+  **Open in your merge tool** runs `git mergetool` when `merge.tool` is set.
 - **Merge, rebase, cherry-pick and revert in progress**: a banner with Continue / Abort,
   conflicted files in their own section, Mark Resolved.
+- **Blame and file history** (⇧⌘H / ⌥⇧⌘H, or a file's context menu): a window per file with
+  every commit that changed it (renames followed), that commit's changes or who changed each
+  line, ⌘[ / ⌘] to step through versions, and "Blame Before This Change" on any line.
+- **Remotes** (⌥⌘R): add, rename, change the URL, remove (⌘Z puts it back, tracking included).
+- **Tags**: lightweight or annotated (with a message), at HEAD or any commit; push one or all,
+  delete (undoable) or delete from the remote (confirmed).
+- **Force push** (⌥⇧⌘U), always with lease, also offered when a push is rejected. The
+  confirmation names the remote's old tip.
 - **Passwords and passphrases**: when git or ssh needs to ask (an HTTPS token, an SSH key
   passphrase, an unknown host key), Commit asks in a sheet on the repository's window. Nothing
   typed is stored by Commit; git's credential helper or ssh-agent keeps what it keeps.
@@ -56,7 +82,7 @@ special permissions. macOS may ask once before it can read repositories in Docum
 Desktop or iCloud Drive; that's the system's own prompt.
 
 **Network:** Commit itself makes no network connections. Git talks to your remotes only when
-you fetch, pull or push, or if you turn on **Fetch automatically** in Settings (off by default).
+you clone, fetch, pull or push (branches or tags), or if you turn on **Fetch automatically** in Settings (off by default).
 
 ## Keyboard
 
@@ -75,14 +101,23 @@ you fetch, pull or push, or if you turn on **Fetch automatically** in Settings (
 | New branch / switch branch | ⇧⌘N / ⇧⌘B |
 | Fetch / Pull / Push | ⌥⌘F / ⌥⌘P / ⌥⌘U |
 | Stash changes | ⌥⌘S |
+| Clone repository | ⇧⌘O |
+| Merge into / rebase the current branch | ⇧⌘M / ⌥⇧⌘M |
+| Cherry-pick selected commits | ⇧⌘C |
+| Edit unpushed commits | ⇧⌘E |
+| New tag | ⌥⌘N |
+| Force push | ⌥⇧⌘U |
+| Remotes | ⌥⌘R |
+| Show file history / blame | ⇧⌘H / ⌥⇧⌘H |
+| Newer / older version (file history) | ⌘] / ⌘[ |
 | Refresh | ⌘R |
 | Undo | ⌘Z |
 
 ## Not there yet
 
-Side-by-side diff, clone, interactive rebase, a conflict-resolution editor, blame, file
-history, reflog, tags beyond the list, remote management, command palette, image diffs,
-syntax colouring, hosting accounts. See `docs/research/commit.md` for what's planned and why.
+Side-by-side diff, reflog, stopping at a commit to edit it during interactive rebase, blame
+options (ignore whitespace, moved lines), external diff tools, reset, command palette, image
+diffs, syntax colouring, hosting accounts. See `docs/research/commit.md` for what's planned and why.
 
 ## Develop
 
@@ -90,21 +125,25 @@ syntax colouring, hosting accounts. See `docs/research/commit.md` for what's pla
 scripts/test.sh Commit     # unit and integration tests (real git in /tmp/commit-test)
 scripts/run.sh Commit      # build a debug .app and open it
 scripts/check.sh Commit    # the full gate: tests, release bundle, launch smoke test
-apps/Commit/Tests/Fixtures/make-fixtures.sh --big   # demo, conflict, wide, big… in /tmp/commit-fixtures
+apps/Commit/Tests/Fixtures/make-fixtures.sh --big   # demo, conflict, integrate, conflicts, wide, big… in /tmp/commit-fixtures
+apps/Commit/Tests/Fixtures/walkthrough-integrations.sh   # drives clone, conflicts, merge… on copies in /tmp/commit-test/walk3
 swift test --package-path apps/Commit -c release -Xswiftc -enable-testing --filter PerformanceTests
 ```
 
 Test hooks (environment variables): `COMMIT_OPEN=/path/repo` opens a repository at launch,
 `COMMIT_LOG=/path/file.log` logs timings, `COMMIT_NO_SHELL_PATH=1` skips the login shell,
-`COMMIT_RESET_RECENTS=1` starts with no recents. Use git's own `GIT_CONFIG_GLOBAL=/tmp/…` to
+`COMMIT_RESET_RECENTS=1` starts with no recents, `COMMIT_NO_RECENTS=1` doesn't save opened
+repositories to recents, `COMMIT_CLONE_PARENT=/tmp/…` is the folder Clone offers,
+`COMMIT_SHOW_CLONE=1` opens the Clone window at launch. Use git's own `GIT_CONFIG_GLOBAL=/tmp/…` to
 keep a test run away from your real global config.
 
 Layout:
 
 - `Sources/CommitCore`: the engine. `GitRunner` (posix_spawn in its own process group,
   concurrent pipes, cancel, timeout) behind a protocol; porcelain v2 status, diff, log, refs
-  and stash parsers; `PatchBuilder` (line and hunk patches from raw bytes); `GraphLayout`
-  (lanes, flat storage); `RefreshScheduler` + `FileWatcher` (FSEvents, coalesced);
+  and stash parsers; `ConflictFile` (byte-exact conflict markers), `RebasePlan` (interactive
+  rebase todo and messages), `Blame` and file history parsers, remotes, tags and clone;
+  `PatchBuilder` (line and hunk patches from raw bytes); `GraphLayout` (lanes, flat storage); `RefreshScheduler` + `FileWatcher` (FSEvents, coalesced);
   `Repository` (every git operation); askpass client and server; error explanations.
 - `Sources/Commit`: SwiftUI app. `RepoModel` per window; the diff and history are
   `NSTableView`s for virtualised rows and native selection. `main.swift` doubles as the

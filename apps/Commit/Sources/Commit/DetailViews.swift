@@ -8,7 +8,16 @@ struct CommitDetailView: View {
     @Bindable var model: RepoModel
 
     var body: some View {
-        if model.historySelection == nil && model.showsUncommittedRow {
+        if model.selectedCommits.count > 1 {
+            ContentUnavailableView {
+                Label("\(model.selectedCommits.count) Commits Selected", systemImage: "square.stack")
+            } description: {
+                Text("Cherry-pick them onto \(model.currentBranchName), oldest first, or drag them onto it in the sidebar.")
+            } actions: {
+                Button(model.cherryPickTitle) { model.cherryPickSelection() }
+                    .disabled(!model.canCherryPickSelection)
+            }
+        } else if model.historySelection == nil && model.showsUncommittedRow {
             ContentUnavailableView {
                 Label("Uncommitted Changes", systemImage: "square.and.pencil")
             } description: {
@@ -21,7 +30,9 @@ struct CommitDetailView: View {
                 VStack(spacing: 0) {
                     CommitHeader(detail: detail, model: model)
                     Hairline()
-                    ChangedFileList(files: model.commitFiles, selection: $model.commitFileSelection)
+                    ChangedFileList(files: model.commitFiles, selection: $model.commitFileSelection) { path, blame in
+                        model.openFileHistory(path, blame: blame, at: model.historySelection)
+                    }
                 }
                 .frame(minHeight: 150, idealHeight: 240)
                 DiffContainer(model: model, state: model.diff, editable: false)
@@ -113,6 +124,8 @@ struct CommitHeader: View {
 struct ChangedFileList: View {
     let files: [ChangedFile]
     @Binding var selection: ChangedFile.ID?
+    /// Opens a file's history (false) or blame (true), where that makes sense.
+    var onHistory: ((String, Bool) -> Void)? = nil
 
     var body: some View {
         if files.isEmpty {
@@ -139,6 +152,13 @@ struct ChangedFileList: View {
                 }
             }
             .listStyle(.inset)
+            .contextMenu(forSelectionType: ChangedFile.ID.self) { ids in
+                if let id = ids.first, let file = files.first(where: { $0.id == id }), let onHistory {
+                    Button("Show File History") { onHistory(file.path, false) }
+                    Button("Show Who Changed Each Line") { onHistory(file.path, true) }
+                        .disabled(file.change == .deleted)
+                }
+            }
             .accessibilityLabel("Changed files")
         }
     }

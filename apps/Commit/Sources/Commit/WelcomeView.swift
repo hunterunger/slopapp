@@ -25,6 +25,8 @@ struct WelcomeView: View {
                 gitState
                 FolderDropZone(title: "Drop a repository folder") { app.open($0) }
                     .frame(height: 132)
+                Button("Clone Repository…") { app.showClone() }
+                    .help("Copy a repository from a server (⇧⌘O)")
             }
             .padding(Spacing.xl)
             .frame(width: 300)

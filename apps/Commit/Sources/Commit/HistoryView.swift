@@ -49,7 +49,7 @@ struct HistoryTable: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let table = HistoryNSTableView()
         table.style = .inset
-        table.allowsMultipleSelection = false
+        table.allowsMultipleSelection = true
         table.usesAlternatingRowBackgroundColors = false
         table.rowHeight = 42
         table.intercellSpacing = NSSize(width: 4, height: 0)
@@ -73,6 +73,10 @@ struct HistoryTable: NSViewRepresentable {
         table.menu = menu
         table.target = context.coordinator
         table.doubleAction = #selector(HistoryCoordinator.doubleClicked(_:))
+        // Commits can be dragged onto the current branch in the sidebar (cherry-pick), or into
+        // any text field as their hashes.
+        table.setDraggingSourceOperationMask(.copy, forLocal: true)
+        table.setDraggingSourceOperationMask(.copy, forLocal: false)
         context.coordinator.table = table
         let scroll = NSScrollView()
         scroll.documentView = table
@@ -139,6 +143,8 @@ final class HistoryCoordinator: NSObject, NSTableViewDataSource, NSTableViewDele
 
     private func syncSelection() {
         guard let table else { return }
+        // A multiple selection made in the table stays as it is.
+        if table.selectedRowIndexes.count > 1, model.selectedCommits.count > 1 { return }
         let wanted: Int?
         if model.historySelection == nil {
             wanted = nil
@@ -214,13 +220,25 @@ final class HistoryCoordinator: NSObject, NSTableViewDataSource, NSTableViewDele
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !applyingSelection, let table else { return }
+        let ids = table.selectedRowIndexes.compactMap { historyIndex(ofTableRow: $0) }.map { history.rows[$0].id }
+        model.selectedCommits = ids
         let row = table.selectedRow
         guard row >= 0 else { return }
-        if let index = historyIndex(ofTableRow: row) {
+        if ids.count > 1 {
+            model.historySelection = ids.first
+        } else if let index = historyIndex(ofTableRow: row) {
             model.historySelection = history.rows[index].id
         } else {
             model.historySelection = nil
         }
+    }
+
+    // Dragging commits out: each row carries its hash as text.
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+        guard let index = historyIndex(ofTableRow: row) else { return nil }
+        let item = NSPasteboardItem()
+        item.setString(history.rows[index].id.hex, forType: .string)
+        return item
     }
 
     @objc func doubleClicked(_ sender: Any?) {
@@ -242,16 +260,45 @@ final class HistoryCoordinator: NSObject, NSTableViewDataSource, NSTableViewDele
             return
         }
         let commit = history.rows[index]
-        let copyHash = menu.addItem(withTitle: "Copy Hash", action: #selector(copyHash(_:)), keyEquivalent: "")
-        copyHash.representedObject = commit.id.hex
-        copyHash.target = self
-        let copySubject = menu.addItem(withTitle: "Copy Subject", action: #selector(copySubject(_:)), keyEquivalent: "")
-        copySubject.representedObject = commit.id.hex
-        copySubject.target = self
-        menu.addItem(.separator())
-        let branch = menu.addItem(withTitle: "New Branch Here…", action: #selector(newBranch(_:)), keyEquivalent: "")
-        branch.representedObject = commit.id.hex
-        branch.target = self
+        // Right-clicking inside a multiple selection acts on all of it.
+        let clickedInSelection = table.selectedRowIndexes.contains(table.clickedRow)
+        let targets = clickedInSelection && model.selectedCommits.count > 1 ? model.selectedCommits : [commit.id]
+        let branch = model.currentBranchName
+        func add(_ title: String, _ action: Selector, _ object: Any?, enabled: Bool = true) {
+            let item = menu.addItem(withTitle: title, action: enabled ? action : nil, keyEquivalent: "")
+            item.representedObject = object
+            item.target = self
+            item.isEnabled = enabled
+        }
+        add(targets.count > 1 ? "Cherry-pick \(targets.count) Commits onto \(branch)" : "Cherry-pick onto \(branch)",
+            #selector(cherryPick(_:)), targets.map(\.hex), enabled: model.canIntegrate)
+        if targets.count == 1 {
+            add("Revert Commit", #selector(revert(_:)), commit.id.hex, enabled: model.canIntegrate)
+            add("Edit History from Here…", #selector(editHistory(_:)), commit.id.hex, enabled: model.canIntegrateOnBranch)
+            menu.addItem(.separator())
+            add("New Branch Here…", #selector(newBranch(_:)), commit.id.hex)
+            add("New Tag Here…", #selector(newTag(_:)), commit.id.hex)
+            menu.addItem(.separator())
+            add("Copy Hash", #selector(copyHash(_:)), commit.id.hex)
+            add("Copy Subject", #selector(copySubject(_:)), commit.id.hex)
+        }
+    }
+
+    @objc private func cherryPick(_ item: NSMenuItem) {
+        let ids = (item.representedObject as? [String] ?? []).compactMap(ObjectID.init(hex:))
+        model.cherryPick(ids)
+    }
+
+    @objc private func revert(_ item: NSMenuItem) {
+        if let hex = item.representedObject as? String, let id = ObjectID(hex: hex) { model.revert(id) }
+    }
+
+    @objc private func editHistory(_ item: NSMenuItem) {
+        if let hex = item.representedObject as? String, let id = ObjectID(hex: hex) { model.editHistory(from: id) }
+    }
+
+    @objc private func newTag(_ item: NSMenuItem) {
+        if let hex = item.representedObject as? String, let id = ObjectID(hex: hex) { model.showNewTag(at: id) }
     }
 
     @objc private func showChanges() { model.sidebarSelection = .changes }

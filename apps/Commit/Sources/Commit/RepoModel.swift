@@ -38,6 +38,10 @@ enum RepoSheet: Identifiable, Equatable {
     case output(title: String, output: String)
     case divergentPull
     case identity
+    case integrate(IntegrationKind, preselected: String?)
+    case interactiveRebase(RebasePlan, pushedCount: Int)
+    case remotes
+    case newTag(at: ObjectID, label: String)
 
     var id: String {
         switch self {
@@ -46,6 +50,10 @@ enum RepoSheet: Identifiable, Equatable {
         case .output: "output"
         case .divergentPull: "divergent"
         case .identity: "identity"
+        case .integrate: "integrate"
+        case .interactiveRebase: "interactiveRebase"
+        case .remotes: "remotes"
+        case .newTag: "newTag"
         }
     }
 }
@@ -174,12 +182,27 @@ final class RepoModel: Identifiable {
     // History
     @ObservationIgnored let history = HistoryStore()
     private(set) var historyRevision = 0
-    var historySelection: ObjectID? { didSet { if oldValue != historySelection { loadCommitDetail() } } }
+    var historySelection: ObjectID? {
+        didSet {
+            guard oldValue != historySelection else { return }
+            // A single selection made anywhere (table, parent link, first row) is what
+            // Cherry-pick and Revert act on; a multiple selection comes from the table.
+            if selectedCommits.count <= 1 { selectedCommits = historySelection.map { [$0] } ?? [] }
+            loadCommitDetail()
+        }
+    }
+    /// Every selected commit in History, newest first (cherry-pick takes several).
+    var selectedCommits: [ObjectID] = []
     /// The "Uncommitted Changes" row is selected.
     var showAllBranches = false
-    private(set) var commitDetail: CommitDetail?
+    var commitDetail: CommitDetail?
     private(set) var commitFiles: [ChangedFile] = []
     var commitFileSelection: ChangedFile.ID? { didSet { if oldValue != commitFileSelection { loadCommitFileDiff() } } }
+
+    // Conflicts
+    var conflict: ConflictSession?
+    var conflictShowsDiff = false
+    private(set) var mergeTool = MergeToolSetting(name: nil)
 
     // Stashes
     var stashSelection: ObjectID? { didSet { if oldValue != stashSelection { loadStashDetail() } } }
@@ -187,7 +210,7 @@ final class RepoModel: Identifiable {
     var stashFileSelection: ChangedFile.ID? { didSet { if oldValue != stashFileSelection { loadStashFileDiff() } } }
 
     // Activity, problems, sheets
-    private(set) var activity: Activity?
+    var activity: Activity?
     var problem: Problem?
     var sheet: RepoSheet?
     var confirmation: Confirmation?
@@ -199,7 +222,7 @@ final class RepoModel: Identifiable {
     @ObservationIgnored private var refreshScheduler: RefreshScheduler?
     @ObservationIgnored private var watcher: FileWatcher?
     @ObservationIgnored private var needsRefs = true
-    @ObservationIgnored private var activityTask: Task<Void, Never>?
+    @ObservationIgnored var activityTask: Task<Void, Never>?
     @ObservationIgnored private var diffTask: Task<Void, Never>?
     @ObservationIgnored private var detailTask: Task<Void, Never>?
     @ObservationIgnored private var draftTask: Task<Void, Never>?
@@ -255,6 +278,7 @@ final class RepoModel: Identifiable {
             startWatching(location)
             scheduleAutoFetch()
             Task { identity = await repository.identity() }
+            Task { mergeTool = await repository.mergeTool() }
         } catch let problem as OpenProblem {
             openProblem = problem
             isOpening = false
@@ -359,6 +383,7 @@ final class RepoModel: Identifiable {
         }
         inProgress = repository.inProgressOperation()
         hasLoadedStatus = true
+        if includeRefs, !status.conflicted.isEmpty { Task { mergeTool = await repository.mergeTool() } }
         // Keep the diff and the history in step.
         if case .workingCopy = diff.source { reloadDiff(keepSelection: false) }
         let head = status.branch.head
@@ -476,9 +501,11 @@ final class RepoModel: Identifiable {
         guard rows.count == 1, let row = rows.first, let entry = entry(for: row) else {
             diffTask?.cancel()
             diff = DiffState(source: rows.count > 1 ? .multiple(rows.count) : .none)
+            conflict = nil
             return
         }
         let staged = row.area == .staged
+        if entry.isConflicted { loadConflict(entry) } else if conflict != nil { conflict = nil }
         let source = DiffState.Source.workingCopy(entry: entry, staged: staged)
         let sameFile = isSameFile(diff.source, source)
         if !sameFile {
@@ -760,9 +787,11 @@ final class RepoModel: Identifiable {
         guard let repository, !entries.isEmpty else { return }
         let withMarkers = entries.filter { repository.hasConflictMarkers($0.path) }
         let run: @MainActor () -> Void = { [weak self] in
-            self?.mutate(.stage, undoName: nil) {
+            self?.mutate(.resolve, undoName: "Mark Resolved") { [weak self] in
+                var snapshots: [ConflictSnapshot] = []
+                for entry in entries { snapshots.append(try await repository.snapshotConflict(entry.path)) }
                 try await repository.stage(paths: entries.map(\.path))
-                return nil
+                return { [weak self] in self?.restoreConflicts(snapshots) }
             }
         }
         if withMarkers.isEmpty { run(); return }
@@ -1206,6 +1235,8 @@ final class RepoModel: Identifiable {
     private func ensureHistory(scope: HistoryScope) {
         guard repository != nil else { return }
         if history.scope == scope, !history.rows.isEmpty || history.isLoading { applySearch(); return }
+        // Another branch's history: start on its newest commit, not the last one looked at.
+        if history.scope != nil { historySelection = nil }
         history.scope = scope
         reloadHistory()
     }
@@ -1220,6 +1251,7 @@ final class RepoModel: Identifiable {
         }
         history.reset()
         history.scope = scope
+        selectedCommits = historySelection.map { [$0] } ?? []
         history.isLoading = true
         historyRevision += 1
         let started = ContinuousClock.now
@@ -1390,7 +1422,7 @@ final class RepoModel: Identifiable {
     // MARK: Running things
 
     /// Runs a change that can be undone. `body` returns the undo action (or nil).
-    private func mutate(_ operation: GitOperation, undoName: String?, isUndo: Bool = false, failureHint: String? = nil,
+    func mutate(_ operation: GitOperation, undoName: String?, isUndo: Bool = false, failureHint: String? = nil,
                         _ body: @escaping @MainActor () async throws -> (@MainActor () -> Void)?) {
         Task {
             do {
@@ -1399,12 +1431,11 @@ final class RepoModel: Identifiable {
             } catch {
                 show(error, operation: operation, hint: failureHint)
             }
-            await refresh(includeRefs: operation == .dropStash || operation == .stash || operation == .discard
-                          || operation == .deleteBranch || operation == .createBranch)
+            await refresh(includeRefs: operation != .stage && operation != .unstage)
         }
     }
 
-    private func registerUndo(_ name: String, _ action: @escaping @MainActor () -> Void) {
+    func registerUndo(_ name: String, _ action: @escaping @MainActor () -> Void) {
         guard let undoManager = window?.undoManager ?? undoManager else { return }
         undoManager.registerUndo(withTarget: self) { _ in
             MainActor.assumeIsolated { action() }
@@ -1413,7 +1444,7 @@ final class RepoModel: Identifiable {
     }
 
     /// A longer operation with an activity in the toolbar.
-    private func perform(_ operation: GitOperation, title: String, cancellable: Bool = false, progress: Bool = false,
+    func perform(_ operation: GitOperation, title: String, cancellable: Bool = false, progress: Bool = false,
                          _ body: @escaping @MainActor (@escaping @Sendable (GitProgress) -> Void) async throws -> Void,
                          success: @escaping @MainActor () -> Void = {}) {
         let remote = refs.remoteNames.contains("origin") ? "origin" : refs.remoteNames.first
@@ -1437,7 +1468,7 @@ final class RepoModel: Identifiable {
         }
     }
 
-    private func run(_ operation: GitOperation, title: String, _ body: @escaping @MainActor () async throws -> Void,
+    func run(_ operation: GitOperation, title: String, _ body: @escaping @MainActor () async throws -> Void,
                      success: @escaping @MainActor () -> Void = {}) {
         perform(operation, title: title, cancellable: false, progress: false, { _ in try await body() }, success: success)
     }

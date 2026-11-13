@@ -194,7 +194,8 @@ struct DiffTable: NSViewRepresentable {
     let file: FileDiff
     let state: DiffState
     let editable: Bool
-    let model: RepoModel
+    /// nil for a read-only diff outside a repository window (file history).
+    let model: RepoModel?
 
     func makeCoordinator() -> DiffTableCoordinator { DiffTableCoordinator() }
 
