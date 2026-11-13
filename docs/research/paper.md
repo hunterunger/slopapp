@@ -1129,6 +1129,17 @@ scripts), 65 (crop), 94 and 95 (editing text and images).
 | P29 | PDFKit never draws a **text field's border** (live or rendered) whatever the property order; only the background. | Saved text fields get an appearance that wraps PDFKit's (keeping its text drawing) and adds the border; the Forms tool outlines every field on screen while authoring. |
 | P30 | `NSSharingServicePickerToolbarItem` asks its delegate for items during toolbar validation, not only on click. Paper's handler called `commitEditing()`, which closed any open text editor (text boxes too, before this round) whenever the toolbar validated, and wrote a temporary PDF each time for edited documents. | The toolbar query no longer ends editing; the share copy is cached until the document changes. |
 
+**Checked on macOS 26 in CI** (GitHub runner, macOS 26.7, SDK 26.5). The first CI run failed 10
+expectations; a diagnostic run showed page copies, writes, rewrites, in-place redaction and the
+content scanner behave the same as on 27. The real differences:
+
+| # | Fact (macOS 26) | What we did |
+|---|---|---|
+| P31 | A `PDFPage` doesn't keep its document's content alive: a page taken from a document that's then released draws, copies and scans as **empty** (on 27 it still works). | No app path does this (editing works on pages of open documents, and keeps its temporary documents alive while drawing). The new tests had used `doc(…).page(at: 0)!`; they now hold the document. |
+| P32 | PDFKit writes a widget's `/AP` and `/MK` as **indirect references** (27 writes them inline), and once a radio button is on it writes the group's parent field itself, **without the radio flags**. | `AcroFormWriter` resolves references before repairing, and gives a radio group's parent the radio flags whatever wrote it (a hand-written test PDF covers the shape). |
+
+Nothing needed an OS gate: all 189 tests pass on macOS 26 and 27 (final CI run 43361354017).
+
 ### What was built, and how it fits
 
 | Gap | Paper now | Where |
