@@ -6,7 +6,9 @@ import PaperFixtures
 
 @Suite("Editing page content")
 struct ContentEditingTests {
-    static func page() -> PDFPage { doc(Fixtures.editableDocument()).page(at: 0)! }
+    /// The document must outlive its pages: a page doesn't keep its document's content alive
+    /// (on macOS 26 a page of a released document draws and copies as empty).
+    static func document() -> PDFDocument { doc(Fixtures.editableDocument()) }
 
     static func block(containing text: String, on page: PDFPage) -> TextBlock? {
         TextLayout.blocks(on: page).first { $0.text.contains(text) }
@@ -19,7 +21,9 @@ struct ContentEditingTests {
     }
 
     @Test func linesGroupIntoBlocks() throws {
-        let page = Self.page()
+        let owner = Self.document()
+        defer { withExtendedLifetime(owner) {} }
+        let page = owner.page(at: 0)!
         let blocks = TextLayout.blocks(on: page)
         let paragraph = try #require(Self.block(containing: "untouched", on: page))
         #expect(paragraph.lines.count == 3)
@@ -34,7 +38,9 @@ struct ContentEditingTests {
     }
 
     @Test func replacingTextRemovesTheOldText() throws {
-        let page = Self.page()
+        let owner = Self.document()
+        defer { withExtendedLifetime(owner) {} }
+        let page = owner.page(at: 0)!
         let block = try #require(Self.block(containing: "untouched", on: page))
         let edited = NSMutableAttributedString(attributedString: block.attributedText)
         let range = (edited.string as NSString).range(of: "untouched")
@@ -63,7 +69,9 @@ struct ContentEditingTests {
     }
 
     @Test func backgroundIsRepainted() throws {
-        let page = Self.page()
+        let owner = Self.document()
+        defer { withExtendedLifetime(owner) {} }
+        let page = owner.page(at: 0)!
         let block = try #require(Self.block(containing: "Total due", on: page))
         let rebuilt = try #require(ContentEditor.replaceText(block, with: NSAttributedString(string: "Paid", attributes: [.font: NSFont.systemFont(ofSize: 16)]), on: page))
         // Right of the new, shorter text the tinted box shows, not a white hole.
@@ -74,7 +82,9 @@ struct ContentEditingTests {
     }
 
     @Test func imagesAreFoundMovedReplacedAndDeleted() throws {
-        let page = Self.page()
+        let owner = Self.document()
+        defer { withExtendedLifetime(owner) {} }
+        let page = owner.page(at: 0)!
         let images = ContentScanner.scan(page).images
         let image = try #require(images.first)
         #expect(image.rect.isClose(to: CGRect(x: 72, y: 300, width: 200, height: 100)))
@@ -105,14 +115,18 @@ struct ContentEditingTests {
     }
 
     @Test func addsAnImage() throws {
-        let page = Self.page()
+        let owner = Self.document()
+        defer { withExtendedLifetime(owner) {} }
+        let page = owner.page(at: 0)!
         let gradient = Fixtures.gradientImage()
         let added = try #require(ContentEditor.addImage(gradient, in: CGRect(x: 350, y: 100, width: 100, height: 50), on: page))
         #expect(ContentScanner.scan(added).images.count == 2)
     }
 
     @Test func missingFontsAreNamedAndMatched() throws {
-        let page = doc(Fixtures.missingFontDocument()).page(at: 0)!
+        let owner = doc(Fixtures.missingFontDocument())
+        defer { withExtendedLifetime(owner) {} }
+        let page = owner.page(at: 0)!
         let lines = TextLayout.lines(on: page)
         #expect(lines.count == 2)
         #expect(lines[0].pdfFontName == "Calibri-Bold")
@@ -150,7 +164,9 @@ struct ContentEditingTests {
 @Suite("Editing page content, follow-ups")
 struct ContentEditingFollowUpTests {
     @Test func movedImagesLeaveNoGhost() throws {
-        let page = ContentEditingTests.page()
+        let owner = ContentEditingTests.document()
+        defer { withExtendedLifetime(owner) {} }
+        let page = owner.page(at: 0)!
         let image = try #require(ContentScanner.scan(page).images.first)
         let moved = try #require(ContentEditor.moveImage(image, to: image.rect.offsetBy(dx: 250, dy: 0), on: page))
         let images = ContentScanner.scan(moved).images

@@ -25,14 +25,18 @@ struct CropTests {
     }
 
     @Test func otherPageSizesKeepTheSameMargins() {
-        let letter = doc(Fixtures.textDocument(pages: 1)).page(at: 0)!
-        let a4 = doc(Fixtures.landscapeA4()).page(at: 0)!
+        let letterDocument = doc(Fixtures.textDocument(pages: 1)), a4Document = doc(Fixtures.landscapeA4())
+        defer { withExtendedLifetime((letterDocument, a4Document)) {} }
+        let letter = letterDocument.page(at: 0)!
+        let a4 = a4Document.page(at: 0)!
         PageCrop.apply(CGRect(x: 36, y: 36, width: 612 - 72, height: 792 - 72), from: letter, to: [letter, a4])
         #expect(a4.bounds(for: .cropBox).isClose(to: CGRect(x: 36, y: 36, width: 842 - 72, height: 595 - 72)))
     }
 
     @Test func tinyCropsAreIgnored() {
-        let page = doc(Fixtures.textDocument(pages: 1)).page(at: 0)!
+        let owner = doc(Fixtures.textDocument(pages: 1))
+        defer { withExtendedLifetime(owner) {} }
+        let page = owner.page(at: 0)!
         #expect(PageCrop.clamped(CGRect(x: 10, y: 10, width: 4, height: 300), to: page) == nil)
         #expect(PageCrop.clamped(CGRect(x: -50, y: -50, width: 200, height: 200), to: page) == CGRect(x: 0, y: 0, width: 150, height: 150))
     }

@@ -22,7 +22,7 @@ public enum AcroFormWriter {
         var update = IncrementalUpdate(file)
 
         // 1. Widgets in page order, repaired from what Paper knows about each field.
-        struct Widget { var number: Int; var dict: PDFDict }
+        struct Widget { var number: Int; var dict: PDFDict; var kind: FormFieldKind? }
         var widgets: [Widget] = []
         var available = Dictionary(grouping: states, by: \.pageIndex)
         for (pageIndex, page) in file.pageRefs().enumerated() {
@@ -30,17 +30,19 @@ public enum AcroFormWriter {
                   let annots = pageDict["Annots"].flatMap({ try? file.resolve($0).arrayValue }) else { continue }
             for annot in annots {
                 guard let ref = annot.refValue, var dict = file.dict(annot), dict["Subtype"]?.nameValue == "Widget" else { continue }
+                var kind: FormFieldKind?
                 if let rect = rect(dict["Rect"]), var candidates = available[pageIndex],
                    let match = candidates.firstIndex(where: { $0.rect.isClose(to: rect) }) {
                     let state = candidates.remove(at: match)
                     available[pageIndex] = candidates
-                    let repaired = repair(dict, state: state, update: &update)
+                    kind = state.kind
+                    let repaired = repair(dict, state: state, file: file, update: &update)
                     if repaired != dict {
                         dict = repaired
                         update.replace(ref.0, with: .dict(dict))
                     }
                 }
-                widgets.append(Widget(number: ref.0, dict: dict))
+                widgets.append(Widget(number: ref.0, dict: dict, kind: kind))
             }
         }
         let existingForm = file.dict(catalog["AcroForm"])
@@ -106,9 +108,14 @@ public enum AcroFormWriter {
             parent["FT"] = first["FT"] ?? .name("Btn")
             parent["T"] = first["T"]
             if let tooltip = group.lazy.compactMap({ $0.dict["TU"] }).first { parent["TU"] = tooltip }
-            var flags = first["Ff"]?.intValue ?? 0
-            let isButton = first["FT"]?.nameValue == "Btn"
-            if isButton { flags |= radioFlag | noToggleToOff }
+            // macOS 26's PDFKit doesn't always put /FT and /Ff on each widget: go by what Paper
+            // knows the widgets are, then by any widget that says.
+            var flags = group.lazy.compactMap { $0.dict["Ff"]?.intValue }.first ?? 0
+            let isButton = group.contains { $0.kind == .radio || $0.kind == .checkbox || $0.dict["FT"]?.nameValue == "Btn" }
+            if isButton {
+                parent["FT"] = .name("Btn")
+                flags |= radioFlag | noToggleToOff
+            }
             parent["Ff"] = .int(flags)
             if isButton {
                 let on = group.lazy.compactMap { $0.dict["AS"]?.nameValue }.first { $0 != "Off" }
@@ -193,7 +200,7 @@ public enum AcroFormWriter {
     /// Puts back what PDFKit drops when it rewrites a widget of a loaded document
     /// (research P26): `/DA` as a string naming a font in `/DR`, the border and background
     /// in `/MK`, and for checkboxes and radio buttons both appearance states, `/AS` and `/V`.
-    static func repair(_ widget: PDFDict, state: WidgetState, update: inout IncrementalUpdate) -> PDFDict {
+    static func repair(_ widget: PDFDict, state: WidgetState, file: PDFFile, update: inout IncrementalUpdate) -> PDFDict {
         var dict = widget
         let isButton = state.kind == .checkbox || state.kind == .radio
         let wantedDA = isButton ? "/ZaDb 0 Tf 0 g" : "/Helv \(PDFWriter.number(Double(state.fontSize ?? 0))) Tf 0 g"
@@ -204,7 +211,8 @@ public enum AcroFormWriter {
         } else if state.kind != .signature {
             dict["DA"] = .string(Data(wantedDA.utf8))
         }
-        var mk = (dict["MK"]?.dictValue) ?? PDFDict()
+        // /MK and /AP may be written inline (macOS 27) or as references (macOS 26).
+        var mk = file.dict(dict["MK"]) ?? PDFDict()
         if mk["BC"] == nil, let border = state.borderColor { mk["BC"] = .array(border.map { .real(Double($0)) }) }
         if mk["BG"] == nil, let background = state.backgroundColor { mk["BG"] = .array(background.map { .real(Double($0)) }) }
         if isButton, mk["CA"] == nil { mk["CA"] = .string(Data((state.kind == .radio ? "l" : "4").utf8)) }
@@ -214,7 +222,7 @@ public enum AcroFormWriter {
         }
         if isButton, let rect = rect(dict["Rect"]) {
             let on = sanitizedState(state.onState)
-            let states = (dict["AP"]?.dictValue?["N"]?.dictValue)
+            let states = file.dict(file.dict(dict["AP"])?["N"])
             if states?[on] == nil || states?["Off"] == nil {
                 let size = CGSize(width: rect.width, height: rect.height)
                 let onRef = update.add(appearanceDict(size), stream: ButtonAppearance.stream(state.kind == .radio, on: true, size: size, state: state))
@@ -228,7 +236,7 @@ public enum AcroFormWriter {
         // PDFKit's text field appearance has the background and the text but no border
         // (research P29): wrap it in one that adds the border, keeping PDFKit's drawing.
         if state.kind == .text, let border = state.borderColor, let rect = rect(dict["Rect"]),
-           let ap = dict["AP"]?.dictValue, case .ref(let normal, let generation)? = ap["N"],
+           let ap = file.dict(dict["AP"]), case .ref(let normal, let generation)? = ap["N"],
            update.current(normal)?.dictValue?["PaperBorder"] == nil {
             let w = Double(rect.width), h = Double(rect.height)
             let color = border.map { PDFWriter.number(Double($0)) }.joined(separator: " ")
