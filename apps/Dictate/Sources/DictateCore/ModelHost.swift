@@ -15,8 +15,17 @@ public protocol SpeechEngine: AnyObject {
     func unload()
     /// 16 kHz mono samples to text, with the loaded model.
     func transcribe(_ samples: [Float]) async throws -> String
+    /// Like `transcribe`, with word timings when the engine reports them (for subtitles).
+    func transcribeTimed(_ samples: [Float]) async throws -> TimedTranscript
     /// Moves the model's files to the Trash.
     func remove(_ option: ModelOption) throws
+}
+
+extension SpeechEngine {
+    /// Engines without timings: the text alone (subtitles then spread it evenly).
+    public func transcribeTimed(_ samples: [Float]) async throws -> TimedTranscript {
+        TimedTranscript(text: try await transcribe(samples))
+    }
 }
 
 /// Where the selected model is.
@@ -230,6 +239,16 @@ public final class ModelHost {
     /// Transcribes with the selected model, loading it first if needed. One at a time: a
     /// second call waits for the first, so previews, dictation and files never overlap.
     public func transcribe(_ samples: [Float]) async throws -> String {
+        try await enqueue { try await $0.transcribe(samples) }
+    }
+
+    /// Transcribes with word timings where the engine has them (file transcription, for
+    /// subtitles). Queued with everything else, like `transcribe`.
+    public func transcribeTimed(_ samples: [Float]) async throws -> TimedTranscript {
+        try await enqueue { try await $0.transcribeTimed(samples) }
+    }
+
+    private func enqueue<Result: Sendable>(_ work: @escaping @MainActor (SpeechEngine) async throws -> Result) async throws -> Result {
         pending += 1
         unloadTask?.cancel()
         defer {
@@ -237,13 +256,13 @@ public final class ModelHost {
             scheduleUnload()
         }
         let previous = queueTail
-        let job = Task { @MainActor () throws -> String in
+        let job = Task { @MainActor () throws -> Result in
             await previous?.value
             try await self.prepare()
             guard let engine = self.engines[self.selected.engine] else {
                 throw ModelHostError.notInstalled(self.selected.name)
             }
-            return try await engine.transcribe(samples)
+            return try await work(engine)
         }
         queueTail = Task { _ = try? await job.value }
         return try await job.value

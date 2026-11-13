@@ -114,7 +114,10 @@ struct ModelRow: View {
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.borderless)
-                    .help("Move \(option.name) to the Trash")
+                    // The model in use stays: removing it would leave nothing to dictate with.
+                    .disabled(isSelected)
+                    .help(isSelected ? "In use. Choose another model to remove this one."
+                                     : "Move \(option.name) to the Trash")
                     .accessibilityLabel("Move \(option.name) to the Trash")
                 } else {
                     Button("Download") {

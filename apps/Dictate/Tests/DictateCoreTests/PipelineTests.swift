@@ -32,6 +32,17 @@ struct ModelHostTests {
         if case .failed = host.state {} else { Issue.record("expected failed, got \(host.state)") }
     }
 
+    @Test func timedTranscriptionLoadsAndFallsBackToPlainText() async throws {
+        let engine = FakeEngine()
+        engine.installed = [v3.key]
+        engine.transcript = "Hello there"
+        let host = ModelHost(engines: [.parakeet: engine], selected: v3, retention: .oneHour, sleep: neverSleep)
+        let timed = try await host.transcribeTimed(Array(repeating: 0.1, count: 16_000))
+        #expect(timed == TimedTranscript(text: "Hello there"))
+        #expect(engine.loadCount == 1)
+        #expect(host.state == .ready)
+    }
+
     @Test func loadsOnDemandOnceEvenWhenAskedTwice() async throws {
         let engine = FakeEngine()
         engine.installed = [v3.key]
@@ -218,6 +229,17 @@ struct DictationTests {
         #expect(rig.engine.transcribeCount == 0)
         #expect(rig.feedback.ended == [.nothing])
         #expect(rig.delivery.delivered.isEmpty)
+    }
+
+    @Test func shorterThanTheEnginesMinimumIsDroppedToo() async {
+        // Parakeet refuses audio under 0.3 s ("invalid audio data"): a 0.28 s tap isn't an error.
+        let rig = Rig()
+        rig.audio.samples = Array(repeating: 0.1, count: 4_480)
+        #expect(await rig.record())
+        rig.controller.end()
+        #expect(rig.controller.phase == .idle)
+        #expect(rig.engine.transcribeCount == 0)
+        #expect(rig.feedback.ended == [.nothing])
     }
 
     @Test func silenceIsNotAnError() async {

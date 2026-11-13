@@ -77,6 +77,10 @@ final class ParakeetEngine: SpeechEngine {
     }
 
     func transcribe(_ samples: [Float]) async throws -> String {
+        try await transcribeTimed(samples).text
+    }
+
+    func transcribeTimed(_ samples: [Float]) async throws -> TimedTranscript {
         if let mandarin {
             // The Mandarin model takes 15 s at a time.
             let window = 240_000
@@ -87,12 +91,14 @@ final class ParakeetEngine: SpeechEngine {
                 text += try await mandarin.transcribe(audio: chunk)
                 start += window
             }
-            return text
+            // No timings from this model: subtitles spread the text over the audio.
+            return TimedTranscript(text: text)
         }
         guard let manager, let loadedVersion else { throw ModelHostError.notInstalled("Parakeet") }
         var state = try TdtDecoderState(decoderLayers: loadedVersion.decoderLayers)
         let result = try await manager.transcribe(samples, decoderState: &state)
-        return result.text
+        let tokens = (result.tokenTimings ?? []).map { (text: $0.token, start: $0.startTime, end: $0.endTime) }
+        return TimedTranscript(text: result.text, words: TimedWord.words(fromTokens: tokens))
     }
 
     func remove(_ option: ModelOption) throws {
@@ -172,7 +178,12 @@ final class WhisperEngine: SpeechEngine {
 
     func transcribe(_ samples: [Float]) async throws -> String {
         guard let pipe else { throw ModelHostError.notInstalled("Whisper") }
-        return try await pipe.transcribe(samples)
+        return try await pipe.transcribe(samples, wordTimings: false).text
+    }
+
+    func transcribeTimed(_ samples: [Float]) async throws -> TimedTranscript {
+        guard let pipe else { throw ModelHostError.notInstalled("Whisper") }
+        return try await pipe.transcribe(samples, wordTimings: true)
     }
 
     func remove(_ option: ModelOption) throws {
@@ -196,9 +207,13 @@ private nonisolated final class WhisperPipe: @unchecked Sendable {
         return WhisperPipe(kit: try await WhisperKit(config))
     }
 
-    func transcribe(_ samples: [Float]) async throws -> String {
-        let options = DecodingOptions(skipSpecialTokens: true)
+    func transcribe(_ samples: [Float], wordTimings: Bool) async throws -> TimedTranscript {
+        let options = DecodingOptions(skipSpecialTokens: true, wordTimestamps: wordTimings)
         let results = try await kit.transcribe(audioArray: samples, decodeOptions: options)
-        return results.map(\.text).joined(separator: " ")
+        let text = results.map(\.text).joined(separator: " ")
+        let words = results.flatMap(\.segments).flatMap { $0.words ?? [] }.map {
+            TimedWord($0.word.trimmingCharacters(in: .whitespaces), start: TimeInterval($0.start), end: TimeInterval($0.end))
+        }
+        return TimedTranscript(text: text, words: words)
     }
 }

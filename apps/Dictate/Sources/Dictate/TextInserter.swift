@@ -32,6 +32,11 @@ final class TextInserter: TextDelivering {
             copy(text)
             return .copied
         }
+        if NSApp.isActive {
+            // Started from Dictate's own menu or while one of its windows is in front: type
+            // into the focused field directly (no Accessibility, no clipboard), or copy.
+            return insertIntoOwnWindow(text)
+        }
         guard AXIsProcessTrusted() else {
             copy(text)
             return .copiedNeedsAccessibility
@@ -54,6 +59,16 @@ final class TextInserter: TextDelivering {
             Diagnostics.record("insert pasted chars=\(text.count)")
         }
         return .inserted
+    }
+
+    private func insertIntoOwnWindow(_ text: String) -> DeliveryOutcome {
+        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView, textView.isEditable {
+            textView.insertText(text, replacementRange: textView.selectedRange())
+            Diagnostics.record("insert into own window chars=\(text.count)")
+            return .inserted
+        }
+        copy(text)
+        return .copied
     }
 
     // MARK: Paste

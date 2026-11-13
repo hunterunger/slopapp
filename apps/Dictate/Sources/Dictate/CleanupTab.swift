@@ -33,13 +33,11 @@ struct CleanupTab: View {
                     HStack(spacing: Spacing.s) {
                         TextField("Heard", text: $rule.from)
                             .labelsHidden()
-                            .accessibilityLabel("Heard")
                         Image(systemName: "arrow.right")
                             .foregroundStyle(.secondary)
                             .accessibilityHidden(true)
-                        TextField("Write", text: $rule.to)
+                        TextField("Write instead", text: $rule.to, prompt: Text("Write"))
                             .labelsHidden()
-                            .accessibilityLabel("Write instead")
                         Button {
                             settings.replacements.removeAll { $0.id == rule.id }
                         } label: {
@@ -96,10 +94,9 @@ struct CleanupTab: View {
             }
 
             Section {
-                TextField("Sample", text: $sample, prompt: Text("Type or paste something you might say…"), axis: .vertical)
+                TextField("Sample text", text: $sample, prompt: Text("Type or paste something you might say…"), axis: .vertical)
                     .labelsHidden()
                     .lineLimit(2...5)
-                    .accessibilityLabel("Sample text")
                 HStack {
                     if running { ProgressView().controlSize(.small) }
                     Spacer()
@@ -107,10 +104,17 @@ struct CleanupTab: View {
                         .disabled(sample.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || running)
                 }
                 if !result.isEmpty {
-                    Text(result)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityLabel("Result: \(result)")
+                    // No accessibility modifiers on selectable text: overriding the label of a
+                    // `.textSelection` Text sent SwiftUI's accessibility into endless recursion
+                    // (a crash when VoiceOver or any Accessibility client read it).
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("Result")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(result)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             } header: {
                 Text("Try it")

@@ -77,6 +77,10 @@ Status: **done** (in Dictate and walked through), **done+** (done and improved),
 | 39 | — | | new | Password fields (Secure Input) get the text on the clipboard instead of losing it |
 | 40 | — | | new | Language choice for Whisper / Parakeet v3 hints | deferred: Better Transcriber didn't have it; needs UI and testing per language |
 | 41 | — | | new | Streaming (true real-time) preview with FluidAudio's streaming managers | deferred: the windowed preview is fast enough on the Neural Engine |
+| 42 | — | | new | Dictation menu in the app's menu bar (start/stop/cancel, history, setup, copy last) and File › Transcribe Audio Files… ⌘O / Save Transcript… ⌘S; macOS's own Edit › Start Dictation… hidden (blind round 1) |
+| 43 | — | | new | Subtitle export (SRT, WebVTT) from word timings (Parakeet token timings, Whisper word timestamps; Mandarin spread evenly); Format pop-up in the save panel (blind round 1) |
+| 44 | — | | new | Notices a hidden menu bar icon (full menu bar / notch), re-inserts it once, says so in Settings › General and once as a HUD (blind round 1) |
+| 45 | — | | later | VoiceOver role for the shortcut recorders (they read as search fields): SlopKit's `ShortcutRow`, shared by every app |
 
 ## Key flows
 
@@ -98,8 +102,9 @@ Status: **done** (in Dictate and walked through), **done+** (done and improved),
 2. It says macOS will ask again for Microphone and Accessibility, and offers to quit Better
    Transcriber so one Fn press doesn't dictate twice.
 3. Microphone → Accessibility (SlopKit `PermissionGate`, updates by itself) → the model step
-   shows "Parakeet TDT v3 Is Ready" (imported) or a Download button → trigger and behaviour →
-   Try It box.
+   shows "Speech Model Is Ready" (imported) or a Download button → trigger and behaviour →
+   Try It box with a Start Dictation button (types into the box, no Accessibility needed).
+   Esc or ⌘W closes the assistant.
 
 ### Flow 3: Command Mode
 Select text → hold the Command Mode shortcut → say "make this more formal" → release → the
@@ -108,7 +113,9 @@ Intelligence; each missing piece gets its own message.
 
 ### Flow 4: transcribe files
 Menu › Transcribe Audio Files… (⌘O) or drop files on the window (or Open With › Dictate).
-Files run one after another; select one to read, copy or save its transcript.
+Files run one after another; select one to read, copy or save its transcript as plain text,
+SRT or WebVTT subtitles (⌘S, a Format pop-up in the save panel). Delete, the − button or the
+context menu (Show in Finder, Copy, Save, Remove, Clear Finished) take files off the list.
 
 ## Settings inventory
 
@@ -136,6 +143,11 @@ Files run one after another; select one to read, copy or save its transcript.
 | Per-app overrides | none | | |
 
 ## Menus and shortcuts
+
+App menu bar (while a Dictate window is in front): File › Transcribe Audio Files… ⌘O, Save
+Transcript… ⌘S, Close ⌘W; Dictation › status line, fix-it item, Start/Stop/Cancel Dictation,
+Copy Last Transcript, Open History ⌘Y, Setup Assistant…. Edit › Start Dictation… (macOS's own
+dictation) is hidden with the registered default `NSDisabledDictationMenuItem`.
 
 Status item menu: status line · fix-it item (when needed) · Start/Stop Dictation · Cancel
 Dictation (while busy) · Transcribe Audio Files… ⌘O · Copy / Paste Last Transcript · Open
@@ -333,3 +345,45 @@ Twice another builder's app came to the front mid-test and the lock correctly re
 ## Blind test log
 
 One section per round, newest last. See docs/dev-cycle.md step 5.
+
+### Round 1 (2026-11-12)
+
+Tester: fresh agent, release build as a separate copy (`--direct`) beside the owner's installed
+Dictate, test env (`DICTATE_DATA_DIR`, cloned models, `DICTATE_FAKE_AUDIO`, private pasteboard,
+`DICTATE_NO_HOTKEY`, insertion locked to a non-existent app).
+
+| # | Finding | Severity | Decision | Fix or reason |
+|---|---|---|---|---|
+| F1 | Test copy's menu bar icon never stayed visible; with the hotkey off there was no way to start a dictation | major | accept | Investigated: a second copy with the same bundle id showed its icon fine here; a copy under a fresh bundle id came up with a zero-height status window and no AX item (the tester's symptom), once, and showed after the item was put in again. Environmental (a crowded notched menu bar shared by several test apps), but a hidden icon is a real user situation. Now: `MenuBarPresence` reads where the icon's window ended up (`StatusItemPlacement`, tested: zero size, off every screen, under the notch), re-inserts the item once, then says so in Settings › General (with how to get around it) and once as a HUD. Reopening the app opens Settings (as before), and the new Dictation menu has every command. Also found while triaging: in a test copy sharing the installed app's bundle id, "Show in menu bar" was written to the installed app's defaults: it now lives in the test domain; `apps/Dictate/test-copy.sh` makes a copy with its own bundle id so shortcuts, window positions and status item placement are separate too |
+| F2 | Crash (stack overflow in SwiftUI `AccessibilityNode.accessibilityLabel()`) after Clean Up in Settings › Cleanup › Try it | major | accept | Reproduced on the first try (type, Clean Up, read the tree). Cause: a custom `.accessibilityLabel` on a `.textSelection(.enabled)` Text makes SwiftUI's label resolution call itself. The result now has a visible "Result" caption and no accessibility modifiers; 10 more runs, no crash. The same pattern isn't used anywhere else. Also removed doubled labels ("Heard, Heard", "Sample, Sample text") |
+| F3 | No way to start dictation from the app's own menus or windows; Edit › Start Dictation… is macOS's | minor | accept | Dictation menu (status, Start/Stop/Cancel, Copy Last Transcript, Open History ⌘Y, Setup Assistant…); File › Transcribe Audio Files… ⌘O. macOS's Edit › Start Dictation… hidden (registered default, nothing written). Setup's Try It step has a Start/Stop Dictation button. A dictation started while Dictate is in front types straight into its focused text field (no Accessibility or clipboard needed), or is copied when none is focused |
+| F4 | Transcribe list: Delete does nothing, no context menu, Save… has no format choice, toolbar icon-only | minor | accept (toolbar labels: reject) | Delete and a − toolbar button remove files (multi-select); context menu: Show in Finder, Copy Transcript, Save Transcript…, Remove from List, Clear Finished (it existed on each row, out of reach of the tester's tool; it's now on the list's selection, multi-select aware). Save offers Plain Text, Subtitles (SRT), Subtitles (WebVTT), timed from the engines' word timings, last choice remembered; File › Save Transcript… ⌘S. Icon-only toolbar buttons are the standard unified toolbar look; each has a tooltip and a VoiceOver label, and every action is now also in a menu |
+| F5 | Setup: Continue not drawn as default; steps half empty; "Parakeet TDT v3 Is Ready" is jargon; Esc doesn't close | minor | accept (default button: reject) | Steps are centred in a shorter window (520 pt); headline "Speech Model Is Ready" with the model's name in the sentence, "Download Speech Model" button; Esc closes like ⌘W. Continue is the default button (`.defaultAction`, accent-filled): it was grey only because the window was inactive (the test copy never activates); screenshot of the active window shows it blue |
+| F6 | "Launch at login" showed on at first launch | minor | reject | Verified: Dictate only calls `SMAppService` from the toggle; the status shown was the installed copy's (same bundle id). Test copies now show the switch disabled with a note, so a test can never change the owner's login items |
+| F7 | Help › Report a Problem… opens a web page at once | nit | reject | SlopKit-wide, the same in every app; the "…" signals more input (the report form) |
+| F8a | Orange "Failed" on a blue selected row | nit | accept | Status labels take the row's text colour when selected |
+| F8b | History and Transcribe windows open 20 pt apart | nit | accept | Default positions differ (History at the left, Transcribe centred); both remember where they were moved |
+| F8c | Settings › Apps mostly empty | nit | accept | The form is short while there are no apps, taller once there are |
+| F8d | Trash button enabled next to the model In Use | nit | accept | Disabled for the model in use, tooltip says to choose another first |
+| A11y | Shortcut recorders exposed as search fields | nit | defer | SlopKit's recorder (KeyboardShortcuts' `NSSearchField` subclass), shared by every app; inventory #45 |
+
+Also fixed while testing: a 0.25–0.3 s tap reached Parakeet, which refuses audio under 0.3 s
+("invalid audio"): the minimum is now 0.3 s (test). Row separators in the Transcribe list started
+under the status label: they start under the file name. Smoke tests no longer warm up a model.
+Test saves default to `DICTATE_DATA_DIR`, never Documents. File menu kept its Close ⌘W.
+
+Gates after the fixes: `scripts/test.sh Dictate` 112 tests in 14 suites pass (was 86 in 11);
+`scripts/check.sh Dictate` all PASS; `scripts/perf.sh Dictate --direct` with test-only env (no
+models): launch 119 ms, first status item 220 ms, idle CPU 0.002 %, footprint 22.1 MB, all PASS
+(busy machine, load 7). `check.sh Dictate --perf` reports perf FAIL only because `perf.sh`
+refuses to run beside the owner's installed copy, by design. `drive tree`: 0 `[unlabeled]` in
+every setup step, all six Settings tabs, History, Transcribe and the status menu. Walkthrough
+(test copy and `build/Dictate.app`, light and dark, `/tmp/dictate-test/shots-r1`): status menu →
+Start → ring with live words → Stop (insertion correctly skipped: another app in front);
+Dictation menu Start/Cancel/Stop (copied when no Dictate field is focused); setup Try It button
+typed into the box; Esc closes setup; four files queued (three transcribed, one bogus), Delete, right-click menu, Failed on a selected row; Save as SRT wrote four
+well-formed cues timed from Parakeet's token timings; Cleanup Try it ×10 with the tree read
+after each, no crash; Models trash disabled for the model in use; hidden-icon note shown when
+the icon was out of sight. Not tested: Whisper's word timings (no Whisper model in the test
+models folder); the hidden-icon HUD on screen (it fired once in the hidden run, its once-only flag is set, but
+it wasn't captured; the Settings note was seen).

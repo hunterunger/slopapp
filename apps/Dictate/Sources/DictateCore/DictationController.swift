@@ -154,7 +154,8 @@ public final class DictationController {
     @ObservationIgnored private var generation = 0
 
     /// Shorter than this can't hold a word: accidental taps are dropped without transcribing.
-    public static let minimumSamples = Int(AudioDecoder.sampleRate / 4)
+    /// 0.3 s is also the shortest audio Parakeet accepts (shorter throws "invalid audio").
+    public static let minimumSamples = Int(AudioDecoder.sampleRate * 0.3)
     /// The preview re-transcribes this much recent audio (the ring only shows the latest words).
     public static let previewWindowSeconds = 20.0
 
