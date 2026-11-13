@@ -189,7 +189,7 @@ nothing else; see "Our v1 scope" for the cut line and why.
 | 3 | Recent repositories | File > Open Recent + Repository Manager | must | Standard Open Recent + recents in the welcome window. |
 | 4 | Repository Manager | Start window with folders of local and hosted repos, statuses, README rendering, auto-tracked folders, "Open in Tabs" | later | v1 welcome window: recents, Open…, (Clone…). |
 | 5 | Create repo (init) | File > New Repository… | should | Offered when the chosen folder isn't a repo. |
-| 6 | Clone | File > Clone Repository…: URL, name, destination, account, submodules | should | URL + destination + progress + cancel. No accounts. |
+| 6 | Clone | File > Clone Repository…: URL, name, destination, account, submodules | should | URL + destination + progress + cancel. No accounts. Built 2026-11-11 (feature round): Clone window, see below. |
 | 7 | Open in Finder / Terminal / editor | View menu, apps chosen in Settings | should | Finder + Terminal (default app). Editor choice later. |
 | 8 | Command-line launcher | Bundled `gitfox-cli` | skip | `open -a Commit .` already works via the folder document type. |
 | 9 | Quick Look | File > Quick Look (⌘Y) | should | Space on a file row. |
@@ -212,9 +212,9 @@ nothing else; see "Our v1 scope" for the cut line and why.
 | 21 | Next / previous change | ⌘↓ / ⌘↑ | must | Also ↑/↓ moves between files in the list. |
 | 22 | Whitespace, algorithm, wrap | Settings: whitespace modes, Patience (default) / Histogram / Myers; wrap | should | "Ignore whitespace" (view only; line staging disabled while on). Respect `diff.algorithm` with the 2 s Myers fallback. Wrap later. |
 | 23 | Binary, image, huge files | Image diff modes | must (binary/huge), later (image diff) | Binary: "Binary file, 4.2 MB → 4.3 MB" + Quick Look. Diffs over ~10,000 lines collapse to "Show Full Diff". |
-| 24 | Blame | Inline blame column | later | |
+| 24 | Blame | Inline blame column | later | Built 2026-11-11: blame in the File History window. |
 | 25 | Find in diff | ⌘F in the diff (4.0), matches scroll into view (5.4.2) | should | System find bar if the diff view supports `NSTextFinder`. |
-| 26 | External diff/merge tools | Launchers for FileMerge, Kaleidoscope, Beyond Compare, VS Code… | later | |
+| 26 | External diff/merge tools | Launchers for FileMerge, Kaleidoscope, Beyond Compare, VS Code… | later | Merge tool built 2026-11-11 (`git mergetool`, the user's `merge.tool`); diff tools still later. |
 | 27 | Open line in editor | Open diff lines in an external editor (5.2) | later | |
 
 ### Committing
@@ -242,12 +242,12 @@ nothing else; see "Our v1 scope" for the cut line and why.
 | 41 | Create branch | Name, start point, track, check out | must | Sheet: name (validated with `check-ref-format`), from HEAD or the selected commit, "Switch to it" on. |
 | 42 | Branch switcher | Toolbar breadcrumb "branch › upstream" | should | Toolbar branch button → filterable popover (⇧⌘B). |
 | 43 | Rename / delete branch | Move Branch…, Delete… (force, delete on remote) | should | Delete confirms with the name, Cancel default, safe `-d` unless ticked; ⌘Z recreates it from the known tip. |
-| 44 | Tags | Sidebar list, create | should (list + create), later (push/delete) | |
-| 45 | Remotes management | Add/Edit Remote, accounts | later | |
-| 46 | Merge / rebase into HEAD | With options (squash, no-ff, no commit, skip hooks) | later | Brings conflicts; with conflicts UI. |
-| 47 | Interactive rebase | Reword/Edit/Squash/Fixup/Drop | later | |
-| 48 | Conflict resolution UI | Per-hunk ours/theirs/both/neither (5.0), whole-file ours/theirs, Continue/Abort bar | later (UI), must (state) | v1: conflicted files flagged and not stageable by accident; "Mark Resolved" after fixing them in an editor; banner with Continue / Abort for merge, rebase, cherry-pick, revert. Pull can always produce this state, so v1 must not get stuck in it. |
-| 49 | Cherry-pick, revert, reset | History context menu | should (revert), later (others) | Revert makes a new commit, so it's safe. Hard reset later, stash-first. |
+| 44 | Tags | Sidebar list, create | should (list + create), later (push/delete) | Create (lightweight/annotated), delete (undoable), push one / all, delete on remote: built 2026-11-11. |
+| 45 | Remotes management | Add/Edit Remote, accounts | later | Add, rename, change URL, remove (undoable): built 2026-11-11. No accounts. |
+| 46 | Merge / rebase into HEAD | With options (squash, no-ff, no commit, skip hooks) | later | Brings conflicts; with conflicts UI. Built 2026-11-11: merge (optional --no-ff) and rebase onto any branch or tag, undoable. |
+| 47 | Interactive rebase | Reword/Edit/Squash/Fixup/Drop | later | Built 2026-11-11: reorder, squash, fixup, reword, drop. Edit (stop at a commit) still later. |
+| 48 | Conflict resolution UI | Per-hunk ours/theirs/both/neither (5.0), whole-file ours/theirs, Continue/Abort bar | later (UI), must (state) | v1: conflicted files flagged and not stageable by accident; "Mark Resolved" after fixing them in an editor; banner with Continue / Abort for merge, rebase, cherry-pick, revert. Pull can always produce this state, so v1 must not get stuck in it. Built 2026-11-11: per-conflict ours/theirs/both, edit the result, whole-file sides, merge tool. |
+| 49 | Cherry-pick, revert, reset | History context menu | should (revert), later (others) | Revert makes a new commit, so it's safe. Hard reset later, stash-first. Cherry-pick (several, menu and drag) and revert built 2026-11-11; reset still later. |
 | 50 | Git-flow, bisect, worktrees, submodule/LFS commands | Menus and toolbar | later | Submodules show as entries; LFS works when `git-lfs` is on the login PATH. |
 | 51 | Hosting accounts, PR links, issue sources | GitHub/GitLab/Bitbucket/Gitea/Jira accounts, Create Pull Request, issue links | later | "Open Pull Request Page" when the remote prints a URL after push: should. No accounts ever in v1. |
 | 52 | Compare branches | From the sidebar (5.3.1) | later | |
@@ -259,7 +259,7 @@ nothing else; see "Our v1 scope" for the cut line and why.
 | 53 | Fetch | Fetch, Fetch All Remotes; prunes | must | All remotes, `--prune`, progress, cancel. |
 | 54 | Pull | Pull… dialog (rebase, autostash) and Pull HEAD | must | One click. Respect `pull.rebase`/`pull.ff`; on "divergent branches" ask Merge / Rebase / Cancel and offer to remember it in the repo's config. Dirty tree → `--autostash`, said aloud. |
 | 55 | Push | Push… dialog and Push HEAD; drag a branch onto a remote (5.3.1); push several branches | must | One click. No upstream → `origin` (ask if several remotes) with `-u`. Rejected → "The remote has commits you don't have" + Pull. |
-| 56 | Force push | With lease and plain, confirmed | later | With lease only. |
+| 56 | Force push | With lease and plain, confirmed | later | With lease only. Built 2026-11-11, with lease only. |
 | 57 | Sync | Sync HEAD (fetch + pull + push) | should | One toolbar button. |
 | 58 | Automatic fetch | Default every 10 min; 5.4 also fetches repos that aren't open | should (opt-in) | Off by default; Off / 5 / 15 / 30 min; open windows only; no notifications. |
 | 59 | Credentials UI | Accounts & Credentials pane, stored passphrases | skip (accounts), **must (askpass)** | We rely on the user's helper and SSH setup; the askpass helper (Engine rule 5) handles prompts. |
@@ -274,7 +274,7 @@ nothing else; see "Our v1 scope" for the cut line and why.
 | 63 | Commit detail | Header (message, author, date, parents, refs) + files + diff | must | Same diff view, read-only. Copy hash (⌘C), copy subject. |
 | 64 | Search history | Filter by message; full-text across history | should | Message/author/hash (`--grep`, `--author`, prefix). `-S` content search later. |
 | 65 | Jump to ref | Jump to HEAD, branches, tags, stashes in the log (5.2) | should | ⌘0 / selecting a branch scrolls to its tip. |
-| 66 | File history | From a file's context menu | later | `log --follow`. |
+| 66 | File history | From a file's context menu | later | `log --follow`. Built 2026-11-11 (`log --follow`), with blame per version. |
 | 67 | Reflog | Sidebar section | later | Strong v1.1 safety net. |
 
 ### Stash
@@ -796,7 +796,7 @@ research doc's recommendations; what was decided and why:
 7. **Undo Commit: yes, as ⌘Z** right after a commit or amend, only while that commit is still
    the branch tip and not on its upstream (soft reset; the message goes back into the
    composer). It rewrites only unpushed local history, which is the case where people want it.
-8. **Init: yes, clone: later.** "Create Repository" is one button when a chosen folder isn't
+8. **Init: yes, clone: later** (clone shipped in the 2026-11-11 feature round). "Create Repository" is one button when a chosen folder isn't
    a repository. Clone (URL, destination, progress, cancel) is deferred: the musts came
    first and clone adds a sheet, network progress and a second open path.
 9. **Minimum macOS: 14**, as the repo standard. Nothing needed 15: the big lists are
@@ -1029,6 +1029,144 @@ context lines, ignore whitespace, auto-fetch (off), pull-request link after push
 | 24 | Nothing jumps | pass after the banner fix; activity appears in the toolbar only while running |
 | 25 | Golden Gate fit | pass: edge-to-edge sidebar, coloured sidebar icons, text-only menus, system toolbar, inactive windows grey their selections |
 | 26 | Every surface light and dark | pass for the main window, conflict, history, welcome; Settings and sheets dark only so far |
+
+## Feature round: repository workflows (2026-11-11)
+
+The owner compared Commit with the app it replaces and found gaps that sent people back to
+Terminal: clone, resolving conflicts, starting merges/rebases/cherry-picks (not just
+continuing them), interactive rebase, blame and file history, remotes and tags. All of them
+were built this round, on the same engine (the user's git through `GitRunner`, fakes in
+tests) and inside the existing window rather than as new modes.
+
+### What was built, and where it lives
+
+| Area | User-facing | Engine (CommitCore) |
+|---|---|---|
+| Clone | File › Clone Repository… (⇧⌘O) and a button in the welcome window: a small window with address (a pasted `git clone …` line is accepted), folder ("Where" + name, suggested from the address), "Include submodules", progress with the phase, Cancel. Git's prompts (token, passphrase, host key) appear as a sheet on that window. Errors are one sentence plus git's output (repository not found or no access, sign-in failed, host unreachable, folder taken). On success the repository opens. | `CloneAddress` (normalise, validate, suggested name), `CloneDestination` (problems), `Repository.clone` (cancel removes a half-made folder) |
+| Conflicts | Selecting a conflicted file shows a resolver instead of the diff: each conflict as a card with both sides (and the base for diff3 files), **Ours / Theirs / Both** plus Both-theirs-first, Base, Neither; a chosen card collapses to its result with Change; each choice is undoable. **Edit Result** turns the merged file into editable text. **Mark Resolved** writes and stages it and moves to the next conflicted file; ⌘Z puts the conflict back exactly (markers and index stages). Delete/modify and binary conflicts get Use Ours / Use Theirs / Delete the File. **Open in <tool>** runs `git mergetool` when `merge.tool` is set and waits (Cancel stops it); terminal tools (vimdiff, emerge) are explained instead. Whole-file sides are in the More menu, the Changes menu and the file's context menu. | `ConflictFile` (byte-exact parse of `<<<<<<<`/`|||||||`/`=======`/`>>>>>>>`, `conflict-marker-size`, CRLF and non-UTF-8 safe), `ConflictKind`, `ConflictSnapshot` + `restoreConflict`, `MergeToolSetting`, `runMergeTool` |
+| Merge / rebase | Branch › Merge into main… (⇧⌘M), Rebase main… (⌥⇧⌘M), and "Merge X into main…" / "Rebase main onto X…" on every branch, remote branch and tag in the sidebar. A sheet picks the branch (filter, keyboard), says how far apart they are ("feature has 2 commits main doesn't…"), has "Always create a merge commit" for merges. Local changes are autostashed. ⌘Z undoes it (`reset --keep` to the old tip). A conflict stops in Changes with the first conflicted file selected. | `merge`, `rebase(onto:)`, `divergence(from:)`, `IntegrationOutcome`, `undoIntegration` |
+| Cherry-pick, revert | History now allows a multiple selection. Right-click: Cherry-pick onto main (one or several, applied oldest first), Revert Commit, Edit History from Here…, New Branch/Tag Here…; Branch › Cherry-pick (⇧⌘C) and Revert. **Drag** commits from History onto the current branch in the sidebar to cherry-pick them (they're also plain-text hashes for other apps). Commits already on the branch are skipped. All undoable. | `cherryPick`, `revert` (merges against parent 1), `headContains` |
+| Interactive rebase | Edit History from Here… (history context menu) and Branch › Edit Unpushed Commits… (⇧⌘E). A sheet lists the commits oldest first, as git applies them: an action menu per row (Keep, Reword, Squash, Fixup, Drop), drag or ⌥⌘↑/↓ to reorder, P/R/S/F/D keys like git's todo list, a message editor for rewords and for the combined message of a squash, a live summary ("5 commits become 3. Drops 1 commit…"), problems in a sentence (first commit can't be squashed, empty message), a warning when commits are already pushed. Rewrite History runs it; ⌘Z undoes it; the sheet says ORIG_HEAD and the reflog keep the old tip. Ranges with merges are refused (rebase would flatten them). | `RebasePlan` (groups, messages, todo, validation, moves), `RebaseLog`, `rebasePlan(from:)`, `rebasePlanForUnpushed`, `pushedCount`, `interactiveRebase` |
+| Force push | Repository › Force Push… (⌥⇧⌘U), and a Force Push… button next to Pull when a push is rejected. Always `--force-with-lease`; the confirmation names the branch, the remote and the remote's current tip; a stale lease is explained ("…has commits you haven't fetched"). | `forcePush`, `Explanation.staleLease` |
+| Blame, file history | File › Show File History (⇧⌘H) and Show Blame (⌥⇧⌘H), and the same in the context menus of changed files and commit files. A File History window per file: versions newest first (the uncommitted version on top when there is one; renames followed and labelled), **Changes** (that commit's diff of the file) or **Blame** (who changed each line, one gutter entry per run of lines, uncommitted lines marked). Newer/Older Version (⌘] / ⌘[) steps through it; a blame line's bar has Show Changes and **Blame Before This Change** (jumps to the version before that commit). | `Blame` (porcelain parser), `FileHistoryEntry` (`log --follow -z --name-status`), `blame(_:at:)`, `fileHistory`, `diffAgainstHead` |
+| Remotes | Repository › Remotes… (⌥⌘R) and "Manage Remotes…" on remote branches: list, Add, Edit (rename and URL in one form, validated), Remove (confirmed; ⌘Z puts back the config, the branches that tracked it and its remote-tracking refs, with no network). | `Remote.parse`, `addRemote`, `renameRemote`, `setRemoteURL` (drops a stale pushurl), `removeRemote` → `RemovedRemote`, `restoreRemote`, `RefNameRules` |
+| Tags | Branch › New Tag… (⌥⌘N, at HEAD or the selected commit) and New Tag Here… in History: name (validated), optional message (annotated, signed if `tag.gpgSign`), "Push to origin". Sidebar tag menu: Push, Delete… (undoable), Delete from origin… (confirmed, says it can't be undone remotely). Repository › Push Tags. | `createTag`, `deleteTag`/`restoreTag`, `pushTag`, `pushAllTags`, `deleteRemoteTag`, `tagMessage`; `RefList` now peels annotated tags (`isAnnotated`) |
+
+### Decisions (made autonomously; the owner can overrule any)
+
+1. **Conflicts replace the diff, not a new mode.** Selecting a conflicted file is already the
+   flow; the resolver takes the detail column, with Show Diff in its More menu. Why: no
+   extra navigation, and Mark Resolved moving to the next conflict makes the whole merge a
+   keyboard-and-click loop.
+2. **"Ours" and "Theirs", with git's labels.** The cards say "Ours · HEAD" / "Theirs · feature"
+   from the markers. Why: those are git's words (and its docs, and `--ours/--theirs`); renaming
+   them "current/incoming" would mislead during a rebase, where git's sides swap meaning.
+3. **Nothing is written until Mark Resolved**, and Mark Resolved is undoable (file bytes and
+   index stages saved first). Why: choices are cheap to change, and a mistaken resolve was the
+   one step with no way back.
+4. **Interactive rebase never opens an editor.** Commit writes git's todo list and hands it over
+   with `GIT_SEQUENCE_EDITOR=cp …`; rewords and squash messages are applied by `exec git commit
+   --amend --only -F <file>` after each group. Why: no helper binary, no editor process, hooks
+   and signing still run (it's a real commit), and a conflict mid-way stops in the normal
+   in-progress banner with Continue still working (tested). Message files live in the user's
+   temporary folder until the rebase is done.
+5. **Oldest first in the editor.** Why: it's the order git applies them in, so "squash into the
+   commit above" means what it says. The sheet says so in its first line.
+6. **Undo everywhere git allows, with `reset --keep`.** Merge, rebase, cherry-pick, revert and
+   history edits register ⌘Z back to the old tip while the branch hasn't moved on; `--keep`
+   refuses rather than lose local edits (tested). Remote removal and tag deletion are undone
+   locally. Force push and deleting a tag on a remote can't be undone, so they're the only ones
+   with a destructive confirmation, which names the old remote tip.
+7. **No confirmation for merge/rebase/cherry-pick.** The merge/rebase sheet is the
+   confirmation (it shows what will happen); cherry-pick and revert are one undoable step.
+   Why: the owner's priority is a fast everyday flow; Undo is the safety net.
+8. **Merges in an edit range are refused**, not flattened. Why: silently linearising a merge is
+   the worst surprise interactive rebase can give.
+9. **Clone is its own small window**, not a sheet, so it works from the welcome window, a
+   repository window or no window. Default folder: ~/Developer if it exists, else home; the
+   last choice is remembered. Clipboard is never read to prefill the address (privacy).
+10. **File history and blame share one window per file**, outside the repository window.
+    Why: people keep it open next to the code; stepping versions is ⌘[ / ⌘] there.
+11. **Shortcuts chosen to avoid system ones**: ⌥⌘H (Hide Others), ⇧⌘T (tab bar) and ⌥⌘M
+    (Minimize All) were avoided; the new ones are listed in the README.
+12. **Test hooks**: `COMMIT_CLONE_PARENT` (the clone folder offered), `COMMIT_SHOW_CLONE=1`,
+    `COMMIT_NO_RECENTS=1` (test runs don't add /tmp paths to a real copy's recents).
+
+### Not done this round (and why)
+
+- **"Edit" (stop at a commit to change its files) in interactive rebase**: needs a "stopped
+  for editing" state in the banner and composer; reword/squash/fixup/drop/reorder cover the
+  everyday cases.
+- **Per-conflict hand edits inside a card**: the whole-file Edit Result covers it; per-card
+  editors would multiply text views in long files.
+- **Dragging a branch onto a branch (merge by drag)**, **drop onto non-current branches**:
+  cherry-pick needs the target checked out; dropping elsewhere explains that.
+- **Blame options** (ignore whitespace, detect moves) and **external diff tools**: later.
+- **Hosting accounts**: never in the app (the brief: the user's own credentials and SSH).
+
+### Build notes (test step for this round)
+
+Design review of the new surfaces (design-system §10), from the code and the gates; the
+screenshot items wait for the walkthrough (see below):
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Main job in one action | pass: one menu item or context item per workflow; drag-to-cherry-pick; Mark Resolved moves on |
+| 3 | Every action in a menu with a shortcut | pass: File (Clone, File History, Blame), Branch (Merge, Rebase, Cherry-pick, Revert, Edit History, Edit Unpushed, New Tag), Repository (Force Push, Push Tags, Remotes), Changes (whole-file sides, merge tool), View (file history versions). Revert, Edit History from Selected Commit, Push Tags and the merge tool have no shortcut |
+| 4 | Esc / Return | pass: every sheet has Cancel (Esc) and a default button; Clone's Esc cancels a running clone |
+| 6 | Copy | pass: title-case buttons and menu items, sentence-case labels, errors say what to do |
+| 7 | Empty states | pass: No Remotes, No History, Empty File, Choose a Version, multi-commit selection |
+| 9 | Nothing destructive without undo | pass: every integration, resolve, tag delete and remote removal is undoable; force push and remote tag delete (not undoable) confirm with destructive buttons, Cancel default |
+| 10 | Network | pass: only clone, fetch/pull/push, tag push/delete, each on request |
+| 12 | VoiceOver labels | by code: per-conflict buttons say which conflict, action pickers name the commit, blame lines read "Line 12: … Ada, Fix typo"; `drive tree` pending the walkthrough |
+| 13 | Reduce Motion | pass: no new animation |
+| 15 | lint | pass |
+| 20 | Hairlines | pass: `Hairline()`/`.hairlineBorder` everywhere; the blame gutter draws a 1-pixel separator |
+| 21 | Contrast | pass by construction: Ours/Theirs titles and uncommitted blame text go through `readable`; tints are 7 % fills behind primary text |
+| 23 | Long/huge content | pass by construction: long common runs fold to 3 lines either side; branch pickers cap at 150 rows per section with the filter; blame and file history are virtualised tables; titles truncate in the middle |
+| 25 | Golden Gate | pass: text-only menus, system toolbar (segmented Changes/Blame), system sidebar in File History |
+
+Tests: 148 in CommitCore (98 before + 50 new: 13 conflict parsing and resolution, 23 merge /
+rebase / cherry-pick / revert / interactive rebase, 14 blame, file history, remotes, tags,
+force push and clone). All of them run real git on throwaway repositories and bare "remotes"
+under /tmp/commit-test (own HOME and GIT_CONFIG_GLOBAL); none touch a real remote. Fakes cover
+what real git can't stage on demand: a clone killed half-way (`CancellingRunner` +
+`ScriptedRunner`, the folder is removed). Highlights: a resolve-then-undo round trip restores
+the file bytes and all three index stages; a reworded commit in an interactive rebase that
+stops on two conflicts in a row still gets its new message after Continue; `reset --keep`
+undo refuses rather than lose an edit made after the merge; a force push with a stale lease is
+refused and explained.
+
+Bugs found while building (fixed): Continue after a rebase step that stopped again on the
+next conflict threw "Couldn't continue" (now it stays in progress with the banner); a pasted
+`git clone --depth 1 <url>` picked "1" as the address; History's single selection wasn't
+recorded when set programmatically (Cherry-pick could act on a stale commit) and a branch's
+history kept the previous branch's selected commit.
+
+`scripts/check.sh Commit --perf` (2026-11-11, load 13.8 from parallel builders, screen
+locked): all checks passed. Launch 130 ms, first window 302 ms, idle CPU 0.000 % (lowest
+window), footprint 38.0 MB (budgets 300 ms / 600 ms / 0.2 % / 120 MB). Release performance
+tests: log parse of 100k rows 66 ms (budget 400), lane layout 5.5 ms, 8.6 MB diff parse 47 ms,
+stage-hunk round trip 31 ms. Two earlier gate runs failed only on the debug-build timing test
+`parsingA100kRowLog` (5.2 s and 7.2 s against a 4 s debug budget, at load 16–20 with other
+builders compiling); `LogParser` is unchanged this round and the release number above is in line
+with last round's 58 ms. A first test run also tripped `timesOutAndKillsTheWholeGroup` because the
+Mac idle-slept mid-run (1,012 s of wall clock); runs since use `caffeinate -i`.
+
+**Scripted walkthrough: not run, the screen was locked.** From the first launch attempt
+(02:2x) until this was written, `CGSSessionScreenIsLocked` stayed 1 and macOS hid every window
+from Accessibility ("the screen is locked or the display is asleep"), so `scripts/drive` could
+not read or press anything, take window screenshots or list `[unlabeled]` controls. It needs
+someone to unlock the Mac. The walkthrough is scripted and ready:
+`apps/Commit/Tests/Fixtures/walkthrough-integrations.sh` (fixtures from `make-fixtures.sh`,
+copies in /tmp/commit-test/walk3, its own `--direct` instance quit by pid, owner-idle and
+unlock gate before every step, no mouse, no global keys). It covers conflicts (choices, Mark
+Resolved, ⌘Z, whole-file sides, a stand-in merge tool, Continue), merge/rebase with undo and a
+conflicting merge + Abort, cherry-pick from a branch's history with undo, the history editor
+(reword + fixup from the keyboard, undo), tags (annotated, Push Tags), remotes (add), file
+history and blame (light and dark, older version) and clone (success into a test folder, a
+missing repository explained), checking git's state after each action. Not covered by it, by
+design: the drag-to-cherry-pick (needs the real mouse) and context menus (right-click).
 
 ## Blind test log
 

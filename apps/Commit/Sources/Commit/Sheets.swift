@@ -211,7 +211,8 @@ struct IdentitySheet: View {
 /// a yes/no for an unknown server. Nothing typed is kept by Commit.
 struct AskpassSheet: View {
     let pending: PendingPrompt
-    let model: RepoModel
+    /// nil: cancelled.
+    let respond: (String?) -> Void
     @State private var answer = ""
 
     var body: some View {
@@ -226,11 +227,11 @@ struct AskpassSheet: View {
                 case .username:
                     TextField("Username", text: $answer)
                         .textFieldStyle(.roundedBorder)
-                        .onSubmit { model.answerPrompt(answer) }
+                        .onSubmit { respond(answer) }
                 case .secret:
                     SecureField(pending.prompt.title, text: $answer)
                         .textFieldStyle(.roundedBorder)
-                        .onSubmit { model.answerPrompt(answer) }
+                        .onSubmit { respond(answer) }
                 case .confirmation:
                     EmptyView()
                 }
@@ -242,13 +243,13 @@ struct AskpassSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         } buttons: {
-            Button("Cancel", role: .cancel) { model.answerPrompt(nil) }
+            Button("Cancel", role: .cancel) { respond(nil) }
                 .keyboardShortcut(.cancelAction)
             if pending.prompt.kind == .confirmation {
-                Button("Trust") { model.answerPrompt(AskpassPrompt.confirmationAnswer(true)) }
+                Button("Trust") { respond(AskpassPrompt.confirmationAnswer(true)) }
                     .keyboardShortcut(.defaultAction)
             } else {
-                Button("Continue") { model.answerPrompt(answer) }
+                Button("Continue") { respond(answer) }
                     .keyboardShortcut(.defaultAction)
             }
         }

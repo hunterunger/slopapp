@@ -34,6 +34,24 @@ struct CommitApp: App {
         .defaultSize(width: 1180, height: 760)
         .windowToolbarStyle(.unified)
 
+        Window("Clone Repository", id: "clone") {
+            CloneWindow(app: app)
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
+        WindowGroup("File History", id: "file-history", for: FileHistoryTarget.self) { $target in
+            if let target {
+                FileHistoryWindow(target: target)
+            } else {
+                ContentUnavailableView("No File", systemImage: "clock",
+                                       description: Text("Choose Show File History on a file in a repository window."))
+                    .frame(minWidth: 480, minHeight: 320)
+            }
+        }
+        .defaultSize(width: 1000, height: 680)
+        .windowToolbarStyle(.unified)
+
         Settings {
             SettingsView(app: app, info: info)
         }
@@ -100,6 +118,7 @@ struct CommitCommands: Commands {
     let app: AppModel
     let info: AppInfo
     @FocusedValue(\.repoModel) private var model
+    @FocusedValue(\.fileHistoryModel) private var fileHistory
 
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
@@ -108,6 +127,8 @@ struct CommitCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("Open…") { app.chooseRepository() }
                 .keyboardShortcut("o")
+            Button("Clone Repository…") { app.showClone() }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
             Menu("Open Recent") {
                 ForEach(app.recents.paths, id: \.self) { path in
                     Button(RecentRow.display(path)) { app.open(URL(fileURLWithPath: path)) }
@@ -123,6 +144,13 @@ struct CommitCommands: Commands {
             Button("Open in Terminal") { model?.openInTerminal() }
                 .keyboardShortcut("t", modifiers: [.command, .option])
                 .disabled(model?.repository == nil)
+            Divider()
+            Button("Show File History") { model?.showHistoryOfSelectedFile(blame: false) }
+                .keyboardShortcut("h", modifiers: [.command, .shift])
+                .disabled(model?.fileForHistory == nil)
+            Button("Show Blame") { model?.showHistoryOfSelectedFile(blame: true) }
+                .keyboardShortcut("h", modifiers: [.command, .shift, .option])
+                .disabled(model?.fileForHistory == nil)
         }
         CommandGroup(after: .undoRedo) {}
 
@@ -152,6 +180,20 @@ struct CommitCommands: Commands {
             }
             .disabled(model?.repository == nil)
             Divider()
+            // File History windows.
+            Button("Changes in Version") { fileHistory?.mode = .changes }
+                .keyboardShortcut("1", modifiers: [.command, .option])
+                .disabled(fileHistory == nil)
+            Button("Blame of Version") { fileHistory?.mode = .blame }
+                .keyboardShortcut("2", modifiers: [.command, .option])
+                .disabled(fileHistory == nil)
+            Button("Newer Version") { fileHistory?.goNewer() }
+                .keyboardShortcut("]")
+                .disabled(fileHistory?.canGoNewer != true)
+            Button("Older Version") { fileHistory?.goOlder() }
+                .keyboardShortcut("[")
+                .disabled(fileHistory?.canGoOlder != true)
+            Divider()
         }
 
         CommandMenu("Changes") {
@@ -177,8 +219,18 @@ struct CommitCommands: Commands {
             Button("Unstage All") { model?.unstageAll() }
                 .keyboardShortcut("a", modifiers: [.command, .option, .shift])
                 .disabled(model?.status.staged.isEmpty != false)
-            Button("Mark Resolved") { model?.markSelectedResolved() }
+            Button("Mark Resolved") {
+                if model?.conflict != nil { model?.markConflictResolved() } else { model?.markSelectedResolved() }
+            }
                 .disabled(model?.selectedConflicts.isEmpty != false)
+            Button("Use Our Whole File") { model?.takeWholeFile(ours: true) }
+                .disabled(model?.selectedConflicts.isEmpty != false)
+            Button("Use Their Whole File") { model?.takeWholeFile(ours: false) }
+                .disabled(model?.selectedConflicts.isEmpty != false)
+            Button("Open in \(model?.mergeTool.name ?? "Merge Tool")") {
+                if let entry = model?.selectedConflicts.first { model?.openInMergeTool(entry) }
+            }
+            .disabled(model?.selectedConflicts.count != 1 || model?.canUseMergeTool != true)
             Divider()
             Button(model?.discardTitle ?? "Discard…") {
                 if TextEditingKeys.forward(#selector(NSResponder.deleteToBeginningOfLine(_:))) { return }
@@ -211,6 +263,29 @@ struct CommitCommands: Commands {
             Button("Switch Branch…") { model?.showBranchSwitcher = true }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
                 .disabled(model?.repository == nil)
+            Divider()
+            Button("Merge into \(model?.currentBranchName ?? "Current Branch")…") { model?.showIntegrate(.merge) }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .disabled(model?.canIntegrateOnBranch != true)
+            Button("Rebase \(model?.currentBranchName ?? "Current Branch")…") { model?.showIntegrate(.rebase) }
+                .keyboardShortcut("m", modifiers: [.command, .shift, .option])
+                .disabled(model?.canIntegrateOnBranch != true)
+            Button(model?.cherryPickTitle ?? "Cherry-pick onto Current Branch") { model?.cherryPickSelection() }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+                .disabled(model?.canCherryPickSelection != true)
+            Button("Revert Commit") { if let id = model?.historySelection { model?.revert(id) } }
+                .disabled(model?.canIntegrate != true || model?.isShowingHistory != true || model?.selectedCommits.count != 1)
+            Button("Edit History from Selected Commit…") { if let id = model?.historySelection { model?.editHistory(from: id) } }
+                .disabled(model?.canIntegrateOnBranch != true || model?.isShowingHistory != true || model?.selectedCommits.count != 1)
+            Button("Edit Unpushed Commits…") { model?.editUnpushedCommits() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(model?.canEditUnpushed != true)
+            Divider()
+            Button("New Tag…") {
+                model?.showNewTag(at: model?.isShowingHistory == true && model?.selectedCommits.count == 1 ? model?.historySelection : nil)
+            }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+                .disabled(model?.status.branch.isUnborn != false)
         }
 
         CommandMenu("Repository") {
@@ -223,6 +298,11 @@ struct CommitCommands: Commands {
             Button("Push") { model?.push() }
                 .keyboardShortcut("u", modifiers: [.command, .option])
                 .disabled(model?.canPush != true)
+            Button("Force Push…") { model?.confirmForcePush() }
+                .keyboardShortcut("u", modifiers: [.command, .option, .shift])
+                .disabled(model?.canForcePush != true)
+            Button("Push Tags") { model?.pushAllTags() }
+                .disabled(model?.canPushTags != true)
             if model?.activity?.isCancellable == true {
                 Button("Cancel \(model?.activity?.title ?? "")") { model?.cancelActivity() }
                     .keyboardShortcut(".", modifiers: .command)
@@ -231,6 +311,9 @@ struct CommitCommands: Commands {
             Button("Stash Changes…") { model?.showStashSheet() }
                 .keyboardShortcut("s", modifiers: [.command, .option])
                 .disabled(model?.status.isClean != false)
+            Button("Remotes…") { model?.showRemotes() }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+                .disabled(model?.repository == nil)
             if let op = model?.inProgress {
                 Divider()
                 Button("Continue \(op.noun)") { model?.continueOperation() }

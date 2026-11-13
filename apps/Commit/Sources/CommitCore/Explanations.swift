@@ -4,6 +4,8 @@ import Foundation
 public enum GitOperation: String, Sendable, Equatable {
     case fetch, pull, push, commit, switchBranch, createBranch, deleteBranch, stage, unstage, discard
     case stash, applyStash, dropStash, continueOperation, abortOperation, open, other
+    case clone, merge, rebase, cherryPick, revert, interactiveRebase, undoIntegration, resolve, mergeTool
+    case addRemote, renameRemote, removeRemote, editRemote, createTag, deleteTag, pushTag, forcePush, blame
 
     var failureTitle: String {
         switch self {
@@ -24,6 +26,24 @@ public enum GitOperation: String, Sendable, Equatable {
         case .abortOperation: "Couldn't abort"
         case .open: "Couldn't open the repository"
         case .other: "Git reported a problem"
+        case .clone: "Couldn't clone"
+        case .merge: "Couldn't merge"
+        case .rebase: "Couldn't rebase"
+        case .cherryPick: "Couldn't cherry-pick"
+        case .revert: "Couldn't revert"
+        case .interactiveRebase: "Couldn't edit the history"
+        case .undoIntegration: "Couldn't undo"
+        case .resolve: "Couldn't resolve the conflict"
+        case .mergeTool: "The merge tool reported a problem"
+        case .addRemote: "Couldn't add the remote"
+        case .renameRemote: "Couldn't rename the remote"
+        case .removeRemote: "Couldn't remove the remote"
+        case .editRemote: "Couldn't change the remote"
+        case .createTag: "Couldn't create the tag"
+        case .deleteTag: "Couldn't delete the tag"
+        case .pushTag: "Couldn't push the tag"
+        case .forcePush: "Couldn't force push"
+        case .blame: "Couldn't show who changed each line"
         }
     }
 }
@@ -42,6 +62,7 @@ public struct Explanation: Sendable, Equatable {
 
     public enum Cause: Sendable, Equatable {
         case rejectedPush, divergentBranches, authentication, unreachable, missingIdentity, indexLocked
+        case notFound, destinationExists, staleLease, alreadyExists
         case wouldOverwrite, conflicts, signing, permissionDenied, nothingToCommit, lfsMissing, noUpstream
         case hookOrOther
     }
@@ -66,6 +87,18 @@ public struct Explanation: Sendable, Equatable {
         let remoteName = remote ?? "the remote"
         func make(_ cause: Cause, _ message: String, _ action: Action = .none, title: String? = nil) -> Explanation {
             Explanation(cause: cause, title: title ?? operation.failureTitle, message: message, action: action, output: output)
+        }
+        if text.contains("stale info") || (text.contains("[rejected]") && operation == .forcePush) {
+            return make(.staleLease, "\(remoteName.capitalizedFirst) has commits you haven't fetched, so Commit didn't overwrite them. Fetch, check what's new, then try again.")
+        }
+        if text.contains("already exists and is not an empty directory") {
+            return make(.destinationExists, "There's already a folder with that name there. Choose another name or location.")
+        }
+        if operation == .createTag && text.contains("already exists") {
+            return make(.alreadyExists, "A tag with that name already exists.")
+        }
+        if (operation == .addRemote || operation == .renameRemote) && text.contains("already exists") {
+            return make(.alreadyExists, "A remote with that name already exists.")
         }
         if text.contains("[rejected]") || text.contains("non-fast-forward") || text.contains("fetch first")
             || text.contains("updates were rejected") {
@@ -107,6 +140,11 @@ public struct Explanation: Sendable, Equatable {
             || text.contains("403") && text.contains("unable to access") {
             return make(.authentication, "Git couldn't sign in to \(remoteName). Check your credentials or SSH key, then try again.")
         }
+        if text.contains("repository not found") || text.contains("not found") && text.contains("repository")
+            || text.contains("does not exist") && operation == .clone
+            || text.contains("does not appear to be a git repository") && operation == .clone {
+            return make(.notFound, "There's no repository at that address, or your account can't see it. Check the address and that you have access.")
+        }
         if text.contains("could not resolve host") || text.contains("could not read from remote repository")
             || text.contains("unable to access") || text.contains("connection refused") || text.contains("network is unreachable")
             || text.contains("operation timed out") || text.contains("does not appear to be a git repository") {
@@ -116,7 +154,7 @@ public struct Explanation: Sendable, Equatable {
             return make(.noUpstream, "This branch isn't connected to a remote branch yet. Push it first.")
         }
         if text.contains("conflict") || text.contains("automatic merge failed") || text.contains("could not apply") {
-            return make(.conflicts, "Some files have conflicts. Fix them in your editor, mark them resolved, then continue.")
+            return make(.conflicts, "Some files have conflicts. Resolve them in Changes, then continue.")
         }
         if text.contains("nothing to commit") || text.contains("no changes added to commit") {
             return make(.nothingToCommit, "There's nothing staged to commit.")

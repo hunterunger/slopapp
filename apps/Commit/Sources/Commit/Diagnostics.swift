@@ -10,6 +10,9 @@ import os
 /// - `COMMIT_SECTION=changes|history|stashes`: open repositories on that section (screenshots).
 /// - `COMMIT_SELECT=path`: select that changed file (its unstaged row if it has one).
 /// - `COMMIT_LOG=/path/file.log`: append timings (open → status shown, history first page…).
+/// - `COMMIT_CLONE_PARENT=/tmp/…`: the folder Clone Repository… offers (and doesn't remember).
+/// - `COMMIT_SHOW_CLONE=1`: open the Clone window at launch (scripted walkthroughs).
+/// - `COMMIT_NO_RECENTS=1`: don't add opened repositories to the saved recents (test runs).
 ///
 /// Use `GIT_CONFIG_GLOBAL=/tmp/…` (git's own variable) to keep a test run away from the real
 /// global git config: Commit passes its environment on to git.
@@ -21,6 +24,9 @@ enum Diagnostics {
     static let section = environment["COMMIT_SECTION"]
     static let select = environment["COMMIT_SELECT"]
     static let resetRecents = environment["COMMIT_RESET_RECENTS"] == "1"
+    static let cloneParent = environment["COMMIT_CLONE_PARENT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+    static let showClone = environment["COMMIT_SHOW_CLONE"] == "1"
+    static let noRecents = environment["COMMIT_NO_RECENTS"] == "1"
     private static let logFile = environment["COMMIT_LOG"].map { URL(fileURLWithPath: $0) }
 
     static func record(_ line: String) {

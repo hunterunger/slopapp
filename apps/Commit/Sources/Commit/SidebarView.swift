@@ -71,8 +71,14 @@ struct SidebarView: View {
     @ViewBuilder
     private func refRows(_ refs: [GitRef]) -> some View {
         ForEach(refs.prefix(Self.displayLimit)) { ref in
-            RefRow(ref: ref, status: model.status.branch)
-                .tag(SidebarItem.ref(ref.fullName))
+            if ref.isHead {
+                // Commits dragged here from History are cherry-picked onto it.
+                CurrentBranchRow(ref: ref, model: model)
+                    .tag(SidebarItem.ref(ref.fullName))
+            } else {
+                RefRow(ref: ref, status: model.status.branch)
+                    .tag(SidebarItem.ref(ref.fullName))
+            }
         }
         if refs.count > Self.displayLimit {
             Text("\(refs.count - Self.displayLimit) more. Type in the filter to find one.")
@@ -142,30 +148,81 @@ struct RefRow: View {
     }
 }
 
+/// The current branch: a drop target for commits dragged from History.
+struct CurrentBranchRow: View {
+    let ref: GitRef
+    let model: RepoModel
+    @State private var targeted = false
+
+    var body: some View {
+        RefRow(ref: ref, status: model.status.branch)
+            .dropDestination(for: String.self) { items, _ in
+                model.dropCommits(items, onto: ref)
+            } isTargeted: { targeted = $0 }
+            .background {
+                if targeted {
+                    RoundedRectangle(cornerRadius: Radius.xs)
+                        .strokeBorder(Color.accentColor, lineWidth: 2)
+                        .padding(-2)
+                }
+            }
+            .help(targeted ? "Cherry-pick onto \(ref.name)" : ref.upstreamName.map { "\(ref.name) tracks \($0). Drop commits here to cherry-pick them." }
+                  ?? "\(ref.name). Drop commits here to cherry-pick them.")
+    }
+}
+
 /// Right-click on a branch, remote branch or tag.
 struct RefMenu: View {
     let ref: GitRef
     let model: RepoModel
 
     var body: some View {
+        let current = model.currentBranchName
         switch ref.kind {
         case .local:
             Button("Switch to \(ref.name)") { model.switchTo(ref) }
                 .disabled(ref.isHead)
             Button("New Branch from \(ref.name)…") { model.showNewBranch(from: ref.target) }
+            if ref.isHead {
+                Button("Edit Unpushed Commits…") { model.editUnpushedCommits() }
+                    .disabled(!model.canEditUnpushed)
+            } else {
+                Divider()
+                integrationItems(current: current)
+            }
             Divider()
             Button("Delete \(ref.name)…") { model.confirmDelete(ref) }
                 .disabled(ref.isHead)
         case .remote:
             Button("Check Out \(ref.nameOnRemote ?? ref.name)") { model.switchTo(ref) }
             Button("New Branch from \(ref.name)…") { model.showNewBranch(from: ref.target) }
+            Divider()
+            integrationItems(current: current)
+            Divider()
+            Button("Manage Remotes…") { model.showRemotes() }
         case .tag:
             Button("New Branch from \(ref.name)…") { model.showNewBranch(from: ref.target) }
+            Divider()
+            integrationItems(current: current)
+            Divider()
+            Button("Push \(ref.name)\(model.defaultRemote.map { " to \($0)" } ?? "")") { model.pushTag(ref) }
+                .disabled(!model.canSync)
+            Button("Delete \(ref.name)…") { model.confirmDeleteTag(ref) }
+            Button("Delete \(ref.name) from \(model.defaultRemote ?? "Remote")…") { model.confirmDeleteRemoteTag(ref) }
+                .disabled(!model.canSync)
         }
         Divider()
         Button("Copy Name") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(ref.name, forType: .string)
         }
+    }
+
+    @ViewBuilder
+    private func integrationItems(current: String) -> some View {
+        Button("Merge \(ref.name) into \(current)…") { model.showIntegrate(.merge, preselected: ref) }
+            .disabled(!model.canIntegrateOnBranch)
+        Button("Rebase \(current) onto \(ref.name)…") { model.showIntegrate(.rebase, preselected: ref) }
+            .disabled(!model.canIntegrateOnBranch)
     }
 }

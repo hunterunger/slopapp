@@ -37,6 +37,9 @@ final class AppModel {
     @ObservationIgnored private var readyWaiters: [CheckedContinuation<Void, Never>] = []
 
     private struct WeakRepo { weak var model: RepoModel? }
+    private struct WeakTarget { weak var target: (any PromptPresenting)? }
+    /// Other windows that can show git's prompts (the clone window), by runner id.
+    @ObservationIgnored private var promptTargets: [UUID: WeakTarget] = [:]
 
     init() {
         UserDefaults.standard.register(defaults: [
@@ -47,6 +50,12 @@ final class AppModel {
         ])
         if Diagnostics.resetRecents { UserDefaults.standard.removeObject(forKey: Preference.recents) }
         recents = RecentRepositories(paths: UserDefaults.standard.stringArray(forKey: Preference.recents) ?? [])
+    }
+
+    /// The git executable in use (interactive rebase runs it from its todo list).
+    var gitPath: String? {
+        guard case .found(let path, _) = installation else { return nil }
+        return path
     }
 
     var runner: ProcessGitRunner? {
@@ -116,7 +125,8 @@ final class AppModel {
 
     /// Shows the prompt on its repository's window and waits for the answer.
     private func answer(_ prompt: AskpassPrompt) async -> String? {
-        let target = prompt.repositoryID.flatMap(UUID.init(uuidString:)).flatMap { repositories[$0]?.model }
+        let id = prompt.repositoryID.flatMap(UUID.init(uuidString:))
+        let target: (any PromptPresenting)? = id.flatMap { promptTargets[$0]?.target } ?? id.flatMap { repositories[$0]?.model }
             ?? repositories.values.compactMap(\.model).first
         guard let target else { return nil }
         NSApp.activate()
@@ -135,6 +145,24 @@ final class AppModel {
 
     func unregister(_ model: RepoModel) {
         repositories.removeValue(forKey: model.id)
+    }
+
+    func registerPrompts(_ target: any PromptPresenting, id: UUID) {
+        promptTargets[id] = WeakTarget(target: target)
+    }
+
+    func unregisterPrompts(id: UUID) {
+        promptTargets.removeValue(forKey: id)
+    }
+
+    /// File › Clone Repository…
+    func showClone() {
+        openWindowAction?(id: "clone")
+    }
+
+    /// A file's history and blame, in its own window.
+    func openFileHistory(_ target: FileHistoryTarget) {
+        openWindowAction?(id: "file-history", value: target)
     }
 
     var openRepositoryCount: Int { repositories.values.filter { $0.model != nil }.count }
@@ -163,11 +191,14 @@ final class AppModel {
         openWindowAction = open
         dismissWindowAction = dismiss
         let pending = pendingOpens + (Diagnostics.openAtLaunch.isEmpty || didOpenLaunchRepos ? [] : Diagnostics.openAtLaunch)
+        if Diagnostics.showClone && !didOpenLaunchRepos { open(id: "clone") }
         didOpenLaunchRepos = true
         pendingOpens = []
         for url in pending { self.open(url) }
     }
     @ObservationIgnored private var didOpenLaunchRepos = false
+
+    private func open(id: String) { openWindowAction?(id: id) }
 
     func showWelcome() {
         openWindowAction?(id: "welcome")
@@ -190,6 +221,7 @@ final class AppModel {
     // MARK: Recents
 
     func noteOpened(_ root: URL) {
+        if Diagnostics.noRecents { return }
         recents.add(root.path)
         UserDefaults.standard.set(recents.paths, forKey: Preference.recents)
         NSDocumentController.shared.noteNewRecentDocumentURL(root)

@@ -12,6 +12,12 @@
 #   unborn     no commits yet, one staged file
 #   detached   HEAD detached at the first commit
 #   bare.git   a bare repository (Commit refuses it)
+#   integrate  merge / rebase / cherry-pick / history editing: main with 4 unpushed commits
+#              (squash, fixup and reword candidates), feature/login (2 commits), fix/readme
+#              (1 commit to cherry-pick), clash (conflicts with main), tags, app.txt renamed
+#              from old-app.txt (file history and blame); integrate-remote.git is its remote
+#   conflicts  a merge stopped on three conflicts: story.txt (two conflicts in one file),
+#              settings.json (deleted by them, changed by us), logo.bin (binary)
 #   wide       50,000 tracked files + a 3,000-file untracked node_modules
 #   big        (--big) 100,000 commits, ~8,000 merges, ~7,000 branches, plus huge.txt
 #              (200,000 lines) with a scattered 28,572-line edit in the working tree
@@ -40,7 +46,8 @@ tick 0
 g() { git -c init.defaultBranch=main -c user.name="Demo Person" -c user.email=demo@example.com -c protocol.file.allow=always "$@"; }
 
 mkdir -p "$OUT"
-rm -rf "$OUT/demo" "$OUT/remote.git" "$OUT/lib" "$OUT/conflict" "$OUT/unborn" "$OUT/detached" "$OUT/bare.git"
+rm -rf "$OUT/demo" "$OUT/remote.git" "$OUT/lib" "$OUT/conflict" "$OUT/unborn" "$OUT/detached" "$OUT/bare.git" \
+  "$OUT/integrate" "$OUT/integrate-remote.git" "$OUT/conflicts"
 
 # --- lib (submodule source) -------------------------------------------------------------
 g init -q "$OUT/lib"
@@ -110,6 +117,56 @@ cd "$OUT/conflict"
 printf 'alpha\nbeta\ngamma\n' > shared.txt && g add . && g commit -qm "Base"
 g switch -q -c theirs && printf 'alpha\nBETA from theirs\ngamma\n' > shared.txt && g commit -qam "Theirs"
 g switch -q main && printf 'alpha\nbeta from ours\ngamma\n' > shared.txt && g commit -qam "Ours"
+g merge -q theirs -m "Merge theirs" >/dev/null 2>&1 || true
+cd - >/dev/null
+
+# --- integrate ----------------------------------------------------------------------------
+g init -q "$OUT/integrate"
+cd "$OUT/integrate"
+printf '# Integrate\n\nA project for merging, rebasing and editing history.\n' > README.md
+printf 'name = "demo"\nversion = 1\nmode = "plain"\n' > old-app.txt
+g add . && g commit -qm "Start the project"
+tick 30
+g tag -a v0.1 -m "First release"
+printf 'name = "demo"\nversion = 2\nmode = "plain"\n' > old-app.txt && g commit -qam "Bump the version"
+tick 30
+g mv old-app.txt app.txt && g commit -qm "Rename the config to app.txt"
+g clone -q --bare "$OUT/integrate" "$OUT/integrate-remote.git"
+g remote add origin "$OUT/integrate-remote.git" && g fetch -q origin && g branch -q -u origin/main main
+g switch -q -c feature/login
+tick 10; printf 'login screen\n' > login.txt && g add . && g commit -qm "Add a login screen"
+tick 10; printf 'login screen\nremember me\n' > login.txt && g commit -qam "Remember the last user"
+g switch -q main
+g switch -q -c fix/readme
+tick 10; printf '# Integrate\n\nA small project for merging, rebasing and editing history.\n' > README.md && g commit -qam "Fix the README wording"
+g switch -q main
+g switch -q -c clash
+tick 10; printf 'name = "demo"\nversion = 3\nmode = "clashing"\n' > app.txt && g commit -qam "Clash: version 3"
+g switch -q main
+tick 20; printf 'name = "demo"\nversion = 2\nmode = "fancy"\n' > app.txt && g commit -qam "Use the fancy mode"
+tick 5; printf 'notes\n' > notes.txt && g add . && g commit -qm "Add notes"
+tick 5; printf 'notes\nmore notes\n' > notes.txt && g commit -qam "fixup notes"
+tick 5; printf 'name = "demo"\nversion = 2\nmode = "fancy"\ncolor = "blue"\n' > app.txt && g commit -qam "Add a colr setting"
+g tag v0.2-lightweight
+cd - >/dev/null
+
+# --- conflicts ----------------------------------------------------------------------------
+g init -q "$OUT/conflicts"
+cd "$OUT/conflicts"
+printf 'Once upon a time\nthere was a fox.\nIt lived in a wood\nnear a river.\nEvery morning\nit went for a walk\nand in the evening\nit slept by the fire.\nThe end.\n' > story.txt
+printf '{ "theme": "light" }\n' > settings.json
+printf 'LOGO\0v1' > logo.bin
+g add . && g commit -qm "Base story"
+g switch -q -c theirs
+printf 'Once upon a time\nthere was a quick brown fox.\nIt lived in a wood\nnear a river.\nEvery morning\nit went for a walk\nand in the evening\nit read a book.\nThe end.\n' > story.txt
+g rm -q settings.json
+printf 'LOGO\0theirs' > logo.bin
+g commit -qam "Their edits"
+g switch -q main
+printf 'Once upon a time\nthere was a sleepy fox.\nIt lived in a wood\nnear a river.\nEvery morning\nit went for a walk\nand in the evening\nit watched the stars.\nThe end.\n' > story.txt
+printf '{ "theme": "dark" }\n' > settings.json
+printf 'LOGO\0ours' > logo.bin
+g commit -qam "Our edits"
 g merge -q theirs -m "Merge theirs" >/dev/null 2>&1 || true
 cd - >/dev/null
 

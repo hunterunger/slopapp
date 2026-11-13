@@ -759,13 +759,20 @@ public final class Repository: Sendable {
         InProgressOperation.detect(gitDirectory: gitDirectory)
     }
 
-    public func continueOperation(_ operation: InProgressOperation) async throws {
+    /// Continues a stopped merge, rebase, cherry-pick or revert. Returns false when git stopped
+    /// again at the next conflict (the in-progress banner stays), true when it finished.
+    @discardableResult
+    public func continueOperation(_ operation: InProgressOperation) async throws -> Bool {
         try await exclusive {
-            if operation == .merge {
-                try await self.write(["commit", "--no-edit"])
-            } else {
-                try await self.write([operation.subcommand, "--continue"], environment: ["GIT_EDITOR": "true"])
+            let arguments = operation == .merge ? ["commit", "--no-edit"] : [operation.subcommand, "--continue"]
+            let cmd = self.command(arguments, environment: ["GIT_EDITOR": "true"].merging(Self.english) { a, _ in a })
+            let result = try await self.runner.run(cmd)
+            if result.succeeded { return self.inProgressOperation() == nil }
+            if self.inProgressOperation() != nil,
+               let status = try? await self.status(includeUntracked: false), !status.conflicted.isEmpty {
+                return false
             }
+            throw GitFailure(command: cmd, result: result)
         }
     }
 
