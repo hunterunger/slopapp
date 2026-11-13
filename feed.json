@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-13T04:34:06.160Z",
+  "generatedAt": "2026-11-13T04:45:18.204Z",
   "name": "Slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "apps": [
@@ -130,15 +130,15 @@
       "icon": "clipboard-list",
       "menuBarOnly": true,
       "status": "beta",
-      "version": "0.2.0",
-      "build": 2,
+      "version": "0.3.0",
+      "build": 3,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.clips",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/clips-v0.2.0/Clips.zip",
-      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/clips-v0.2.0/Clips-icon.png",
-      "sha256": "913e38772c0b52219abe0a089503566f54d92ee1169ac5e08a9fb52ad0e9cf15",
-      "size": 2538071,
-      "installedSize": 7989822,
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/clips-v0.3.0/Clips.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/clips-v0.3.0/Clips-icon.png",
+      "sha256": "0578c5e53fbba78ec0ad58ba11c6a6611e2ca585fd39ee5be74e191099432574",
+      "size": 5474067,
+      "installedSize": 14515779,
       "releaseNotes": ""
     },
     {
