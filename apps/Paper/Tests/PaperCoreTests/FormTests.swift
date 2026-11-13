@@ -317,7 +317,9 @@ struct FieldAppearanceTests {
         document.page(at: 0)!.annotations.first { $0.type == "Widget" }!.widgetStringValue = "Ada"
         let data = FormFieldTests.save(document)
         // Reopened, PDFKit draws the saved appearance: the border is there.
-        let page = doc(data).page(at: 0)!
+        let owner = doc(data)
+        defer { withExtendedLifetime(owner) {} }
+        let page = owner.page(at: 0)!
         let image = try #require(PageRenderer.render(page, region: CGRect(x: 72, y: 300, width: 120, height: 22), scale: 2))
         let pixels = try #require(PageRenderer.rgba(image))
         // The left edge column is grey (border), the middle of an empty part is white.
