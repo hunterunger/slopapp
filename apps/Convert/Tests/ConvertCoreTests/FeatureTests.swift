@@ -164,7 +164,11 @@ private func surround(_ channels: Int, codec: String = "ac-3") -> MediaInfo {
         // 60 s of 1080p with stereo: 25 MB buys about 3.1 Mbps, an eighth (snapped) of it for sound.
         let minute = SizeBudget.video(limit, duration: 60, width: 1920, height: 1080, frameRate: 30, audioChannels: 2, quality: .balanced)
         #expect(minute.audioBitRate == 160_000 && minute.box == nil && !minute.isTight)
-        #expect(abs(Double(minute.videoBitRate + minute.audioBitRate!) * 60 / 8 - 25_000_000 * 0.94) < 2_000)
+        // Split up so slower compilers (CI) can type-check it.
+        let totalBits = Double(minute.videoBitRate + (minute.audioBitRate ?? 0))
+        let fileBytes: Double = totalBits * 60 / 8
+        let target: Double = 25_000_000 * 0.94
+        #expect(abs(fileBytes - target) < 2_000)
         // Ten minutes: too few bits for 1080p, so a smaller frame.
         let ten = SizeBudget.video(limit, duration: 600, width: 1920, height: 1080, frameRate: 30, audioChannels: 2, quality: .balanced)
         #expect(ten.box.map { $0.long < 1920 } == true && ten.audioBitRate == 64_000)
@@ -304,7 +308,9 @@ private func surround(_ channels: Int, codec: String = "ac-3") -> MediaInfo {
         let gif = try report(try await converter { $0.video = .gif }.run(clip, options: FileOptions(crop: CropRect(x: 0, y: 0, width: 0.5, height: 1))))
         let gifProps = imageProperties(gif.output)
         let (w, h) = (gifProps[kCGImagePropertyPixelWidth] as? Int ?? 0, gifProps[kCGImagePropertyPixelHeight] as? Int ?? 0)
-        #expect(abs(Double(w) / Double(h) - 640.0 / 720) < 0.02, "\(w)×\(h)")
+        let aspect: Double = Double(w) / Double(h)
+        let expected: Double = 640.0 / 720
+        #expect(abs(aspect - expected) < 0.02, "\(w)×\(h)")
     }
 
     @Test func videoFitsInASize() async throws {
