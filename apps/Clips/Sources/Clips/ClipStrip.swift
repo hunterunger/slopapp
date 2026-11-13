@@ -21,7 +21,7 @@ struct ClipStrip: NSViewRepresentable {
     func updateNSView(_ view: ClipStripView, context: Context) {
         view.cardRadius = PanelMetrics.cardRadius(inPanel: panelRadius)
         // Reading these registers observation, so SwiftUI calls us again when they change.
-        view.sync(resultsVersion: state.resultsVersion, selectedID: state.selectedID, scrollRequest: state.scrollRequest,
+        view.sync(resultsVersion: state.resultsVersion, selection: state.selection, scrollRequest: state.scrollRequest,
                   now: state.now, showsNumbers: state.commandHeld)
     }
 }
@@ -51,6 +51,8 @@ final class ClipStripView: NSView {
     private var query = ""
     private var now = Date()
     private var selectedIndex: Int?
+    /// Every selected card (several after ⇧/⌘-click, ⇧-arrows or ⌘A).
+    private var selectedIDs: Set<UUID> = []
     private var showsNumbers = false
     private var resultsVersion = -1
     private var scrollRequest = -1
@@ -98,7 +100,7 @@ final class ClipStripView: NSView {
 
     // MARK: - Sync with the panel state
 
-    func sync(resultsVersion: Int, selectedID: UUID?, scrollRequest: Int, now: Date, showsNumbers: Bool) {
+    func sync(resultsVersion: Int, selection: StripSelection, scrollRequest: Int, now: Date, showsNumbers: Bool) {
         guard let state else { return }
         var reconfigure = false
         if resultsVersion != self.resultsVersion || now != self.now {
@@ -111,10 +113,12 @@ final class ClipStripView: NSView {
             reconfigure = true
         }
         let newSelection = state.selectedIndex
-        if newSelection != selectedIndex {
-            if let old = selectedIndex { visible[old]?.setSelected(false) }
+        if newSelection != selectedIndex || selection.ids != selectedIDs {
             selectedIndex = newSelection
-            if let new = newSelection { visible[new]?.setSelected(true) }
+            selectedIDs = selection.ids
+            for card in visible.values {
+                card.setSelected(card.clip.map { selectedIDs.contains($0.id) } ?? false)
+            }
         }
         if showsNumbers != self.showsNumbers {
             self.showsNumbers = showsNumbers
@@ -190,17 +194,26 @@ final class ClipStripView: NSView {
     }
 
     private func configure(_ card: ClipCardView, at index: Int) {
-        card.configure(clip: clips[index], index: index, number: index < 9 ? index + 1 : nil, now: now, query: query,
-                       selected: index == selectedIndex, showsNumber: showsNumbers)
+        let clip = clips[index]
+        card.configure(clip: clip, index: index, number: index < 9 ? index + 1 : nil, now: now, query: query,
+                       selected: selectedIDs.contains(clip.id) || index == selectedIndex, showsNumber: showsNumbers,
+                       board: clip.boardID.flatMap { AppModel.shared.boards.board(id: $0) })
     }
 
     // MARK: - Card events
 
-    func cardClicked(_ card: ClipCardView, clickCount: Int) {
+    /// A click: ⌘ adds or removes the card, ⇧ selects the range to it, a double-click pastes.
+    func cardClicked(_ card: ClipCardView, clickCount: Int, modifiers: NSEvent.ModifierFlags = []) {
         guard let state, let clip = card.clip else { return }
-        state.selectedID = clip.id
-        if clickCount >= 2 {
-            actions?.choose(clip, false)
+        let command = modifiers.contains(.command), shift = modifiers.contains(.shift)
+        // Pressing a selected card of several keeps them all (it may be the start of a drag).
+        if !command, !shift, state.isMultipleSelection, state.selection.contains(clip.id), clickCount == 1 {
+            pendingCollapse = clip.id
+        } else {
+            state.click(clip.id, command: command, shift: shift)
+        }
+        if clickCount >= 2, !command, !shift {
+            actions?.choose([clip], false)
         } else if clip.kind == .image, dragPayloads[clip.id] == nil {
             let id = clip.id
             Task { [weak self] in
@@ -209,7 +222,29 @@ final class ClipStripView: NSView {
         }
     }
 
-    /// What a card puts on the drag pasteboard: text, file URLs, or image data (if loaded).
+    /// A press on one of several selected cards that turned out to be a click, not a drag:
+    /// now it selects just that card.
+    private var pendingCollapse: UUID?
+
+    func cardMouseUp(_ card: ClipCardView) {
+        guard let id = pendingCollapse else { return }
+        pendingCollapse = nil
+        if card.clip?.id == id { state?.selectedID = id }
+    }
+
+    /// The clips a drag or a right-click on `card` acts on: the selection if the card is in
+    /// it, else just the card.
+    func targets(for card: ClipCardView) -> [Clip] {
+        guard let state, let clip = card.clip else { return [] }
+        if state.isMultipleSelection, state.selection.contains(clip.id) { return state.selectedClips }
+        return [clip]
+    }
+
+    func dragStarted() {
+        pendingCollapse = nil
+    }
+
+    /// What a card puts on the drag pasteboard: text, file URLs, or an image file and its data.
     func dragWriters(for clip: Clip) -> [NSPasteboardWriting] {
         switch clip.kind {
         case .text, .link, .color:
@@ -217,33 +252,26 @@ final class ClipStripView: NSView {
         case .file:
             return clip.filePaths.map { URL(fileURLWithPath: $0) as NSURL }
         case .image:
-            guard let reps = dragPayloads[clip.id]?.items.first else { return [] }
-            let item = NSPasteboardItem()
-            for rep in reps { item.setData(rep.data, forType: NSPasteboard.PasteboardType(rep.type)) }
-            return [item]
+            let image = dragPayloads[clip.id]?.items.first.flatMap(ImageExport.image(in:))
+            return [ImageDragProvider(clip: clip, image: image)]
         }
+    }
+
+    /// The drag is over `point` (screen): true while it's over a board tab.
+    func dragMoved(to point: NSPoint) -> Bool {
+        actions?.dragMoved(point) ?? false
+    }
+
+    func dragEnded(at point: NSPoint, clips: [Clip]) -> Bool {
+        actions?.dragEnded(point, clips) ?? false
     }
 
     func menu(for card: ClipCardView) -> NSMenu? {
         guard let state, let actions, let clip = card.clip else { return nil }
-        state.selectedID = clip.id
+        let clips = targets(for: card)
+        if clips.count == 1 { state.selectedID = clip.id }
         let menu = NSMenu()
-        let label = AppModel.shared.willPasteDirectly(into: state.target) ? "Paste" : "Copy"
-        menu.addItem(ClosureMenuItem(label) { actions.choose(clip, false) })
-        if clip.kind != .image, clip.kind != .file {
-            menu.addItem(ClosureMenuItem("\(label) as Plain Text") { actions.choose(clip, true) })
-        }
-        if label == "Paste" { menu.addItem(ClosureMenuItem("Copy") { actions.copy(clip) }) }
-        menu.addItem(ClosureMenuItem("Preview") { actions.preview(clip) })
-        if clip.kind == .link || clip.kind == .file {
-            menu.addItem(ClosureMenuItem(clip.kind == .link ? "Open Link" : "Open") { actions.open(clip) })
-        }
-        if clip.kind == .file {
-            menu.addItem(ClosureMenuItem("Show in Finder") { actions.reveal(clip) })
-        }
-        menu.addItem(.separator())
-        menu.addItem(ClosureMenuItem(clip.isPinned ? "Unpin" : "Pin") { actions.togglePin(clip) })
-        menu.addItem(ClosureMenuItem("Delete") { actions.delete(clip) })
+        ClipMenus.addItems(for: clips, to: menu, model: AppModel.shared, state: state, actions: actions)
         return menu
     }
 }

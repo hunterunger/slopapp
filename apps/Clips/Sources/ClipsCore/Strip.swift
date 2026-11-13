@@ -78,6 +78,13 @@ public enum PanelCommand: Equatable, Sendable {
     /// ⌘1–⌘9: paste the nth clip in the strip.
     case quickPaste(index: Int, plain: Bool)
     case move(Int)
+    /// ⇧-arrows: grow or shrink the selection.
+    case extend(Int)
+    /// ⇧Home / ⇧End, ⇧⌘↑ / ⇧⌘↓: extend the selection to the first or last card.
+    case extendToFirst
+    case extendToLast
+    /// ⌘A: select every card in the strip.
+    case selectAll
     case first
     case last
     case pageBack
@@ -100,6 +107,16 @@ public enum PanelCommand: Equatable, Sendable {
     case close
     case openHistory
     case openSettings
+    /// ⌘E: edit the selected clip's text (and its title).
+    case edit
+    /// ⌘R: give the selected clip a title.
+    case rename
+    /// ⌥⌘1–⌥⌘9: pin the selection to board n (0-based).
+    case pinToBoard(index: Int)
+    /// ⇧⌘N: a new board (with the selection on it, if any).
+    case newBoard
+    /// ⇧⌘C: start a paste stack (with the selected cards, or empty to collect copies), or stop one.
+    case pasteStack
 }
 
 /// The panel's keyboard model, kept apart from AppKit so it can be tested.
@@ -141,17 +158,18 @@ public enum PanelKeys {
                                context: Context) -> PanelCommand? {
         let command = modifiers.contains(.command)
         let shift = modifiers.contains(.shift)
+        let option = modifiers.contains(.option)
         if command, let number = digitKeys[keyCode] {
-            return .quickPaste(index: number - 1, plain: shift)
+            return option ? .pinToBoard(index: number - 1) : .quickPaste(index: number - 1, plain: shift)
         }
         switch keyCode {
         case 36, 76: return .choose(plain: shift) // Return, Enter
-        case 123: return command ? .previousTab : .move(-1) // ←
-        case 124: return command ? .nextTab : .move(1) // →
-        case 125: return command ? .last : .move(1) // ↓
-        case 126: return command ? .first : .move(-1) // ↑
-        case 115: return .first // Home
-        case 119: return .last // End
+        case 123: return command ? .previousTab : (shift ? .extend(-1) : .move(-1)) // ←
+        case 124: return command ? .nextTab : (shift ? .extend(1) : .move(1)) // →
+        case 125: return command ? (shift ? .extendToLast : .last) : (shift ? .extend(1) : .move(1)) // ↓
+        case 126: return command ? (shift ? .extendToFirst : .first) : (shift ? .extend(-1) : .move(-1)) // ↑
+        case 115: return shift ? .extendToFirst : .first // Home
+        case 119: return shift ? .extendToLast : .last // End
         case 116: return .pageBack // Page Up
         case 121: return .pageForward // Page Down
         case 48: return .toggleFocus // Tab, ⇧Tab
@@ -163,7 +181,12 @@ public enum PanelKeys {
         guard command else { return nil }
         if keyCode == 51 || keyCode == 117 { return .delete } // ⌘⌫, ⌘⌦
         switch characters?.lowercased() {
+        case "c" where shift: return .pasteStack
         case "c": return context.searchHasSelection ? nil : .copy
+        case "a" where !shift: return .selectAll
+        case "e" where !shift: return .edit
+        case "r" where !shift: return .rename
+        case "n" where shift: return .newBoard
         case "p": return .togglePin
         case "o": return .open
         case "t": return .togglePause

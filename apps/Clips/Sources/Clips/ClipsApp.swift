@@ -10,9 +10,22 @@ extension KeyboardShortcuts.Name {
     /// ⇧⌥V by default: clear of ⇧⌘V (Paste and Match Style, and Paste's own shortcut) and
     /// ⌥⌘V (Finder's Move).
     static let showClips = Self("showClips", default: .init(.v, modifiers: [.option, .shift]))
+    /// Starts or stops a paste stack from any app. No default: common combos (⇧⌘C) already
+    /// mean something in many apps, and the strip's ⇧⌘C is always there.
+    static let pasteStack = Self("pasteStack")
 }
 
+/// Starts Clips, or (with `--recognize-text`) the helper that reads text in images for it.
 @main
+enum ClipsMain {
+    static func main() {
+        // A helper that quit mid-write must fail the write, not end Clips.
+        signal(SIGPIPE, SIG_IGN)
+        if CommandLine.arguments.contains(TextHelper.argument) { TextHelper.run() }
+        ClipsApp.main()
+    }
+}
+
 struct ClipsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage(MenuBarIcon.storageKey) private var showMenuBarIcon = true
@@ -23,7 +36,7 @@ struct ClipsApp: App {
         MenuBarExtra(isInserted: $showMenuBarIcon) {
             ClipsMenu(model: model, info: info)
         } label: {
-            MenuBarLabel(isPaused: model.isPaused)
+            MenuBarLabel(isPaused: model.isPaused, isStacking: model.stack.isActive)
         }
         .menuBarExtraStyle(.menu)
 
@@ -44,12 +57,13 @@ struct ClipsApp: App {
 /// captured for code outside views (the panel's ⌘Y and ⌘,).
 struct MenuBarLabel: View {
     let isPaused: Bool
+    let isStacking: Bool
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        Image(systemName: isPaused ? "clipboard" : "list.clipboard")
-            .accessibilityLabel(isPaused ? "Clips, recording paused" : "Clips")
+        Image(systemName: isStacking ? "square.stack.3d.up" : (isPaused ? "clipboard" : "list.clipboard"))
+            .accessibilityLabel(isStacking ? "Clips, paste stack on" : (isPaused ? "Clips, recording paused" : "Clips"))
             .onAppear {
                 SettingsOpener.action = { openSettings() }
                 HistoryOpener.action = { openWindow(id: HistoryWindow.id) }
@@ -109,6 +123,7 @@ struct ClipsMenu: View {
         }
         Toggle("Ignore Next Copy", isOn: $model.ignoreNextCopy)
             .disabled(model.isPaused)
+        stackButton
         if model.clipboardAccess != .allowed {
             Button("Allow Clipboard Access…") { ClipboardAccess.openSettings() }
         }
@@ -119,7 +134,22 @@ struct ClipsMenu: View {
             .onAppear { SettingsOpener.action = { openSettings() } }
     }
 
+    @ViewBuilder private var stackButton: some View {
+        let title = model.stack.isActive ? "Stop Paste Stack" : "Start Paste Stack"
+        let button = Button(title) {
+            if model.stack.isActive { model.stack.cancel() } else { model.stack.start() }
+        }
+        if let shortcut = KeyboardShortcuts.getShortcut(for: .pasteStack), let key = shortcut.menuKey {
+            button.keyboardShortcut(key, modifiers: shortcut.eventModifiers)
+        } else {
+            button
+        }
+    }
+
     private var statusLine: String {
+        if let stack = model.stack.stack {
+            return stack.remaining == 0 ? "Paste stack on · copy to add" : "Paste stack · \(stack.remaining) to paste"
+        }
         if let paused = model.pauseDescription { return paused }
         switch model.clipboardAccess {
         case .denied: return "Clipboard access is off"
@@ -201,6 +231,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             KeyboardShortcuts.onKeyDown(for: .showClips) {
                 Self.panel?.toggle(trigger: Diagnostics.now())
             }
+            KeyboardShortcuts.onKeyDown(for: .pasteStack) {
+                let stack = AppModel.shared.stack
+                if stack.isActive { stack.cancel() } else { stack.start() }
+            }
         }
         if Diagnostics.testHooks { installTestHooks(panel) }
         // Render the chosen sounds (first launch of a version only) and create their IDs in
@@ -235,16 +269,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         center.addObserver(forName: .init(prefix + "tab"), object: nil, queue: .main) { note in
             let index = (note.object as? String).flatMap(Int.init) ?? 0
             MainActor.assumeIsolated {
-                let tabs = ClipFilter.allCases
+                let tabs = panel.state.tabs
                 panel.state.filter = tabs[min(max(index, 0), tabs.count - 1)]
             }
         }
         // object "pause" / "resume" / "pin" (toggles the selected clip) / "delete" (the selected
         // clip; a pinned one asks for a second delete) / "cards" / "search" (keyboard focus).
         center.addObserver(forName: .init(prefix + "do"), object: nil, queue: .main) { note in
-            let action = note.object as? String ?? ""
+            let full = note.object as? String ?? ""
+            // "name:argument", e.g. "board-new:Work", "select-add:3".
+            let parts = full.split(separator: ":", maxSplits: 1).map(String.init)
+            let action = parts.first ?? ""
+            let argument = parts.count > 1 ? parts[1] : ""
+            let number = Int(argument) ?? 0
             MainActor.assumeIsolated {
                 switch action {
+                case "select-add": panel.state.testSelect(indexes: [number], adding: true)
+                case "select-range": panel.state.extendSelection(by: number)
+                case "undo": _ = AppModel.shared.undoDelete(); panel.state.refresh()
+                case "select-all": panel.state.selectAll()
+                case "select-none": panel.state.collapseSelection()
+                case "board-new": panel.testNewBoard(named: argument.isEmpty ? nil : argument)
+                case "board-rename":
+                    if let board = AppModel.shared.boards.all.dropFirst(number).first {
+                        panel.state.beginRenaming(board, isNew: false)
+                    }
+                case "board-color":
+                    let bits = argument.split(separator: ",").map(String.init)
+                    if bits.count == 2, let index = Int(bits[0]), let color = BoardColor(rawValue: bits[1]),
+                       let board = AppModel.shared.boards.all.dropFirst(index).first {
+                        AppModel.shared.setColor(color, ofBoard: board.id)
+                    }
+                case "board-move":
+                    let bits = argument.split(separator: ",").compactMap { Int($0) }
+                    if bits.count == 2, let board = AppModel.shared.boards.all.dropFirst(bits[0]).first {
+                        AppModel.shared.moveBoard(board.id, by: bits[1])
+                    }
+                case "board-delete": panel.testRequestBoardDelete(number)
+                case "board-delete-confirm": panel.testConfirmBoardDelete()
+                case "pin-to": panel.testPin(toBoard: number)
+                case "drop-on-tab": panel.testDropOnTab(number)
+                case "edit": panel.testEdit(inTitle: false)
+                case "rename": panel.testEdit(inTitle: true)
+                case "edit-text": panel.testSetEditorText(argument)
+                case "edit-title": panel.testSetEditorTitle(argument)
+                case "edit-save": panel.testFinishEditing(save: true)
+                case "edit-cancel": panel.testFinishEditing(save: false)
+                case "stack": panel.testPasteStack()
+                case "stack-start": AppModel.shared.stack.start()
+                case "stack-stop": AppModel.shared.stack.cancel()
                 case "pause": AppModel.shared.pause(for: nil)
                 case "resume": AppModel.shared.resume()
                 case "pin": panel.testTogglePinSelected()
@@ -282,7 +355,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        standard.applicationDidBecomeActive(notification)
         AppModel.shared.refreshPermissions()
     }
 

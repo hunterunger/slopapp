@@ -18,6 +18,8 @@ protocol Pasteboard: AnyObject {
 @MainActor
 final class SystemPasteboard: Pasteboard {
     let board: NSPasteboard
+    /// The data behind the last promised write (kept alive until the next write).
+    private var promised: [PromisedPasteboardData] = []
 
     init(name: String?) {
         board = name.map { NSPasteboard(name: NSPasteboard.Name($0)) } ?? .general
@@ -40,12 +42,30 @@ final class SystemPasteboard: Pasteboard {
 
     @discardableResult
     func write(_ payload: ClipPayload) -> Int {
+        promised.removeAll()
         board.clearContents()
         let items = payload.items.map { reps -> NSPasteboardItem in
             let item = NSPasteboardItem()
             for rep in reps {
                 item.setData(rep.data, forType: NSPasteboard.PasteboardType(rep.type))
             }
+            return item
+        }
+        board.writeObjects(items)
+        return board.changeCount
+    }
+
+    /// Writes `payload` as a promise: the data is handed over when an app asks for it, and
+    /// `onRead` hears each ask (the paste stack's way of telling a paste happened). Marked
+    /// transient, so clipboard managers don't read it. Returns the new change count.
+    @discardableResult
+    func writePromised(_ payload: ClipPayload, onRead: @escaping @MainActor () -> Void) -> Int {
+        board.clearContents()
+        promised = payload.items.map { PromisedPasteboardData(reps: $0, onRead: onRead) }
+        let items = promised.map { provider -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            item.setDataProvider(provider, forTypes: provider.types)
+            item.setData(Data(), forType: NSPasteboard.PasteboardType(PasteboardType.transient))
             return item
         }
         board.writeObjects(items)

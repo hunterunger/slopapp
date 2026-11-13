@@ -3,15 +3,31 @@ import ClipsCore
 import SlopKit
 import SwiftUI
 
+/// What the strip's cards, menus and tabs can do. Most act on several clips: the selection,
+/// or the one card a menu was opened on.
 struct PanelActions {
-    let choose: (Clip, _ plain: Bool) -> Void
-    let copy: (Clip) -> Void
-    let togglePin: (Clip) -> Void
-    let delete: (Clip) -> Void
+    let choose: ([Clip], _ plain: Bool) -> Void
+    let copy: ([Clip]) -> Void
+    let togglePin: ([Clip]) -> Void
+    /// Onto a board, or off any board (nil).
+    let pin: ([Clip], _ board: UUID?) -> Void
+    /// A new board with these clips on it, its name ready to type.
+    let newBoard: ([Clip]) -> Void
+    let delete: ([Clip]) -> Void
     let preview: (Clip) -> Void
+    /// `title`: start in the title field (Rename) instead of the text (Edit).
+    let edit: (Clip, _ title: Bool) -> Void
     let open: (Clip) -> Void
     let reveal: (Clip) -> Void
+    let copyImageText: (Clip) -> Void
+    /// Start a paste stack with these clips (none: collect copies), or stop the running one.
+    let pasteStack: ([Clip]) -> Void
+    let requestBoardDelete: (Board) -> Void
     let dismiss: () -> Void
+    /// A dragged card is over this point on screen: true if it's a board tab.
+    let dragMoved: (NSPoint) -> Bool
+    /// Dropped there: true if a board took the clips.
+    let dragEnded: (NSPoint, [Clip]) -> Bool
 }
 
 enum PanelMetrics {
@@ -59,7 +75,7 @@ struct PanelView: View {
     let model: AppModel
     let actions: PanelActions
 
-    @FocusState private var searchFocused: Bool
+    @FocusState private var focus: PanelFocus?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -73,8 +89,12 @@ struct PanelView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { searchFocused = true }
-        .onChange(of: state.focusRequest) { searchFocused = true }
+        .onAppear { focus = .search }
+        .onChange(of: state.focusRequest) { focus = .search }
+        .onChange(of: state.renaming?.id) { _, renaming in focus = renaming == nil ? .search : .boardName }
+        .onPreferenceChange(TabFramesKey.self) { frames in
+            MainActor.assumeIsolated { state.tabFrames = frames }
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -100,7 +120,7 @@ struct PanelView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: Spacing.s) {
                 searchField
-                TabBar(filter: $state.filter)
+                TabBar(state: state, model: model, actions: actions, focus: $focus)
             }
             .fixedSize()
             ZStack(alignment: .trailing) {
@@ -130,7 +150,7 @@ struct PanelView: View {
                             .accessibilityHidden(true)
                     }
                 }
-                .focused($searchFocused)
+                .focused($focus, equals: .search)
                 .focusEffectDisabled()
                 .accessibilityLabel("Search clips")
             if !state.query.isEmpty {
@@ -155,7 +175,15 @@ struct PanelView: View {
 
     @ViewBuilder private var leading: some View {
         if let notice = PanelNotice.current(model: model, state: state) {
-            NoticeLabel(notice: notice)
+            NoticeLabel(notice: notice) { action in
+                switch action {
+                case .clipboardSettings: ClipboardAccess.openSettings()
+                case .accessibility: Permission.accessibility.request()
+                case .resume: model.resume()
+                case .deleteBoard(let id): AppDelegate.panel?.confirmBoardDelete(id)
+                case .stopStack: model.stack.cancel()
+                }
+            }
         }
     }
 
@@ -174,11 +202,14 @@ struct PanelView: View {
         Group {
             if !state.query.isEmpty {
                 ContentUnavailableView.search(text: state.query)
-            } else if state.filter == .pinned {
-                ContentUnavailableView("No Pinned Clips", systemImage: "pin",
-                                       description: Text("Press ⌘P to pin the selected clip. Pinned clips are never removed automatically."))
-            } else if state.filter != .all {
-                ContentUnavailableView("No \(state.filter.title)", systemImage: state.filter.systemImage,
+            } else if let id = state.filter.boardID {
+                let name = model.boards.board(id: id)?.name ?? "This Board"
+                let index = model.boards.index(of: id).map { $0 + 1 }
+                ContentUnavailableView("\(name) Is Empty", systemImage: "pin",
+                                       description: Text(index.map { $0 <= 9 ? "Drag cards onto this tab, or press ⌥⌘\($0) on a card. Clips on a board are never removed automatically." : "Drag cards onto this tab. Clips on a board are never removed automatically." }
+                                                         ?? "Drag cards onto this tab."))
+            } else if state.filter != .all, let title = state.filter.title {
+                ContentUnavailableView("No \(title)", systemImage: state.filter.systemImage,
                                        description: Text("Nothing of this kind has been copied yet."))
             } else {
                 ContentUnavailableView("No Clips Yet", systemImage: "doc.on.clipboard",
@@ -191,36 +222,223 @@ struct PanelView: View {
 
 // MARK: - Tabs
 
-/// All, Pinned and the kinds of clip. ⌘← / ⌘→ switch.
+/// Where typing goes in the top bar.
+enum PanelFocus: Hashable {
+    case search, boardName
+}
+
+/// Collects every tab's frame in the panel, so a card dragged out of the strip can be dropped
+/// on a board tab.
+struct TabFramesKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+/// All, the boards (coloured dots, + for a new one), then the kinds. ⌘← / ⌘→ switch.
+/// Boards: double-click or right-click to rename, recolour, move or delete; drop cards on one
+/// to pin them there.
 struct TabBar: View {
-    @Binding var filter: ClipFilter
+    @Bindable var state: PanelState
+    let model: AppModel
+    let actions: PanelActions
+    var focus: FocusState<PanelFocus?>.Binding
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
-            ForEach(ClipFilter.allCases) { item in
-                let selected = item == filter
-                Button {
-                    filter = item
-                } label: {
-                    ZStack {
-                        // Reserve the semibold width so switching tabs never shifts the row.
-                        Text(item.title).font(.callout.weight(.semibold)).hidden()
-                        Text(item.title).font(.callout.weight(selected ? .semibold : .regular))
-                    }
-                        .padding(.horizontal, Spacing.m)
-                        .frame(height: PanelMetrics.controlHeight)
-                        .background {
-                            if selected { Capsule().fill(.quaternary) }
-                        }
-                        .foregroundStyle(selected ? Color.primary : Color.secondary)
-                        .contentShape(Capsule())
+            tab(.all, title: "All")
+            ForEach(model.boards.all) { board in
+                if state.renaming?.id == board.id {
+                    nameField(board)
+                } else {
+                    boardTab(board)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(item.title)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-                .help("Show \(item.title.lowercased()) (⌘← ⌘→ switch)")
+            }
+            newBoardButton
+            ForEach(ClipFilter.kinds) { kind in
+                tab(kind, title: kind.title ?? "")
             }
         }
+    }
+
+    private func tab(_ item: ClipFilter, title: String) -> some View {
+        let selected = item == state.filter
+        return Button {
+            state.filter = item
+        } label: {
+            TabLabel(title: title, color: nil, selected: selected, targeted: false)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .help("Show \(title.lowercased()) (⌘← ⌘→ switch)")
+        .reportFrame(id: item.id)
+    }
+
+    private func boardTab(_ board: Board) -> some View {
+        let item = ClipFilter.board(board.id)
+        let selected = item == state.filter
+        let index = model.boards.index(of: board.id) ?? 0
+        let count = model.clipCount(onBoard: board.id)
+        return Button {
+            state.filter = item
+        } label: {
+            TabLabel(title: board.name, color: board.color.color, selected: selected, targeted: state.dropTarget == item)
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { state.beginRenaming(board, isNew: false) })
+        .accessibilityLabel("\(board.name), board, \(count == 1 ? "1 clip" : "\(count) clips")")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityAction(named: "Rename") { state.beginRenaming(board, isNew: false) }
+        .help(index < 9 ? "\(board.name): drop cards here, or press ⌥⌘\(index + 1) on a card. Double-click to rename."
+                        : "\(board.name): drop cards here. Double-click to rename.")
+        .contextMenu {
+            Button("Rename") { state.beginRenaming(board, isNew: false) }
+            Menu("Color") {
+                ForEach(BoardColor.allCases) { color in
+                    Toggle(isOn: Binding(get: { board.color == color }, set: { if $0 { model.setColor(color, ofBoard: board.id) } })) {
+                        Label { Text(color.title) } icon: { Image(nsImage: BoardSwatch.image(color)) }
+                    }
+                }
+            }
+            Divider()
+            Button("Move Left") { model.moveBoard(board.id, by: -1) }
+                .disabled(index == 0)
+            Button("Move Right") { model.moveBoard(board.id, by: 1) }
+                .disabled(index >= model.boards.all.count - 1)
+            Divider()
+            Button(count > 0 ? "Delete Board…" : "Delete Board") { actions.requestBoardDelete(board) }
+        }
+        .reportFrame(id: item.id)
+    }
+
+    private func nameField(_ board: Board) -> some View {
+        HStack(spacing: Spacing.s) {
+            Circle().fill(board.color.color).frame(width: 8, height: 8).accessibilityHidden(true)
+            TextField("Board name", text: Binding(get: { state.renaming?.draft ?? "" },
+                                                  set: { state.renaming?.draft = $0 }))
+                .textFieldStyle(.plain)
+                .focused(focus, equals: .boardName)
+                .focusEffectDisabled()
+                .frame(width: 112)
+                .onSubmit { state.commitRename() }
+                .accessibilityLabel("Board name")
+                .help("Type a name, then press Return (Esc cancels)")
+        }
+        .padding(.horizontal, Spacing.m)
+        .frame(height: PanelMetrics.controlHeight)
+        .background(Capsule().strokeBorder(Color.accentColor, lineWidth: 2))
+        .background(Capsule().fill(.quaternary))
+        .onChange(of: focus.wrappedValue) { _, now in
+            // Clicking elsewhere keeps the name typed so far.
+            if now != .boardName, state.renaming?.id == board.id { state.commitRename() }
+        }
+    }
+
+    private var newBoardButton: some View {
+        let targeted = state.dropTarget == PanelController.newBoardTab
+        return Button {
+            actions.newBoard([])
+        } label: {
+            Image(systemName: "plus")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: PanelMetrics.controlHeight, height: PanelMetrics.controlHeight)
+                .background {
+                    if targeted {
+                        Circle().fill(Color.accentColor.opacity(0.18))
+                        Circle().strokeBorder(Color.accentColor, lineWidth: 2)
+                    }
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("New Board")
+        .help("New board (⇧⌘N). Drop cards here to put them on a new board.")
+        .reportFrame(id: PanelController.newBoardTab.id)
+    }
+}
+
+/// A tab's capsule: the name (with a board's colour dot), filled when selected, ringed while a
+/// dragged card is over it.
+private struct TabLabel: View {
+    let title: String
+    let color: Color?
+    let selected: Bool
+    let targeted: Bool
+
+    var body: some View {
+        HStack(spacing: Spacing.s) {
+            if let color {
+                Circle().fill(color).frame(width: 8, height: 8).accessibilityHidden(true)
+            }
+            ZStack {
+                // Reserve the semibold width so switching tabs never shifts the row.
+                Text(title).font(.callout.weight(.semibold)).hidden()
+                Text(title).font(.callout.weight(selected ? .semibold : .regular))
+            }
+            .lineLimit(1)
+            .frame(maxWidth: 140)
+        }
+        .padding(.horizontal, Spacing.m)
+        .frame(height: PanelMetrics.controlHeight)
+        .background {
+            if targeted {
+                Capsule().fill(Color.accentColor.opacity(0.18))
+                Capsule().strokeBorder(Color.accentColor, lineWidth: 2)
+            } else if selected {
+                Capsule().fill(.quaternary)
+            }
+        }
+        .foregroundStyle(selected || targeted ? Color.primary : Color.secondary)
+        .contentShape(Capsule())
+    }
+}
+
+private extension View {
+    func reportFrame(id: String) -> some View {
+        background(GeometryReader { proxy in
+            Color.clear.preference(key: TabFramesKey.self, value: [id: proxy.frame(in: .global)])
+        })
+    }
+}
+
+extension BoardColor {
+    /// A system colour, so it follows light and dark mode and Increase Contrast.
+    var color: Color { Color(nsColor: nsColor) }
+
+    var nsColor: NSColor {
+        switch self {
+        case .red: .systemRed
+        case .orange: .systemOrange
+        case .yellow: .systemYellow
+        case .green: .systemGreen
+        case .teal: .systemTeal
+        case .blue: .systemBlue
+        case .purple: .systemPurple
+        case .pink: .systemPink
+        case .gray: .systemGray
+        }
+    }
+}
+
+/// A small coloured dot for menus (a colour swatch carries information, so menus may show it).
+@MainActor
+enum BoardSwatch {
+    private static var cache: [BoardColor: NSImage] = [:]
+
+    static func image(_ color: BoardColor) -> NSImage {
+        if let cached = cache[color] { return cached }
+        let image = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+            color.nsColor.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
+        image.isTemplate = false
+        image.accessibilityDescription = color.title
+        cache[color] = image
+        return image
     }
 }
 
@@ -228,7 +446,7 @@ extension ClipFilter {
     var systemImage: String {
         switch self {
         case .all: "tray.full"
-        case .pinned: "pin"
+        case .pinned, .board: "pin"
         case .text: "text.alignleft"
         case .links: "link"
         case .images: "photo"
@@ -272,16 +490,29 @@ struct PanelNotice: Equatable {
     var text: String
     var button: String?
     var action: Action?
+    /// Information, not a warning (the selection, a running paste stack): the accent colour.
+    var isInfo = false
 
-    enum Action { case clipboardSettings, accessibility, resume }
+    enum Action: Equatable { case clipboardSettings, accessibility, resume, deleteBoard(UUID), stopStack }
 
     @MainActor
     static func current(model: AppModel, state: PanelState) -> PanelNotice? {
         if let error = model.storageError {
             return PanelNotice(systemImage: "exclamationmark.triangle", text: error)
         }
-        if let pending = state.pendingPinnedDelete, let clip = state.results.first(where: { $0.id == pending }) {
-            return PanelNotice(systemImage: "pin", text: "“\(ClipText.title(of: clip, limit: 30))” is pinned. Press ⌘⌫ again to delete it.")
+        if let pending = state.pendingDelete {
+            let clips = state.results.filter { pending.contains($0.id) }
+            let pinned = clips.filter(\.isPinned)
+            if clips.count == 1, let clip = clips.first {
+                return PanelNotice(systemImage: "pin", text: "“\(ClipText.title(of: clip, limit: 30))” is pinned. Press ⌘⌫ again to delete it.")
+            }
+            return PanelNotice(systemImage: "pin", text: "\(pinned.count) of these \(clips.count) clips are pinned. Press ⌘⌫ again to delete them all.")
+        }
+        if let id = state.pendingBoardDelete, let board = model.boards.board(id: id) {
+            let count = model.clipCount(onBoard: id)
+            return PanelNotice(systemImage: "trash",
+                               text: "Delete “\(board.name)”? Its \(count == 1 ? "clip stays" : "\(count) clips stay") in your history, no longer pinned. Esc keeps it.",
+                               button: "Delete Board", action: .deleteBoard(id))
         }
         switch model.clipboardAccess {
         case .denied:
@@ -297,8 +528,18 @@ struct PanelNotice: Equatable {
             return PanelNotice(systemImage: "accessibility", text: "Return copies. To paste into apps, allow Clips in Accessibility.",
                                button: "Open Settings…", action: .accessibility)
         }
+        if let stack = model.stack.stack {
+            let text = stack.remaining == 0 ? "Paste stack on: what you copy now pastes one by one, in order."
+                : "Paste stack: \(stack.remaining) to paste. Each ⌘V takes the next one."
+            return PanelNotice(systemImage: "square.stack.3d.up", text: text, button: "Stop", action: .stopStack, isInfo: true)
+        }
         if let paused = model.pauseDescription {
             return PanelNotice(systemImage: "pause.circle", text: "\(paused). New copies aren't recorded.", button: "Resume", action: .resume)
+        }
+        if state.isMultipleSelection {
+            let clips = state.selectedClips
+            return PanelNotice(systemImage: "checkmark.circle",
+                               text: "\(ClipJoin.describe(clips)) selected. Return pastes them together, ⇧⌘C one by one.", isInfo: true)
         }
         return nil
     }
@@ -306,12 +547,13 @@ struct PanelNotice: Equatable {
 
 struct NoticeLabel: View {
     let notice: PanelNotice
+    let perform: (PanelNotice.Action) -> Void
 
     var body: some View {
         HStack(spacing: Spacing.s) {
             Image(systemName: notice.systemImage)
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.orange)
+                .foregroundStyle(notice.isInfo ? AnyShapeStyle(.tint) : AnyShapeStyle(.orange))
                 .accessibilityHidden(true)
             Text(notice.text)
                 .font(.caption)
@@ -319,18 +561,10 @@ struct NoticeLabel: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .help(notice.text)
             if let button = notice.button, let action = notice.action {
-                Button(button) { run(action) }
+                Button(button) { perform(action) }
                     .controlSize(.small)
                     .fixedSize()
             }
-        }
-    }
-
-    @MainActor private func run(_ action: PanelNotice.Action) {
-        switch action {
-        case .clipboardSettings: ClipboardAccess.openSettings()
-        case .accessibility: Permission.accessibility.request()
-        case .resume: AppModel.shared.resume()
         }
     }
 }
@@ -369,34 +603,35 @@ struct PanelMenu: NSViewRepresentable {
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
-        if let clip = state.selected {
-            let paste = model.willPasteDirectly(into: state.target) ? state.targetName.map { "Paste in \($0)" } ?? "Paste" : "Copy"
-            menu.addItem(ClosureMenuItem(paste) { actions.choose(clip, false) })
-            if clip.kind != .image, clip.kind != .file {
-                menu.addItem(ClosureMenuItem("\(paste) as Plain Text") { actions.choose(clip, true) })
-            }
-            menu.addItem(ClosureMenuItem("Preview") { actions.preview(clip) })
-            menu.addItem(ClosureMenuItem(clip.isPinned ? "Unpin" : "Pin") { actions.togglePin(clip) })
-            menu.addItem(ClosureMenuItem("Delete") { actions.delete(clip) })
+        let selected = state.selectedClips
+        if !selected.isEmpty {
+            ClipMenus.addItems(for: selected, to: menu, model: model, state: state, actions: actions)
             menu.addItem(.separator())
         }
-        menu.addItem(ClosureMenuItem("Open History") {
+        if model.stack.isActive {
+            menu.addItem(ClosureMenuItem("Stop Paste Stack", key: "c", modifiers: [.command, .shift]) { actions.pasteStack([]) })
+        } else if selected.count < 2 {
+            menu.addItem(ClosureMenuItem("Start Paste Stack", key: "c", modifiers: [.command, .shift]) { actions.pasteStack([]) })
+        }
+        menu.addItem(ClosureMenuItem("New Board", key: "n", modifiers: [.command, .shift]) { actions.newBoard([]) })
+        menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem("Open History", key: "y") {
             actions.dismiss()
             HistoryOpener.open()
         })
         if model.isPaused {
-            menu.addItem(ClosureMenuItem("Resume Recording") { model.resume() })
+            menu.addItem(ClosureMenuItem("Resume Recording", key: "t") { model.resume() })
         } else {
             let pause = NSMenuItem(title: "Pause Recording", action: nil, keyEquivalent: "")
             let sub = NSMenu()
             sub.addItem(ClosureMenuItem("For 15 Minutes") { model.pause(for: 15 * 60) })
             sub.addItem(ClosureMenuItem("For 1 Hour") { model.pause(for: 3_600) })
-            sub.addItem(ClosureMenuItem("Until I Resume") { model.pause(for: nil) })
+            sub.addItem(ClosureMenuItem("Until I Resume", key: "t") { model.pause(for: nil) })
             pause.submenu = sub
             menu.addItem(pause)
         }
         menu.addItem(.separator())
-        menu.addItem(ClosureMenuItem("Settings…") {
+        menu.addItem(ClosureMenuItem("Settings…", key: ",") {
             actions.dismiss()
             SettingsOpener.open()
         })
@@ -442,6 +677,8 @@ final class PanelMenuButton: NSButton {
 /// The selected clip, big: what Space shows above the strip.
 struct QuickLookView: View {
     let state: PanelState
+    /// Ends the editor (⌘E / ⌘R turn the preview into one): true saves.
+    let finishEditing: (_ save: Bool) -> Void
     @Environment(\.floatingPanelCornerRadius) private var panelRadius
 
     /// The content sits on its own text-background surface, `Spacing.s` in from the panel's
@@ -451,13 +688,17 @@ struct QuickLookView: View {
 
     var body: some View {
         Group {
-            if let clip = state.selected {
+            if let clip = state.selected, let editor = state.editor, editor.clipID == clip.id {
+                ClipEditorView(session: editor, clip: clip, onDone: finishEditing, surfaceRadius: surfaceRadius)
+                    .padding(.bottom, editor.editsText || editor.dropsFormatting ? 0 : Spacing.s)
+            } else if let clip = state.selected {
                 VStack(spacing: 0) {
                     HStack(spacing: Spacing.s) {
-                        Text(ClipText.kindName(of: clip)).font(.headline)
+                        Text(ClipText.headerTitle(of: clip)).font(.headline).lineLimit(1)
                         ClipSourceLine(clip: clip, now: state.now)
                         Spacer(minLength: Spacing.s)
-                        Text("Space to close").font(.caption).foregroundStyle(.secondary)
+                        Text(ClipEdit.canEditText(clip) ? "⌘E to edit · Space to close" : "⌘R to add a title · Space to close")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, Spacing.l)
                     .frame(height: QuickLookMetrics.headerHeight)

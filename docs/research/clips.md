@@ -675,7 +675,7 @@ small footer ("65 characters"); a ring around the selected card; Space for Quick
 | Tab switches search ↔ cards | Done | Paste's model. The caret hides and the search outline drops while the cards have the keyboard; typing goes back to search. (Previously Tab cycled filters.) |
 | ⌘←/⌘→ previous/next tab | Done | Paste uses these for pinboards. |
 | ⌘O open link/file, Show in Finder | Done | Keys + right-click menu. (Deferred before.) |
-| Drag a card out | Done | Text, links, colours, files; images once pressed (the payload loads on mouse-down). (Deferred before.) |
+| Drag a card out | Done | Text, links, colours, files and images. An image card offers a file (a promise Finder and the Desktop turn into `Image <date> at <time>.png`) plus the image data for apps. (Deferred before.) |
 | ⌘T pause/resume, ⌘F back to search | Done | |
 | Vertical mouse wheel scrolls the strip sideways | Done | |
 | Paste / copy / plain text / pin / delete + undo / Esc | Kept | Same behaviours as before, same keys. |
@@ -1138,3 +1138,99 @@ on `build/Clips.app`, relaunched from /Applications: **downtime 22 s**. After: o
 so Paper with both sounds on); history files untouched; `~/Library/Caches/app.slopapp.clips/Sounds`
 holds `paper-{copy,paste}-v2.aiff`. The test defaults domain was deleted afterwards.
 
+
+
+## Organize-and-reuse round (2026-11-11)
+
+Owner, after comparing Clips with the app it replaces: one Pinned list can't replace
+organized collections; form filling needs a paste stack; saved text needs fixing before
+reuse; the strip needs multi-select; search should find text inside images. Built on top of
+the uncommitted "Trim whitespace" setting, image-card file drags and the SlopKit menu bar
+change, all kept.
+
+### What was built
+
+| Feature | How it fits |
+|---|---|
+| **Named boards** | `ClipsCore/Board.swift`. A board has a name and a system colour (9: red … gray, stored by name). A clip is on at most one board (`Clip.boardID`); being on one *is* being pinned (`isPinned` is now derived), so retention, Clear History and the second-⌘⌫ rule apply unchanged. Tabs: All · boards (colour dot) · + · Text · Links · Images · Files; ⌘← ⌘→ walk them. + / ⇧⌘N make a board and open its name field in the tab (Return keeps, Esc on a just-made board removes it, clicking away keeps the name). Board tab right-click: Rename, Color ▸ (swatches), Move Left/Right, Delete Board…. Double-click renames. History sidebar: a Boards section (drag to reorder, same context menu) and New Board. |
+| Pin to a board | ⌘P toggles the first board (Pinned by default, so old muscle memory works); ⌥⌘1–⌥⌘9 the nth board (again: off it); card and ⋯ menus "Pin to ▸" with swatches, checkmark and the ⌥⌘ keys; drag cards onto a board tab (the tab rings in the accent colour while hovered), or onto + for a new board holding them. |
+| Board delete | An empty board goes at once. One with clips asks in the strip's notice area ("Delete “Work”? Its 5 clips stay in your history, no longer pinned. Esc keeps it." [Delete Board]); History uses a confirmation dialog. Clips are never deleted with a board. |
+| **Migration** | Schema v4: `boards` table, `board_id`, `label`, `ocr_text` columns. Every v3 pinned clip goes onto a "Pinned" board with a fixed id; a fresh history also starts with Pinned. Each open also reconciles with older builds, which still read/write only `pinned` (this build keeps it in step): an older build's pin lands on the first board (recreating Pinned if every board was deleted), its unpin takes the clip off. Tested against a hand-built v3 file (`BoardDatabaseTests`). |
+| **Titles** | ⌘R (any kind) / Add Title… / Rename…: the title replaces the kind word in the card header, is the History row title, and is searched. Kept when the same content is copied again. |
+| **Editing** | ⌘E turns the preview into an editor: title field, Cancel / Save, the text in an NSTextView. RTF/RTFD clips edit as formatted text and save as RTF (RTFD with pictures); HTML-only formatting can't be rendered safely (remote content), so those clips are edited and saved as plain text, and the editor says so before you save. The edit replaces the clip in place (same id, board, title, dates), with a new fingerprint, so the edited text is what pastes and copying it again finds it. Empty text is refused. Esc cancels; ⌘S / ⌘Return / Return in the title saves; clicking away keeps the edit. History's detail pane hosts the same editor (⌘E, Edit button). `ClipsCore/ClipEdit.swift`. |
+| **Multi-select in the strip** | `ClipsCore/StripSelection.swift`, Mac list rules (same as the History table): click, ⌘-click, ⇧-click range from the anchor, ⇧-arrows, ⇧Home/End, ⌘A. Every selected card gets the ring. Pressing one of several selected cards keeps them for a drag; releasing selects just it. Return/⌘C paste/copy them joined (`ClipJoin`), ⌘P/⌥⌘n pin them, ⌘⌫ deletes them (pinned among them: second ⌘⌫; ⌘Z restores all), a drag carries all. Esc collapses the selection before clearing the search. A notice says "3 clips selected. Return pastes them together, ⇧⌘C one by one." |
+| **Paste stack** | ⇧⌘C in the strip, Start Paste Stack in the ⋯ and menu bar menus, or an optional global shortcut (Settings › Shortcuts, no default). Empty: every recorded copy joins it. With several cards selected: those, oldest first, and the first is pasted right away. A non-key floating list (top-right) shows what's next and how many are left; click a row to make it next; ✕ stops. The menu bar icon becomes a stack, and the strip shows a "Paste stack" notice with Stop. Ends by itself after the last paste (HUD "Paste stack done"). `ClipsCore/PasteStack.swift`, `Clips/PasteStackController.swift`, `Clips/PasteStackPill.swift`. |
+| **Text in images** | Vision `VNRecognizeTextRequest` (accurate, language correction) on device. `TextRecognitionQueue` (core, tested with a fake) works one image at a time, new copies first (1 s after capture), older images 5 s after launch, 0.4 s apart, waiting out Low Power Mode. Results (capped 5,000 chars, "" = none) go in `ocr_text` and the search key; an image card hit by a search shows the matched words in its chip; Copy Text in Image in the card and History menus. |
+
+### Decisions
+
+| Question | Decision | Why |
+|---|---|---|
+| One board per clip, or tags? | **One** | Matches how people file things and keeps "pinned" one clear idea; multi-board would need a join table and murkier ⌘P. |
+| Where do board tabs go? | **Right after All**, where Pinned was | ⌘→ once still reaches Pinned; the kinds read as filters after the collections. + sits between the two groups and doubles as a drop target. |
+| Default board, fresh install | **Pinned** (orange) | Same tab and ⌘P as before for everyone; renamable and deletable. If no boards are left, ⌘P makes Pinned again. |
+| Deleting a board with clips | **Clips stay, unpinned**; confirm in place | Less destructive than deleting them; the confirmation lives in the strip's notice area so the strip stays open (an alert would steal key and close it). |
+| Reordering boards | Move Left/Right in the panel, **drag in History's sidebar** | Drag-reorder inside a 28 pt glass tab row is fiddly; the sidebar has native `.onMove`. |
+| Edit in place or as a copy? | **In place** | "Fix saved text before reuse": the fixed version should be the one in its board. |
+| Click-away while editing | **Keeps the edit**; Esc discards | Like Finder rename; losing typing is worse than saving it. |
+| Order for several clips | **Oldest first** (the order you copied them), for joined paste, joined copy (History too, which used to be newest first) and stacks | One rule everywhere: things copied in reading order paste in reading order. |
+| Detecting a paste for the stack | **A promised pasteboard item**: Clips gives the data when an app asks, and that ask is the paste | No event tap, no Accessibility or Input Monitoring, works for ⌘V, Edit › Paste and right-click Paste. Only the first read per item counts (one paste may read RTF then text), with 0.3 s to settle. The item is marked `TransientType`, so other clipboard managers skip it instead of reading it (a read would look like a paste). |
+| Global stack shortcut | **Recorder, no default** | ⇧⌘C (the original's) is Inspect Element and more in many apps; the strip's ⇧⌘C is always there. |
+| Where Vision runs | **A helper process** (Clips' binary with `--recognize-text`, stdin/stdout, quits after 10 s idle) | In-process, Vision peaked at 202 MB and left Clips at 59 MB (budget 50). With the helper Clips stayed at 35 MB through recognition. |
+| Recognition level | Accurate + language correction, image ≤ 2,400 px | Screenshots are the main case; fast mode misses small UI text. It runs once per image, in the background. |
+| Smoke test safety | `SLOPAPP_SMOKE_TEST=1` gets a temp history, private pasteboard, no hotkey | `scripts/smoke.sh` runs the bare binary for 3 s; with this round's migration and image reading it would otherwise have migrated and read the owner's real history. |
+
+### Gates
+
+- **Unit tests: 167 pass** (was 110). New: `BoardTests` (board names/colours/moves/tabs,
+  pins and pruning, release on delete, labels, **v3 → v4 migration test**, fresh history,
+  boards and labels round trip, older-build pin/unpin reconciliation, Pinned coming back,
+  recognized text stored and searched), `EditTests` (edit replaces in place and dedupes,
+  RTF kept and HTML dropped, kind changes, empty/image refusal, long text in full, strip
+  selection rules, joins), `StackTests` (stack order, adding, skip/back, deletes, read
+  tracker, recognition queue order/dedupe/failure/cancel, image snippets, new panel keys).
+- **`scripts/check.sh Clips`: pass** (lint, icon, SlopKit + Clips tests, release bundle,
+  smoke, catalog). The catalog regeneration also carried another builder's Snapper change;
+  only my date bump was reverted.
+- **Perf**: `check.sh --perf` was **not run as is**: perf.sh launches `build/Clips.app`
+  through LaunchServices, which hands the launch to the owner's running /Applications copy
+  (same bundle id; last round it opened that copy's Settings). The same measurements on a
+  `--direct` test copy of the release build (`scratchpad/tools/perf-direct.sh`, 3 launches,
+  3 × 5 s idle, empty test history, load 11): launch 93/98/106 ms, first status item
+  260–278 ms, idle CPU lowest 0.025 % (0.039 median), footprint 30.9 MB. After image
+  recognition: 35.2–35.9 MB (helper separate, gone when idle).
+- **Walkthrough** (release build, `--direct`, `CLIPS_DATA_DIR=/tmp/clips-test/data`,
+  private pasteboard `clips-test`, 30 seeded clips + fixtures written with a scratch tool;
+  hooks only, strip shown passively; verified through the log, the test database and reads
+  of the private pasteboard):
+  - Image text: a PNG with "Invoice 4471…" found ~1 s after the copy; searches "4471" and
+    "gate b22" each return just their image.
+  - Boards: new board, colour, move, three cards ⌘-selected and pinned to it; card dropped
+    on a board tab pinned there; empty board deleted at once; a board with clips asked first,
+    then deleted with all 37 clips kept unpinned; ⌘P then pinned to the first board left.
+  - Editing: RTF clip "tilte" → "title" saved with fresh RTF (no HTML), title "Pancakes"
+    saved and searchable; ⌘R title on a plain clip; emptied text refused, then cancelled
+    with the original intact.
+  - Paste stack: from three selected cards: three pastes delivered them oldest first and
+    the stack ended itself. Collect mode: three copies, three pastes in copy order; Clips'
+    own re-arming writes were never recorded as copies.
+  - Several cards: ⌘C of three link cards copied them oldest first, one per line; ⌘⌫
+    deleted all three.
+
+### Not verified, and why
+
+- **Screenshots, light/dark, `drive tree` labels, §10 visual checks**: the Mac's screen was
+  locked/asleep for the whole session (owner away), and macOS hides windows from
+  Accessibility then; `drive windows` refused. Every new control has an accessibility label
+  in code (tabs with board name and count, New Board, Board name, Clip title, Clip text,
+  Stop Paste Stack, stack rows, card labels with "pinned to …" and image text). Shoot:
+  board tabs (+ hover ring), name field, notices, editor (plain, rich, HTML note), multi-ring,
+  stack list, History sidebar Boards and detail, both modes.
+- **Real mouse**: drag a card onto a tab (the tab-frame → screen mapping was exercised only
+  by the hook, which uses the same mapping), ⌘/⇧-click, the stack list's buttons. Not done
+  with the screen locked. The synthetic mouse-down issue from last session couldn't be
+  investigated either; SlopDrive posts clicks at the HID level, so the likely cause is the
+  `activate` step its mouse guard asks for (activating Clips moves key away from the
+  non-activating strip, which then closes itself). Worth checking without `activate`, since
+  the floating strip already passes the guard's "own window on top" check.
+- Real direct paste of the first stacked clip (needs ⌘V into another app).

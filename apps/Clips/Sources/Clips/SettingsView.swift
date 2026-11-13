@@ -69,6 +69,8 @@ private struct GeneralRows: View {
                 .foregroundStyle(.secondary)
         }
         Toggle("Always paste as plain text", isOn: $model.alwaysPlainText)
+        Toggle("Trim spaces and line breaks from copied text", isOn: $model.trimsWhitespace)
+            .help("Removes them from the start and end of each copy as it's saved. Spaces inside the text are kept.")
         Toggle("Play sound when copying", isOn: $model.playsCopySound)
         Toggle("Play sound when pasting", isOn: Binding(
             get: { model.playsPasteSound },
@@ -158,6 +160,13 @@ private struct ShortcutRows: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         Text("Press the shortcut in any app to search your clips. You can also open Clips from its menu bar icon.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        LabeledContent("Start or stop a paste stack") {
+            KeyboardShortcuts.Recorder(for: .pasteStack)
+        }
+        Text("A paste stack pastes what you copy next one by one, in order, for filling in forms. In the Clips strip, ⇧⌘C does the same; with several cards selected, it stacks those.")
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)

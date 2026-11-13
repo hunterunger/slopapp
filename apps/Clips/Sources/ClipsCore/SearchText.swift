@@ -58,16 +58,45 @@ public enum SearchText {
     }
 }
 
-/// Which clips the panel shows.
-public enum ClipFilter: String, Sendable, CaseIterable, Identifiable {
-    case all, pinned, text, links, images, files
+/// Which clips the panel shows: everything, one board, or one kind of clip.
+public enum ClipFilter: Hashable, Sendable, Identifiable {
+    case all
+    /// Clips on any board.
+    case pinned
+    case board(UUID)
+    case text, links, images, files
 
-    public var id: String { rawValue }
+    /// The kinds, in tab order (after All and the boards).
+    public static let kinds: [ClipFilter] = [.text, .links, .images, .files]
 
-    public var title: String {
+    /// The panel's tabs: All, each board, then the kinds.
+    public static func tabs(boards: [Board]) -> [ClipFilter] {
+        [.all] + boards.map { .board($0.id) } + kinds
+    }
+
+    public var id: String {
+        switch self {
+        case .all: "all"
+        case .pinned: "pinned"
+        case .board(let id): "board-" + id.uuidString
+        case .text: "text"
+        case .links: "links"
+        case .images: "images"
+        case .files: "files"
+        }
+    }
+
+    public var boardID: UUID? {
+        if case .board(let id) = self { return id }
+        return nil
+    }
+
+    /// The tab's name. Boards are named by the user, so this is nil for them.
+    public var title: String? {
         switch self {
         case .all: "All"
         case .pinned: "Pinned"
+        case .board: nil
         case .text: "Text"
         case .links: "Links"
         case .images: "Images"
@@ -79,6 +108,7 @@ public enum ClipFilter: String, Sendable, CaseIterable, Identifiable {
         switch self {
         case .all: true
         case .pinned: clip.isPinned
+        case .board(let id): clip.boardID == id
         case .text: clip.kind == .text || clip.kind == .color
         case .links: clip.kind == .link
         case .images: clip.kind == .image
