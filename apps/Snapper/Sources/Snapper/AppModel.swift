@@ -813,6 +813,7 @@ final class AppModel {
 
     /// Picks an area (or window) and copies the text in it.
     private func captureText(started: TimeInterval) async {
+        TextWarmUp.warmInProcess()
         guard let region = await PickedRegion.pick(.area, capturer: capturer, options: overlayOptions, started: started, report: report) else { return }
         let image: CGImage
         if let frozen = region.frozen {
@@ -833,8 +834,17 @@ final class AppModel {
     /// Reads the text in `image` and copies it.
     func recognizeAndCopy(_ image: CGImage) async {
         let started = Diagnostics.now()
+        // Usually done in a blink. When macOS is still preparing the recognizer it isn't:
+        // say so instead of showing nothing.
+        let progress = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            HUD.show("Reading text…", systemImage: "text.viewfinder", duration: .seconds(120))
+        }
+        defer { progress.cancel() }
         do {
             let text = try await textRecognizer.recognize(image, keepLineBreaks: ocrKeepLineBreaks)
+            progress.cancel()
             Diagnostics.record("text recognized characters=\(text.count) ms=\(Diagnostics.milliseconds(since: started))")
             guard !text.isEmpty else {
                 HUD.show("No text found", systemImage: "text.viewfinder")

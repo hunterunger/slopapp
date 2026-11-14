@@ -286,6 +286,15 @@ struct TextRecognitionTests {
     }
 }
 
+@Suite struct TextWarmUpTests {
+    /// The warm-up only compiles the networks if Vision finds text in its sample.
+    @Test func theWarmUpSampleHoldsReadableText() async throws {
+        let image = try #require(VisionTextRecognizer.sampleImage())
+        let text = try await VisionTextRecognizer(fast: true).recognize(image, keepLineBreaks: false)
+        #expect(text.contains("Snapper"))
+    }
+}
+
 @Suite struct TextPreviewTests {
     @Test func cutsAtAWordBoundary() {
         let preview = TextLayout.preview("slopapp-test Snapper test scene · captures of this window contain nothing personal")

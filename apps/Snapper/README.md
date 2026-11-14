@@ -5,7 +5,7 @@ Screenshots, annotated and shared in seconds.
 Part of [Slopapp](../../README.md), a free, open-source collection of Mac apps.
 An open alternative to CleanShot X.
 
-**Status:** stable (1.0.0)
+**Status:** stable (1.0.1)
 
 ## What it does
 

@@ -41,7 +41,7 @@ extension KeyboardShortcuts.Name {
     }
 }
 
-@main
+/// The app. Started by `SnapperMain` (TextWarmUp.swift).
 struct SnapperApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage(MenuBarIcon.storageKey, store: Preferences.store) private var showMenuBarIcon = true
@@ -259,6 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TestScene.showIfRequested()
         if let scene = Showcase.scene { ShowcaseScenes.run(scene, model: model) }
         HiddenIconHint.checkSoon()
+        TextWarmUp.start()
         Diagnostics.record("launched permission=\(model.hasPermission) shortcuts=\(!Diagnostics.noShortcuts)")
     }
 

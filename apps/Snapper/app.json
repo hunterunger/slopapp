@@ -9,8 +9,8 @@
   "icon": "camera",
   "menuBarOnly": true,
   "status": "stable",
-  "version": "1.0.0",
-  "build": 3,
+  "version": "1.0.1",
+  "build": 4,
   "minimumMacOS": "14.0",
   "bundleId": "app.slopapp.snapper",
   "infoPlist": {

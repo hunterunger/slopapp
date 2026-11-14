@@ -332,8 +332,8 @@
       "favourite": true,
       "priority": 1,
       "status": "stable",
-      "version": "1.0.0",
-      "build": 3,
+      "version": "1.0.1",
+      "build": 4,
       "minimumMacOS": "14.0",
       "bundleId": "app.slopapp.snapper",
       "infoPlist": {
@@ -406,7 +406,7 @@
         }
       ],
       "shotsVersion": "0.2.0-1",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/snapper-v1.0.0/Snapper.zip"
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/snapper-v1.0.1/Snapper.zip"
     },
     {
       "slug": "convert",

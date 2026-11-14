@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreText
 import Foundation
 import Vision
 
@@ -67,6 +68,10 @@ public enum TextLayout {
 }
 
 /// Vision's accurate text recognizer, with automatic language detection.
+///
+/// The first recognition after macOS drops its compiled copy of the recognizer takes 30 s or
+/// more: the Neural Engine compiles the networks again, and the compiled copy is kept per
+/// executable. `warmUp()` pays that cost ahead of time (see `TextWarmUp` in the app).
 public struct VisionTextRecognizer: TextRecognizing {
     /// `fast` trades accuracy for speed (tests use it; the app reads accurately).
     public var fast = false
@@ -78,17 +83,51 @@ public struct VisionTextRecognizer: TextRecognizing {
     public func recognize(_ image: CGImage, keepLineBreaks: Bool) async throws -> String {
         let fast = self.fast
         return try await Task.detached(priority: .userInitiated) {
-            let request = VNRecognizeTextRequest()
-            request.recognitionLevel = fast ? .fast : .accurate
-            request.usesLanguageCorrection = !fast
-            request.automaticallyDetectsLanguage = !fast
-            let handler = VNImageRequestHandler(cgImage: image, options: [:])
-            try handler.perform([request])
-            let lines = (request.results ?? []).compactMap { observation -> RecognizedLine? in
-                guard let best = observation.topCandidates(1).first else { return nil }
-                return RecognizedLine(text: best.string, box: observation.boundingBox)
-            }
+            let lines = try Self.lines(in: image, fast: fast)
             return TextLayout.join(lines, keepLineBreaks: keepLineBreaks)
         }.value
+    }
+
+    /// Reads a small built-in sample with the same settings as `recognize`, so the networks
+    /// are compiled and loaded. Blocks; returns what it read (empty if it failed).
+    @discardableResult
+    public static func warmUp() -> String {
+        guard let image = sampleImage(), let lines = try? lines(in: image, fast: false) else { return "" }
+        return TextLayout.join(lines, keepLineBreaks: false)
+    }
+
+    private static func lines(in image: CGImage, fast: Bool) throws -> [RecognizedLine] {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = fast ? .fast : .accurate
+        request.usesLanguageCorrection = !fast
+        request.automaticallyDetectsLanguage = !fast
+        let handler = VNImageRequestHandler(cgImage: image, options: [:])
+        try handler.perform([request])
+        return (request.results ?? []).compactMap { observation -> RecognizedLine? in
+            guard let best = observation.topCandidates(1).first else { return nil }
+            return RecognizedLine(text: best.string, box: observation.boundingBox)
+        }
+    }
+
+    /// Dark text on white. It has to hold real text: an empty image never reaches the
+    /// recognition networks.
+    public static let sampleText = "Snapper reads text"
+
+    public static func sampleImage() -> CGImage? {
+        let width = 360, height = 64
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceGray(),
+                                      bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
+        context.setFillColor(gray: 1, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let font = CTFontCreateUIFontForLanguage(.system, 28, nil) ?? CTFontCreateWithName("Helvetica" as CFString, 28, nil)
+        let text = NSAttributedString(string: sampleText, attributes: [
+            NSAttributedString.Key(kCTFontAttributeName as String): font,
+            NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
+        ])
+        context.setFillColor(gray: 0, alpha: 1)
+        context.textPosition = CGPoint(x: 16, y: 20)
+        CTLineDraw(CTLineCreateWithAttributedString(text), context)
+        return context.makeImage()
     }
 }
