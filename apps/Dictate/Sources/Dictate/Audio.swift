@@ -1,104 +1,101 @@
-@preconcurrency import AVFoundation
 import AudioToolbox
+@preconcurrency import AVFoundation
 import CoreAudio
 import DictateCore
 import Foundation
 
 /// Captures the microphone as 16 kHz mono Float32, and the voice features the ring draws.
+///
+/// Two rules keep the app from freezing here:
+/// - Input only, through an audio queue. AVAudioEngine's input node joins the microphone and
+///   the speakers into an aggregate device on every new engine, and on macOS 27 that setup
+///   can fail and then spin forever inside Core Audio.
+/// - The main thread never waits on Core Audio. Opening and closing the microphone run on
+///   their own queue, and an open that takes longer than `openTimeout` fails the dictation
+///   ("The microphone didn't respond") instead of hanging the app.
 final class AudioRecorder: AudioCapturing {
     private(set) var features = AudioFeatures()
-    /// Called when the input device goes away mid-recording (unplugged, switched).
+    /// Called when the input device goes away mid-recording and no other microphone takes over.
     var onInterruption: () -> Void = {}
 
     private let microphoneUID: () -> String
-    private var engine: AVAudioEngine?
     private var sink: AudioSink?
+    private var capture: MicrophoneCapture?
     private var meterTimer: Timer?
-    private var configObserver: NSObjectProtocol?
+    /// Bumped by every start and stop, so a late open or device change from an earlier
+    /// recording is dropped.
+    private var session = 0
+
+    /// Opening a microphone takes well under a second; Bluetooth headsets can take a few.
+    private static let openTimeout: Double = 6
+    /// Restarts after the microphone changes, at most this many times per recording.
+    private static let maxRestarts = 3
+    private var restarts = 0
 
     init(microphoneUID: @escaping () -> String) {
         self.microphoneUID = microphoneUID
     }
 
-    func start() throws {
+    func start() async throws {
         guard sink == nil else { return }
+        session += 1
+        let session = self.session
         restarts = 0
-        try startEngine(continuing: nil)
-    }
-
-    /// A fresh engine on the current microphone. `continuing` keeps what was already recorded
-    /// (a restart after the audio setup changed mid-recording).
-    private func startEngine(continuing previous: AudioSink?) throws {
-        // A fresh engine each time picks up the current default device and format.
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        Self.applyPreferredDevice(microphoneUID(), to: input)
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw RecorderError.noInput
-        }
-        let sink = previous ?? AudioSink(inputFormat: format)
-        if previous != nil { sink.reset(inputFormat: format) }
-        // Small buffers keep the ring's reaction to the voice tight.
-        input.installTap(onBus: 0, bufferSize: 2048, format: format, block: Self.tap(into: sink))
-        engine.prepare()
+        let sink = AudioSink()
+        self.sink = sink
         do {
-            try engine.start()
+            capture = try await open(sink: sink, session: session)
         } catch {
-            input.removeTap(onBus: 0)
+            if session == self.session { self.sink = nil }
             throw error
         }
-        self.engine = engine
-        self.sink = sink
-        if meterTimer == nil {
-            meterTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self, let sink = self.sink else { return }
-                    self.features = sink.nextFeatures()
-                }
+        meterTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let sink = self.sink else { return }
+                self.features = sink.nextFeatures()
             }
         }
-        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
-        configObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.audioSetupChanged() }
+    }
+
+    /// Opens the chosen microphone (or the default one) off the main thread.
+    private func open(sink: AudioSink, session: Int) async throws -> MicrophoneCapture {
+        let capture = try await MicrophoneCapture.open(
+            preferredUID: microphoneUID(), sink: sink, timeout: Self.openTimeout
+        ) { [weak self] in
+            Task { @MainActor in self?.microphoneChanged(session: session) }
         }
+        guard session == self.session, self.sink === sink else {
+            // Stopped or cancelled while the microphone was opening.
+            capture.close()
+            throw CancellationError()
+        }
+        return capture
     }
 
-    /// The tap block. It runs on Core Audio's realtime thread, so it must not inherit this
-    /// class's main-actor isolation: a closure written inside a method here would, and Swift
-    /// stops the app when it then runs off the main thread. Built in a nonisolated function.
-    private nonisolated static func tap(into sink: AudioSink) -> AVAudioNodeTapBlock {
-        { buffer, _ in sink.process(buffer) }
-    }
-
-    /// Restarts after an audio setup change, at most this many times per recording.
-    private static let maxRestarts = 3
-    private var restarts = 0
-
-    /// The audio hardware changed: a sound started playing (our own start sound does it),
-    /// the default device or its format changed, or the microphone went away. The engine stops
-    /// itself for most of these. Keep recording on whatever microphone is there now; only
-    /// when there's none (or it keeps failing) does the recording end, with what was said so far.
-    private func audioSetupChanged() {
-        guard let engine, let sink else { return }
-        if engine.isRunning { return }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        self.engine = nil
+    /// The microphone being recorded went away, or the one that should be recorded changed
+    /// (a new default input, the chosen microphone plugged back in). Keep recording on the
+    /// right one, with what was said so far; only when there's none does the recording end.
+    private func microphoneChanged(session: Int) {
+        guard session == self.session, let sink, let old = capture else { return }
+        capture = nil
+        old.close()
         restarts += 1
         guard restarts <= Self.maxRestarts else {
-            Diagnostics.record("audio setup changed: gave up after \(Self.maxRestarts) restarts")
+            Diagnostics.record("microphone changed: gave up after \(Self.maxRestarts) restarts")
             onInterruption()
             return
         }
-        do {
-            try startEngine(continuing: sink)
-            Diagnostics.record("audio setup changed: recording continues (restart \(restarts))")
-        } catch {
-            Diagnostics.record("audio setup changed: no microphone (\(error.localizedDescription))")
-            onInterruption()
+        let attempt = restarts
+        Task {
+            do {
+                capture = try await open(sink: sink, session: session)
+                Diagnostics.record("microphone changed: recording continues (restart \(attempt))")
+            } catch is CancellationError {
+            } catch {
+                guard session == self.session else { return }
+                Diagnostics.record("microphone changed: no microphone (\(error.localizedDescription))")
+                onInterruption()
+            }
         }
     }
 
@@ -106,86 +103,207 @@ final class AudioRecorder: AudioCapturing {
         sink?.recent(Int(seconds * AudioDecoder.sampleRate)) ?? []
     }
 
+    /// Returns at once: the microphone closes in the background.
     @discardableResult
     func stop() -> [Float] {
+        session += 1
         guard let sink else { return [] }
-        if let engine {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
-        }
+        capture?.close()
+        capture = nil
         meterTimer?.invalidate()
         meterTimer = nil
-        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
-        configObserver = nil
         features = AudioFeatures()
         self.sink = nil
-        self.engine = nil
-        return sink.drain()
-    }
-
-    /// Points the input node at the chosen microphone. No-op for "System Default" or a device
-    /// that isn't connected (the default input is used then).
-    private static func applyPreferredDevice(_ uid: String, to input: AVAudioInputNode) {
-        guard !uid.isEmpty, var deviceID = AudioDevices.deviceID(forUID: uid), let unit = input.audioUnit else { return }
-        AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
-                             &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size))
+        return sink.close()
     }
 
     enum RecorderError: LocalizedError {
         case noInput
-        var errorDescription: String? { "No microphone is available. Connect one, or choose another in Settings." }
+        case notResponding
+        case failed(OSStatus)
+
+        var errorDescription: String? {
+            switch self {
+            case .noInput: "No microphone is available. Connect one, or choose another in Settings."
+            case .notResponding:
+                "The microphone didn't respond. Try again, or choose another microphone in Settings."
+            case .failed(let status): "The microphone couldn't start (error \(status))."
+            }
+        }
     }
 }
 
-/// Collects and resamples audio off the main thread (the tap runs on a realtime thread).
+/// One open microphone: an input-only audio queue that hands 16 kHz mono Float32 to a sink.
+/// Every Core Audio call it makes runs on its own serial queue, never on the main thread.
+private nonisolated final class MicrophoneCapture: @unchecked Sendable {
+    private static let sampleFormat = AudioStreamBasicDescription(
+        mSampleRate: AudioDecoder.sampleRate, mFormatID: kAudioFormatLinearPCM,
+        mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+        mBytesPerPacket: 4, mFramesPerPacket: 1, mBytesPerFrame: 4,
+        mChannelsPerFrame: 1, mBitsPerChannel: 32, mReserved: 0)
+    /// 32 ms buffers keep the ring's reaction to the voice tight.
+    private static let bufferFrames: UInt32 = 512
+    private static let bufferCount = 3
+
+    private let worker: DispatchQueue
+    private let preferredUID: String
+    private let deviceID: AudioDeviceID
+    private var queue: AudioQueueRef?
+    private var listeners: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
+
+    private init(worker: DispatchQueue, preferredUID: String, deviceID: AudioDeviceID) {
+        self.worker = worker
+        self.preferredUID = preferredUID
+        self.deviceID = deviceID
+    }
+
+    /// Opens and starts the microphone on a queue of its own. Gives up after `timeout`
+    /// seconds; a microphone that opens after that is closed again.
+    static func open(preferredUID: String, sink: AudioSink, timeout: Double,
+                     onChange: @escaping @Sendable () -> Void) async throws -> MicrophoneCapture {
+        let worker = DispatchQueue(label: "app.slopapp.dictate.microphone", qos: .userInitiated)
+        let outcome = OneShot()
+        return try await withCheckedThrowingContinuation { continuation in
+            worker.async {
+                let result = Result { try start(preferredUID: preferredUID, sink: sink, worker: worker, onChange: onChange) }
+                if outcome.claim() {
+                    continuation.resume(with: result)
+                } else if case .success(let late) = result {
+                    Diagnostics.record("microphone opened after the timeout; closing it")
+                    late.close()
+                }
+            }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) {
+                guard outcome.claim() else { return }
+                Diagnostics.record("microphone didn't open within \(timeout) s")
+                continuation.resume(throwing: AudioRecorder.RecorderError.notResponding)
+            }
+        }
+    }
+
+    /// Runs on `worker`.
+    private static func start(preferredUID: String, sink: AudioSink, worker: DispatchQueue,
+                              onChange: @escaping @Sendable () -> Void) throws -> MicrophoneCapture {
+        // The chosen microphone when it's connected, else the default input.
+        let preferred = preferredUID.isEmpty ? nil : AudioDevices.deviceID(forUID: preferredUID)
+        guard let device = preferred ?? AudioDevices.defaultInputDevice(),
+              let uid = AudioDevices.uid(of: device) else { throw AudioRecorder.RecorderError.noInput }
+
+        let capture = MicrophoneCapture(worker: worker, preferredUID: preferredUID, deviceID: device)
+        var format = sampleFormat
+        var queue: AudioQueueRef?
+        let buffers = DispatchQueue(label: "app.slopapp.dictate.microphone.buffers", qos: .userInteractive)
+        var status = AudioQueueNewInputWithDispatchQueue(&queue, &format, 0, buffers, callback(into: sink))
+        guard status == noErr, let queue else { throw AudioRecorder.RecorderError.failed(status) }
+        capture.queue = queue
+        do {
+            var deviceUID = uid as CFString
+            status = withUnsafeMutablePointer(to: &deviceUID) {
+                AudioQueueSetProperty(queue, kAudioQueueProperty_CurrentDevice, $0, UInt32(MemoryLayout<CFString>.size))
+            }
+            guard status == noErr else { throw AudioRecorder.RecorderError.failed(status) }
+            for _ in 0..<bufferCount {
+                var buffer: AudioQueueBufferRef?
+                status = AudioQueueAllocateBuffer(queue, bufferFrames * sampleFormat.mBytesPerFrame, &buffer)
+                guard status == noErr, let buffer else { throw AudioRecorder.RecorderError.failed(status) }
+                AudioQueueEnqueueBuffer(queue, buffer, 0, nil)
+            }
+            status = AudioQueueStart(queue, nil)
+            guard status == noErr else { throw AudioRecorder.RecorderError.failed(status) }
+        } catch {
+            capture.shutDown()
+            throw error
+        }
+        capture.watchDevices(onChange: onChange)
+        return capture
+    }
+
+    /// The buffer callback. Built in a nonisolated function so it can't inherit main-actor
+    /// isolation (it runs on the buffers queue).
+    private static func callback(into sink: AudioSink) -> AudioQueueInputCallbackBlock {
+        { queue, buffer, _, _, _ in
+            let bytes = Int(buffer.pointee.mAudioDataByteSize)
+            if bytes > 0 {
+                sink.append(buffer.pointee.mAudioData.assumingMemoryBound(to: Float.self),
+                            count: bytes / MemoryLayout<Float>.size)
+            }
+            AudioQueueEnqueueBuffer(queue, buffer, 0, nil)
+        }
+    }
+
+    /// Calls `onChange` when the device list or the default input changes in a way that means
+    /// a different microphone should be recording.
+    private func watchDevices(onChange: @escaping @Sendable () -> Void) {
+        for selector in [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice] {
+            var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                                     mElement: kAudioObjectPropertyElementMain)
+            let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+                guard let self, self.queue != nil, self.shouldSwitch() else { return }
+                onChange()
+            }
+            if AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, worker, block) == noErr {
+                listeners.append((address, block))
+            }
+        }
+    }
+
+    /// Runs on `worker`.
+    private func shouldSwitch() -> Bool {
+        guard AudioDevices.isAlive(deviceID) else { return true }
+        let preferred = preferredUID.isEmpty ? nil : AudioDevices.deviceID(forUID: preferredUID)
+        let wanted = preferred ?? AudioDevices.defaultInputDevice()
+        return wanted != nil && wanted != deviceID
+    }
+
+    /// Stops and disposes of the queue in the background.
+    func close() {
+        worker.async { self.shutDown() }
+    }
+
+    /// Runs on `worker`.
+    private func shutDown() {
+        for (address, block) in listeners {
+            var address = address
+            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, worker, block)
+        }
+        listeners = []
+        guard let queue else { return }
+        self.queue = nil
+        AudioQueueStop(queue, true)
+        AudioQueueDispose(queue, true)
+    }
+}
+
+/// The first of several racing callers wins.
+private nonisolated final class OneShot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    func claim() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
+/// Collects 16 kHz mono samples and the voice features off the main thread (audio arrives
+/// on the microphone's buffers queue).
 private nonisolated final class AudioSink: @unchecked Sendable {
     private let lock = NSLock()
     private var samples: [Float] = []
+    private var closed = false
     private let extractor = FeatureExtractor()
     private var pending: [AudioFeatures] = []
     private var current = AudioFeatures()
-    private let targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioDecoder.sampleRate,
-                                             channels: 1, interleaved: false)!
-    private var converter: AVAudioConverter?
 
-    init(inputFormat: AVAudioFormat) {
-        converter = AVAudioConverter(from: inputFormat, to: targetFormat)
+    init() {
         samples.reserveCapacity(Int(AudioDecoder.sampleRate) * 60)
-    }
-
-    /// A new input format after a restart; the samples so far are kept.
-    func reset(inputFormat: AVAudioFormat) {
-        let next = AVAudioConverter(from: inputFormat, to: targetFormat)
-        lock.lock()
-        converter = next
-        lock.unlock()
-    }
-
-    func process(_ buffer: AVAudioPCMBuffer) {
-        lock.lock()
-        let converter = self.converter
-        lock.unlock()
-        guard let converter else { return }
-        let ratio = targetFormat.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1)
-        guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return }
-        var fed = false
-        var error: NSError?
-        converter.convert(to: out, error: &error) { _, status in
-            if fed {
-                status.pointee = .noDataNow
-                return nil
-            }
-            fed = true
-            status.pointee = .haveData
-            return buffer
-        }
-        guard error == nil, let channel = out.floatChannelData?[0], out.frameLength > 0 else { return }
-        append(channel, count: Int(out.frameLength))
     }
 
     func append(_ pointer: UnsafePointer<Float>, count: Int) {
         lock.lock()
+        guard !closed else { lock.unlock(); return }
         samples.append(contentsOf: UnsafeBufferPointer(start: pointer, count: count))
         lock.unlock()
         extractor.consume(pointer, count: count) { features in
@@ -211,8 +329,16 @@ private nonisolated final class AudioSink: @unchecked Sendable {
         return Array(samples.suffix(count))
     }
 
+    /// Everything recorded so far, for a sink that's still recording (file audio).
     func drain() -> [Float] {
         lock.lock(); defer { lock.unlock() }
+        return samples
+    }
+
+    /// Everything recorded; later audio is ignored.
+    func close() -> [Float] {
+        lock.lock(); defer { lock.unlock() }
+        closed = true
         return samples
     }
 }
@@ -238,11 +364,9 @@ final class FileAudioSource: AudioCapturing {
         }
     }
 
-    func start() throws {
+    func start() async throws {
         guard !file.isEmpty else { throw AudioRecorder.RecorderError.noInput }
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioDecoder.sampleRate,
-                                   channels: 1, interleaved: false)!
-        let sink = AudioSink(inputFormat: format)
+        let sink = AudioSink()
         self.sink = sink
         position = 0
         let chunk = Int(AudioDecoder.sampleRate / 30)
@@ -315,6 +439,29 @@ nonisolated enum AudioDevices {
 
     static func deviceID(forUID uid: String) -> AudioDeviceID? {
         allDeviceIDs().first { hasInput($0) && string($0, kAudioDevicePropertyDeviceUID) == uid }
+    }
+
+    static func defaultInputDevice() -> AudioDeviceID? {
+        let id = uint32(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultInputDevice)
+        return id.flatMap { $0 == kAudioObjectUnknown ? nil : $0 }
+    }
+
+    static func uid(of id: AudioDeviceID) -> String? {
+        string(id, kAudioDevicePropertyDeviceUID)
+    }
+
+    /// Connected and still an input.
+    static func isAlive(_ id: AudioDeviceID) -> Bool {
+        uint32(id, kAudioDevicePropertyDeviceIsAlive) == 1 && hasInput(id)
+    }
+
+    private static func uint32(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) -> UInt32? {
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return nil }
+        return value
     }
 
     private static func allDeviceIDs() -> [AudioDeviceID] {

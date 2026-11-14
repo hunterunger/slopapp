@@ -265,6 +265,41 @@ struct DictationTests {
         #expect(rig.feedback.started.isEmpty)
     }
 
+    @Test func releasedWhileTheMicrophoneOpensIsDropped() async {
+        let rig = Rig()
+        rig.audio.openDelay = .milliseconds(100)
+        rig.controller.begin(.dictation)
+        try? await Task.sleep(for: .milliseconds(20))
+        rig.controller.end()
+        #expect(await waitUntil { rig.audio.startCount == 1 && !rig.controller.isBusy })
+        #expect(!rig.audio.isRunning)
+        #expect(rig.controller.phase == .idle)
+        #expect(rig.feedback.started.isEmpty)
+    }
+
+    @Test func cancelledWhileTheMicrophoneOpensStaysQuiet() async {
+        let rig = Rig()
+        rig.audio.openDelay = .milliseconds(100)
+        rig.controller.begin(.dictation)
+        try? await Task.sleep(for: .milliseconds(20))
+        rig.controller.cancel()
+        #expect(!rig.controller.isBusy)
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(!rig.audio.isRunning)
+        #expect(rig.controller.phase == .idle)
+        #expect(rig.feedback.started.isEmpty)
+        #expect(rig.feedback.messages.isEmpty)
+    }
+
+    @Test func aMicrophoneThatNeverOpensIsReportedNotHung() async {
+        let rig = Rig()
+        rig.audio.openDelay = .milliseconds(50)
+        rig.audio.startError = CocoaError(.featureUnsupported)
+        rig.controller.begin(.dictation)
+        #expect(await waitUntil { if case .error = rig.controller.phase { true } else { false } })
+        #expect(!rig.controller.isBusy)
+    }
+
     @Test func secondStartWhileBusyIsRefused() async {
         let rig = Rig()
         #expect(await rig.record())

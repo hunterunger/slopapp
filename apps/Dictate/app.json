@@ -10,8 +10,8 @@
   "icon": "audio-lines",
   "menuBarOnly": true,
   "status": "stable",
-  "version": "1.0.0",
-  "build": 2,
+  "version": "1.0.1",
+  "build": 3,
   "minimumMacOS": "26.4",
   "bundleId": "app.slopapp.dictate",
   "infoPlist": {

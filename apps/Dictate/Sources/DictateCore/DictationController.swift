@@ -3,11 +3,12 @@ import Observation
 
 // MARK: - System seams
 
-/// The microphone. `AudioRecorder` (AVAudioEngine) in the app; a fake in tests and a file
-/// player in scripted walkthroughs.
+/// The microphone. `AudioRecorder` (an input-only audio queue) in the app; a fake in tests and
+/// a file player in scripted walkthroughs.
 @MainActor
 public protocol AudioCapturing: AnyObject {
-    func start() throws
+    /// Async so opening the microphone never blocks the main thread.
+    func start() async throws
     /// Stops and returns everything captured, 16 kHz mono.
     @discardableResult func stop() -> [Float]
     /// The last `seconds` of audio so far, without stopping.
@@ -226,9 +227,15 @@ public final class DictationController {
             models.warmUp()
             if mode == .dictation { processor.prepare(for: settings.cleanupConfig(forBundleID: target?.bundleID)) }
             do {
-                try audio.start()
+                try await audio.start()
             } catch {
+                // Cancelled while the microphone was opening: nothing to report.
+                guard generation == self.generation, !cancelled else { return }
                 fail("Couldn't start recording: \(ModelHost.describe(error))", fix: nil)
+                return
+            }
+            guard generation == self.generation, !cancelled else {
+                audio.stop()
                 return
             }
             if pendingStop {
@@ -285,7 +292,8 @@ public final class DictationController {
         cancelled = true
         generation += 1
         if isStarting { pendingStop = true }
-        if phase == .recording { audio.stop() }
+        // Also while starting: a microphone still opening is closed when it's ready.
+        if isStarting || phase == .recording { audio.stop() }
         stopPreview()
         isStarting = false
         finishQuietly()

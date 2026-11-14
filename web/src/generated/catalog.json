@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-13",
+  "generatedAt": "2026-11-14",
   "brand": {
     "name": "Slopapp",
     "tagline": "Native Mac apps, made with care.",
@@ -248,8 +248,8 @@
       "menuBarOnly": true,
       "priority": 1,
       "status": "stable",
-      "version": "1.0.0",
-      "build": 2,
+      "version": "1.0.1",
+      "build": 3,
       "minimumMacOS": "26.4",
       "bundleId": "app.slopapp.dictate",
       "infoPlist": {
@@ -267,7 +267,7 @@
         ]
       },
       "dir": "apps/Dictate",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/dictate-v1.0.0/Dictate.zip"
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/dictate-v1.0.1/Dictate.zip"
     },
     {
       "slug": "squish",

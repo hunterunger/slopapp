@@ -113,7 +113,11 @@ final class FakeAudio: AudioCapturing {
     private(set) var startCount = 0
     var features = AudioFeatures()
 
-    func start() throws {
+    /// How long opening takes, to test stopping and cancelling while it opens.
+    var openDelay: Duration = .zero
+
+    func start() async throws {
+        if openDelay > .zero { try? await Task.sleep(for: openDelay) }
         if let startError { throw startError }
         startCount += 1
         isRunning = true
