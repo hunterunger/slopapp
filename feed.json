@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-14T00:37:12.505Z",
+  "generatedAt": "2026-11-14T00:52:43.376Z",
   "name": "Slopapp",
   "feedUrl": "https://hunterunger.github.io/slopapp/feed.json",
   "apps": [
@@ -153,15 +153,15 @@
       "icon": "audio-lines",
       "menuBarOnly": true,
       "status": "stable",
-      "version": "1.0.0",
-      "build": 2,
+      "version": "1.0.1",
+      "build": 3,
       "minimumMacOS": "26.4",
       "bundleId": "app.slopapp.dictate",
-      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/dictate-v1.0.0/Dictate.zip",
-      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/dictate-v1.0.0/Dictate-icon.png",
-      "sha256": "995f4f2b2aef4d97ce31c5e1623bf1f080a5f347edb508784ba6c46b8ee8f18a",
-      "size": 12182957,
-      "installedSize": 35503128,
+      "downloadUrl": "https://github.com/hunterunger/slopapp/releases/download/dictate-v1.0.1/Dictate.zip",
+      "iconUrl": "https://github.com/hunterunger/slopapp/releases/download/dictate-v1.0.1/Dictate-icon.png",
+      "sha256": "d61af8fe51bd07960285afd613f73b1cf8775fbf6b198bbcab2764fc160f30d3",
+      "size": 12206508,
+      "installedSize": 35570728,
       "releaseNotes": ""
     },
     {
